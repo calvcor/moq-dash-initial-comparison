@@ -1,0 +1,19 @@
+# Vídeo fuente: no se distribuye, el orquestador lo descarga en media/ al arrancar
+media/
+*.mp4
+*.zip
+*.part
+
+# Certificados locales del diseño inicial (incluyen una clave privada)
+server/certs/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Node (el detalle está en web/.gitignore)
+node_modules/
+dist/
