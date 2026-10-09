@@ -3,6 +3,7 @@ import * as Watch from '@moq/watch';
 import * as Net from '@moq/net';
 import { Signal } from '@moq/signals';
 import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
+import { MoqTracer } from '../lib/trace';
 import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
 interface MoqPlayerProps {
@@ -40,6 +41,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   // El medidor vive lo que el componente, no lo que cada intento de reproducción: así los congelados
   // se siguen contando mientras la vigilancia recrea el reproductor.
   const meterRef = useRef<GlassMeter | null>(null);
+  const ladderRef = useRef(renditions);
+  ladderRef.current = renditions;
   const timecodesRef = useRef<TimecodeLayout[]>([DEFAULT_TIMECODE]);
   if (timecodes?.length) timecodesRef.current = timecodes;
   const restartsRef = useRef(0);
@@ -96,6 +99,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
     let isAborted = false;
     let retryTimer: any = null;
     let metricsInterval: any = null;
+    let tracer: MoqTracer | null = null;
     const rate = new RateWindow();
     const networkRate = new RateWindow();
     let networkSource: PlayerMetrics['networkSource'];
@@ -161,6 +165,16 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           target: targetSignal,
         });
         playerRef.current = player;
+        // Acceso desde la consola del navegador para depurar
+        (window as any).moqPlayer = player;
+
+        // Seguimiento de frames concretos por las etapas del recorrido
+        tracer = new MoqTracer(
+          player,
+          meter,
+          () => (ladderRef.current ?? []).findIndex((r) => r.height === player.renderer.out.frame.peek()?.displayHeight),
+          (stages) => onMetricsUpdate({ stages }),
+        );
 
         if (isAborted) return;
         setStatus('playing');
@@ -250,6 +264,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
       clearTimeout(retryTimer);
       clearInterval(metricsInterval);
       clearInterval(watchdog);
+      tracer?.close();
       if (playerRef.current) {
         try {
           playerRef.current.close();

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as dashjs from 'dashjs';
 import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
+import { DashTracer } from '../lib/trace';
 import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
 interface DashPlayerProps {
@@ -46,6 +47,8 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // El medidor vive lo que el componente, no lo que cada intento de reproducción: así los congelados
   // se siguen contando mientras la vigilancia recrea el reproductor.
   const meterRef = useRef<GlassMeter | null>(null);
+  const ladderRef = useRef(renditions);
+  ladderRef.current = renditions;
   const timecodesRef = useRef<TimecodeLayout[]>([DEFAULT_TIMECODE]);
   if (timecodes?.length) timecodesRef.current = timecodes;
   const restartsRef = useRef(0);
@@ -226,6 +229,15 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
 
     startDash();
 
+    // Seguimiento de frames concretos por las etapas del recorrido
+    const video = videoRef.current;
+    const tracer = new DashTracer(
+      video,
+      meter,
+      () => (ladderRef.current ?? []).findIndex((r) => r.height === video.videoHeight),
+      (stages) => onMetricsUpdate({ stages }),
+    );
+
     // Muestreo de métricas cada 500 ms
     const interval = setInterval(() => {
       const p = playerRef.current;
@@ -266,6 +278,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
       clearTimeout(retryTimer);
       clearInterval(interval);
       clearInterval(watchdog);
+      tracer.close();
       resources.disconnect();
       if (playerRef.current) {
         playerRef.current.destroy();

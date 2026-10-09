@@ -5,6 +5,7 @@ mientras todavía se está escribiendo, fragmento CMAF a fragmento. Escribiendo 
 expone el segmento al renombrarlo una vez completo, lo que anula la baja latencia.
 """
 import asyncio
+import bisect
 import logging
 import math
 import re
@@ -20,6 +21,7 @@ router = APIRouter()
 
 MIME = {"mpd": "application/dash+xml", "m4s": "video/mp4"}
 SEGMENT_RE = re.compile(r"chunk-stream(\d+)-(\d+)\.m4s$")
+INIT_RE = re.compile(r"init-stream(\d+)\.m4s$")
 AST_RE = re.compile(rb'availabilityStartTime="[^"]*"')
 
 
@@ -50,6 +52,56 @@ class LiveFile:
                 return
 
 
+class FragmentParser:
+    """Sigue las cajas ISO BMFF de un segmento según llega y avisa cuando cada fragmento CMAF está completo.
+
+    Un fragmento es moof + mdat; su tiempo de medios es el baseMediaDecodeTime (tfdt) del moof. El mdat no
+    se guarda: solo se cuenta hasta dónde llega.
+    """
+
+    def __init__(self, on_fragment):
+        self.on_fragment = on_fragment
+        self.buffer = b""
+        self.mdat_left = 0
+        self.tfdt = None
+
+    def feed(self, chunk: bytes, now: float):
+        if self.mdat_left:
+            used = min(self.mdat_left, len(chunk))
+            self.mdat_left -= used
+            chunk = chunk[used:]
+            if self.mdat_left:
+                return
+            self.complete(now)
+        self.buffer += chunk
+        while len(self.buffer) >= 8:
+            size, kind = int.from_bytes(self.buffer[:4], "big"), self.buffer[4:8]
+            if size < 8:
+                self.buffer = b""  # caja que no se sabe interpretar: se deja de seguir este segmento
+                return
+            if kind == b"mdat":
+                if len(self.buffer) < size:
+                    self.mdat_left = size - len(self.buffer)
+                    self.buffer = b""
+                    return
+                self.buffer = self.buffer[size:]
+                self.complete(now)
+                continue
+            if len(self.buffer) < size:
+                return
+            if kind == b"moof":
+                at = self.buffer.find(b"tfdt", 0, size)
+                if at >= 0:
+                    wide = self.buffer[at + 4] == 1
+                    self.tfdt = int.from_bytes(self.buffer[at + 8:at + (16 if wide else 12)], "big")
+            self.buffer = self.buffer[size:]
+
+    def complete(self, now: float):
+        if self.tfdt is not None:
+            self.on_fragment(self.tfdt, now)
+            self.tfdt = None
+
+
 class Origin:
     def __init__(self):
         self.reset(2.0, 1.5)
@@ -64,6 +116,38 @@ class Origin:
         self.ast: Optional[float] = None
         self.drift_ms: Optional[float] = None
         self.last_activity = time.time()  # última escritura de FFmpeg, para detectar un empaquetador colgado
+        # Para el desglose de latencia: cuándo quedó completo en el origen cada fragmento de cada calidad
+        self.timescale: dict[int, int] = {}
+        self.first_media_time: dict[int, float] = {}  # tiempo de medios del primer frame de cada calidad
+        self.fragments: dict[int, tuple[list, list]] = {}  # stream -> ([tiempo de medios...], [hora...])
+
+    def on_init(self, stream: int, body: bytes):
+        at = body.find(b"mdhd")
+        if at >= 0:
+            wide = body[at + 4] == 1
+            start = at + 8 + (16 if wide else 8)
+            self.timescale[stream] = int.from_bytes(body[start:start + 4], "big")
+
+    def on_fragment(self, stream: int, tfdt: int, now: float):
+        timescale = self.timescale.get(stream)
+        if not timescale:
+            return
+        media_time = tfdt / timescale
+        self.first_media_time.setdefault(stream, media_time)
+        starts, times = self.fragments.setdefault(stream, ([], []))
+        starts.append(media_time)
+        times.append(now)
+        if len(starts) > 1500:
+            del starts[:500], times[:500]
+
+    def fragment_time(self, stream: int, media_time: float):
+        """Hora (epoch, s) a la que quedó completo en el origen el fragmento que contiene ese instante."""
+        starts, times = self.fragments.get(stream, ([], []))
+        i = bisect.bisect_right(starts, media_time + 1e-4) - 1
+        # El último de la lista puede no ser aún el que lo contiene: hace falta ver empezar el siguiente
+        if 0 <= i < len(starts) - 1:
+            return times[i]
+        return None
 
     def on_first_data(self, name: str, now: float):
         """FFmpeg abre el segmento n (caja styp) al recibir su primer frame, en (n-1)*seg de tiempo de medios.
@@ -106,18 +190,28 @@ async def put_file(name: str, request: Request):
 
     live = LiveFile()
     origin.files[name] = live
+    segment = SEGMENT_RE.search(name)
+    init = INIT_RE.search(name)
+    if segment:
+        stream = int(segment.group(1))
+        parser = FragmentParser(lambda tfdt, now: origin.on_fragment(stream, tfdt, now))
     first = True
     try:
         async for chunk in request.stream():
             if not chunk:
                 continue
+            now = time.time()
             if first:
-                origin.on_first_data(name, time.time())
+                origin.on_first_data(name, now)
                 first = False
-            origin.last_activity = time.time()
+            origin.last_activity = now
+            if segment:
+                parser.feed(chunk, now)
             await live.append(chunk)
     finally:
         await live.append(None)
+    if init:
+        origin.on_init(int(init.group(1)), b"".join(live.chunks))
     return Response(status_code=201)
 
 

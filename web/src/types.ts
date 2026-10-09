@@ -97,8 +97,16 @@ export interface PlayerMetrics {
   bandwidthEstimateKbps: number | null; // estimación en la que se basa la adaptación
   qualityMode: 'auto' | 'manual';
   maxDriftSec?: number; // solo DASH: desvío a partir del cual dash.js salta al directo (0 = nunca)
+  stages?: StageBreakdown | null;
   status: 'idle' | 'connecting' | 'playing' | 'error';
   errorMessage?: string;
+}
+
+// Latencia glass-to-glass repartida por etapas, medida sobre frames concretos del último segundo
+export interface StageBreakdown {
+  stages: { key: string; ms: number }[]; // mediana de cada etapa, en el orden del recorrido
+  totalMs: number;
+  samples: number; // frames seguidos de principio a fin en el periodo
 }
 
 // Una fila por segundo del registro exportable de la sesión
@@ -142,6 +150,15 @@ export interface SampleRow {
   moq_quality_switches: number;
   moq_bw_estimate_kbps: number | null;
   moq_quality_mode: string;
+  // Desglose de la latencia por etapas (ms); la suma de las de cada rama es su glass-to-glass
+  dash_stage_encode_ms: number | null;
+  dash_stage_package_ms: number | null;
+  dash_stage_deliver_ms: number | null;
+  dash_stage_player_ms: number | null;
+  moq_stage_encode_ms: number | null;
+  moq_stage_ingest_ms: number | null;
+  moq_stage_transport_ms: number | null;
+  moq_stage_player_ms: number | null;
   clock_offset_ms: number | null;
   clock_rtt_ms: number | null;
   ingest_anomalies: number | null;

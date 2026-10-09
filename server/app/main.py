@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from . import source
+from . import source, trace
 from .origin import origin, router as origin_router
 from .source import VIDEO_FILE
 
@@ -153,7 +153,7 @@ def timecode_layout(width: int, height: int) -> dict:
         "height": height,
     }
 
-def timecode_filter(layout: dict) -> str:
+def timecode_filter(layout: dict, stream: int) -> str:
     n = TC_BITS + 4
     size, x0, y0, pad = layout["cell"], layout["x"], layout["y"], layout["cell"] // 2
     cell = lambda i: f"x={x0 + i * size}:y={y0}:w={size}:h={size}:color=white:t=fill"
@@ -166,7 +166,10 @@ def timecode_filter(layout: dict) -> str:
     for bit in range(TC_BITS):
         # Gray con una sola lectura de reloj por bit: si el ms cambia entre dos drawbox el error es de 1 ms como máximo
         if bit == TC_BITS - 1:
-            expr = f"mod(floor({ms}/{2 ** bit}),2)"
+            # De paso, FFmpeg escribe en su log la marca exacta de este frame y a qué frame y calidad
+            # pertenece (print). El orquestador lo lee y así puede identificar después cualquier frame
+            # por su timecode y seguirle la pista por las etapas (ver trace.py).
+            expr = f"mod(floor(print({ms})/{2 ** bit}),2)+0*print(n*10+{stream})"
         else:
             expr = f"mod(floor(({ms}+{2 ** bit})/{2 ** (bit + 1)}),2)"
         parts.append(f"drawbox={cell(2 + TC_BITS - 1 - bit)}:enable='{expr}'")
@@ -260,7 +263,7 @@ def ensure_master_source(force_restart: bool = False):
                 f"drawtext=fontfile={font_path}:text='{r.height}p {r.bitrate_kbps} kbps':fontsize={size}:"
                 f"fontcolor=white:box=1:boxcolor=black@0.8:boxborderw={size // 3}:x=w-tw-{size}:y={size}"
             )
-            graph += f";[s{i}]scale={r.width}:{r.height},{label},{timecode_filter(timecode_layout(r.width, r.height))}[v{i}]"
+            graph += f";[s{i}]scale={r.width}:{r.height},{label},{timecode_filter(timecode_layout(r.width, r.height), i)}[v{i}]"
             maps += f"-map '[v{i}]' "
             # Tope de tasa (VBV de 1 s): sin él los picos de x264 superan con mucho el bitrate nominal
             # y ni la emulación de red ni la adaptación de calidad tendrían una referencia fiable.
@@ -288,8 +291,34 @@ def ensure_master_source(force_restart: bool = False):
             shell=True,
             preexec_fn=os.setsid,
             stdout=subprocess.DEVNULL,
-            stderr=open("/tmp/ffmpeg_master.log", "w")
+            stderr=subprocess.PIPE
         )
+        threading.Thread(target=pump_master_log, args=(processes["master_source"],), daemon=True).start()
+
+PRINTED_VALUE = re.compile(rb"\d+\.\d{6}")
+
+def pump_master_log(proc: subprocess.Popen):
+    """Copia el log de la fuente a su fichero, apartando las marcas de frame que escribe el filtro del timecode."""
+    stamp_ms = None
+    pending = b""
+    with open("/tmp/ffmpeg_master.log", "wb") as log:
+        while True:
+            chunk = os.read(proc.stderr.fileno(), 65536)
+            if not chunk:
+                return
+            *lines, pending = re.split(rb"[\r\n]", pending + chunk)
+            for line in lines:
+                if not PRINTED_VALUE.fullmatch(line):
+                    if line:
+                        log.write(line + b"\n")
+                    continue
+                value = float(line)
+                if value > 1e11:
+                    stamp_ms = value  # reloj de pared en ms: la marca quemada
+                elif stamp_ms is not None:
+                    trace.frame_log.add_stamp(int(value) % 10, int(value) // 10, stamp_ms)
+                    stamp_ms = None
+            log.flush()
 
 @app.get("/api/time")
 async def get_time():
@@ -355,6 +384,7 @@ def launch(name: str, cmd: str, log: str):
 def start_dash():
     """Empaquetador LL-DASH: lee de UDP 5001 y publica fragmentos CMAF por HTTP PUT chunked."""
     kill_proc(processes.get("dash_pipeline"))
+    trace.frame_log.reset("dash")
     # Vaciar el origen para no mezclar segmentos de la emisión anterior
     origin.reset(current_config.seg_duration, PROBE_S)
 
@@ -364,7 +394,7 @@ def start_dash():
     # El bitrate se declara porque con -c copy FFmpeg no lo conoce y el manifiesto lo necesita.
     declared = "".join(f"-b:v:{i} {r.bitrate_kbps}k " for i, r in enumerate(current_config.renditions))
     dash_cmd = (
-        f"python3 -u {TSGATE} 5001 | "
+        f"python3 -u {TSGATE} 5001 dash | "
         f"ffmpeg -y -analyzeduration {int(PROBE_S * 1_000_000)} -i pipe:0 "
         f"-map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 -tag:a mp4a {declared}"
         f"-f dash -adaptation_sets 'id=0,streams=v id=1,streams=a' -seg_duration {current_config.seg_duration} "
@@ -382,14 +412,80 @@ def start_dash():
 def start_moq():
     """Empaquetador MoQ: lee de UDP 5002 y publica a moq-relay, sin remultiplexado intermedio."""
     kill_proc(processes.get("moq_pipeline"))
+    trace.frame_log.reset("moq")
     moq_cmd = (
-        f"python3 -u {TSGATE} 5002 | "
+        f"python3 -u {TSGATE} 5002 moq | "
         f"moq --connect '{MOQ_RELAY_URL}' --connect-tls-insecure --broadcast live.hang import ts"
     )
     logger.info("Iniciando Empaquetador MoQ hacia moq-relay...")
     launch("moq_pipeline", moq_cmd, "/tmp/ffmpeg_moq.log")
     started_at["moq"] = time.time()
     stream_ids["moq"] = int(started_at["moq"] * 1000)
+
+class TraceQuery(BaseModel):
+    """Frames que el dashboard acaba de pintar, identificados por la marca de tiempo quemada en ellos (ms)."""
+    dash_stream: int = 0
+    dash_stamps_ms: list[float] = []
+    moq_stream: int = 0
+    moq_stamps_ms: list[float] = []
+
+@app.post("/api/trace")
+def trace_frames(query: TraceQuery):
+    """Horas del servidor (ms epoch) a las que cada frame pasó por los puntos de medida, o null si no consta.
+
+    stamp_ms: marca exacta que se quemó en el frame antes de codificarlo.
+    encoded_ms: su último paquete llegó a la compuerta de su rama (hora del kernel), ya codificado y multiplexado.
+    forwarded_ms: la compuerta lo leyó y lo reenvió al empaquetador; se retrasa si este no acepta datos.
+    packaged_ms (solo DASH): el fragmento CMAF que lo contiene quedó completo en el origen.
+    """
+    ms = lambda seconds: None if seconds is None else round(seconds * 1000, 1)
+    log = trace.frame_log
+    ticks = 90000 // current_config.fps
+
+    def follow(branch: str, stream: int, stamp: float):
+        frame = log.frame_for_stamp(stream, stamp)
+        base = log.pts_base.get(stream)
+        if frame is None or base is None:
+            return None, None, None, None
+        number, exact_stamp = frame
+        pts = base + number * ticks
+        times = log.lookup(branch, stream, pts)
+        # Un frame tarda en codificarse decenas de ms: si no cuadra, la referencia de PTS no es fiable
+        if times is None or not 0 <= times[0] * 1000 - exact_stamp < 1000:
+            return exact_stamp, None, None, pts
+        return exact_stamp, times[0], times[1], pts
+
+    dash, moq = [], []
+    for stamp in query.dash_stamps_ms:
+        exact_stamp, encoded, forwarded, pts = follow("dash", query.dash_stream, stamp)
+        packaged = None
+        first_pts = log.first_pts["dash"].get(query.dash_stream)
+        first_media = origin.first_media_time.get(query.dash_stream)
+        if encoded is not None and first_pts is not None and first_media is not None:
+            # FFmpeg resta a todo el flujo su instante inicial: el tiempo de medios y el PTS avanzan a la par
+            packaged = origin.fragment_time(query.dash_stream, first_media + (pts - first_pts) / 90000)
+        dash.append({"stamp_ms": exact_stamp, "encoded_ms": ms(encoded), "forwarded_ms": ms(forwarded), "packaged_ms": ms(packaged)})
+    for stamp in query.moq_stamps_ms:
+        exact_stamp, encoded, forwarded, _ = follow("moq", query.moq_stream, stamp)
+        moq.append({"stamp_ms": exact_stamp, "encoded_ms": ms(encoded), "forwarded_ms": ms(forwarded)})
+    return {"dash": dash, "moq": moq}
+
+def start_all(restart_master: bool):
+    """Arranca los dos empaquetadores y, si hace falta, la fuente."""
+    # Detener los empaquetadores antes de tocar la fuente, para que no mezclen dos emisiones
+    kill_proc(processes.get("dash_pipeline"))
+    kill_proc(processes.get("moq_pipeline"))
+    if restart_master:
+        kill_proc(processes.get("master_source"))
+        processes["master_source"] = None
+        trace.frame_log.master_restarted()
+    start_dash()
+    start_moq()
+    if restart_master:
+        # Las compuertas ya están escuchando cuando la fuente emite su primer frame: su primer PTS es
+        # entonces el del frame 0, la referencia para pasar de número de frame a PTS.
+        time.sleep(0.4)
+        ensure_master_source()
 
 @app.post("/api/start")
 def start_pipeline(config: Optional[StreamConfig] = None):
@@ -409,12 +505,7 @@ def start_pipeline(config: Optional[StreamConfig] = None):
             logger.info(f"Ajustando seg_duration a {min_seg}s para alinear con GOP de {current_config.gop_size} frames")
             current_config.seg_duration = min_seg
 
-        # Detener los empaquetadores antes de tocar la fuente, para que no mezclen dos emisiones
-        kill_proc(processes.get("dash_pipeline"))
-        kill_proc(processes.get("moq_pipeline"))
-        ensure_master_source(force_restart=need_restart_master)
-        start_dash()
-        start_moq()
+        start_all(restart_master=need_restart_master or not alive("master_source"))
         desired_running = True
         if os.path.exists(STOPPED_MARKER):
             os.remove(STOPPED_MARKER)
@@ -457,11 +548,7 @@ def supervise():
                 if not alive("master_source"):
                     logger.warning("Supervisor: la fuente maestra ha caído; se relanza todo el pipeline")
                     restarts["master"] += 1
-                    kill_proc(processes.get("dash_pipeline"))
-                    kill_proc(processes.get("moq_pipeline"))
-                    ensure_master_source()
-                    start_dash()
-                    start_moq()
+                    start_all(restart_master=True)
                     continue
                 # DASH colgado: el proceso vive pero lleva varios segmentos sin publicar nada en el origen
                 dash_silence = max(10.0, 3 * current_config.seg_duration)
@@ -498,6 +585,7 @@ def on_startup():
     # En segundo plano: la descarga inicial tarda minutos y la API debe responder mientras tanto
     threading.Thread(target=boot, daemon=True).start()
     threading.Thread(target=supervise, daemon=True).start()
+    threading.Thread(target=trace.listen, daemon=True).start()
 
 @app.on_event("shutdown")
 def on_shutdown():

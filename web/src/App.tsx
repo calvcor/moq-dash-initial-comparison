@@ -4,6 +4,7 @@ import { MoqPlayer } from './components/MoqPlayer';
 import { MetricsDashboard } from './components/MetricsDashboard';
 import { ControlPanel } from './components/ControlPanel';
 import { NetworkPanel } from './components/NetworkPanel';
+import { PipelineDiagram } from './components/PipelineDiagram';
 import { RateWindow } from './lib/glass';
 import { syncClock, getClockSync } from './lib/clock';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile } from './types';
@@ -11,6 +12,8 @@ import { Activity, Radio, Cpu, Network } from 'lucide-react';
 
 // Mismo origen que el dashboard: el punto de entrada (edge) reparte /api, /media/dash y el resto
 const API_BASE = '';
+
+const stage = (metrics: PlayerMetrics, key: string) => metrics.stages?.stages.find((s) => s.key === key)?.ms ?? null;
 
 export function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
@@ -210,6 +213,14 @@ export function App() {
         moq_quality_switches: currentMoq.qualitySwitches,
         moq_bw_estimate_kbps: currentMoq.bandwidthEstimateKbps,
         moq_quality_mode: currentMoq.qualityMode,
+        dash_stage_encode_ms: stage(currentDash, 'encode'),
+        dash_stage_package_ms: stage(currentDash, 'package'),
+        dash_stage_deliver_ms: stage(currentDash, 'deliver'),
+        dash_stage_player_ms: stage(currentDash, 'player'),
+        moq_stage_encode_ms: stage(currentMoq, 'encode'),
+        moq_stage_ingest_ms: stage(currentMoq, 'ingest'),
+        moq_stage_transport_ms: stage(currentMoq, 'transport'),
+        moq_stage_player_ms: stage(currentMoq, 'player'),
         clock_offset_ms: clock ? Number(clock.offsetMs.toFixed(2)) : null,
         clock_rtt_ms: clock ? Number(clock.rttMs.toFixed(2)) : null,
         ingest_anomalies: status?.ingest_anomalies
@@ -426,6 +437,9 @@ export function App() {
             onMetricsUpdate={(m) => setMoqMetrics((prev) => ({ ...prev, ...m }))}
           />
         </div>
+
+        {/* Recorrido de un frame con la latencia medida en cada etapa */}
+        <PipelineDiagram dash={dashMetrics.stages} moq={moqMetrics.stages} dashLatencyMs={dashMetrics.latencyMs} moqLatencyMs={moqMetrics.latencyMs} />
 
         {/* Panel de Métricas y Telemetría */}
         <div className="pt-2">

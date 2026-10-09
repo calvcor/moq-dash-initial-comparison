@@ -129,6 +129,11 @@ export class GlassMeter {
     this.#samples.push({ t, latency });
   }
 
+  /** Timecode del frame que se ve ahora mismo, para quien necesite seguir un frame concreto. */
+  readCode(): number | null {
+    return this.#read();
+  }
+
   /** Devuelve el timecode (ms mod 2^bits) del frame visible, o null si no se puede leer con garantías. */
   #read(): number | null {
     const src = this.#getSource();
