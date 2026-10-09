@@ -17,3 +17,6 @@ __pycache__/
 # Node (el detalle está en web/.gitignore)
 node_modules/
 dist/
+
+# Configuración local del despliegue (HTTP_PORT, MOQ_PORT, PUBLIC_HOST, MOQ_HOST)
+.env
