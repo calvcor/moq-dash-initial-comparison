@@ -241,7 +241,8 @@ Incluye codificación, empaquetado, red, búfer del reproductor, decodificación
 | Tráfico IP en el router | Bytes IP reenviados por protocolo y sentido, con cabeceras y retransmisiones; misma capa para ambos. Es la cifra rigurosa de consumo de red |
 | Descarga total | A nivel de aplicación y en capas distintas, así que la comparación es orientativa. DASH: tamaño transferido de todas las peticiones (vídeo, audio y manifiesto, con cabeceras HTTP de respuesta) según la Resource Timing API. MoQ: `WebTransport.getStats()` si el navegador lo implementa; en Chrome no existe y se suma la carga útil de las pistas descargadas. El detalle aparece al pasar el ratón por la tarjeta |
 | Latencia según reproductor | La que declara cada uno (`getCurrentLiveLatency()` en dash.js, retardo de sincronización en `@moq/watch`); solo como contraste |
-| Búfer / jitter | `getBufferLength('video')` en dash.js, jitter de sincronización en `@moq/watch` |
+| Búfer local (DASH) | Segundos de vídeo descargados por delante del punto de reproducción (`getBufferLength('video')`) |
+| Búfer de jitter (MoQ y WebRTC) | Tiempo medio que cada frame pasa retenido en el reproductor. WebRTC: `jitterBufferDelay / jitterBufferEmittedCount` de `getStats()`, desde el primer paquete hasta la salida hacia el decodificador. MoQ: desde que `@moq/watch` lee el frame de la red hasta que lo entrega para pintarlo; incluye la decodificación |
 
 Cuando no hay medida se muestra `--`; no se rellena con valores supuestos.
 
@@ -422,7 +423,7 @@ Desde el panel de control:
 | Fragmento CMAF | 100, 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
 | Latencia objetivo DASH | 0,05 a 6,0 s | `liveDelay` de dash.js, con catch-up LoL+ |
 | Salto al directo DASH | 0 (desactivado) a 10 s, por defecto 1,5 s | `liveCatchup.maxDrift` de dash.js: desvío sobre el objetivo a partir del cual salta al directo en vez de corregir con la velocidad. El salto aborta las descargas y abre conexiones TCP frías; con retardo de red alto puede encadenar saltos y paradas |
-| Latencia objetivo MoQ | 50 a 2000 ms | `delay` de `@moq/watch` |
+| Latencia objetivo MoQ | auto, o 50 a 2000 ms (200 ms al abrir) | `delay` de `@moq/watch`. En auto, que es su valor por defecto, la librería lo calcula del RTT que comunica el relay (1,25 × el mínimo, con suelo de 20 ms). En ambos casos le suma el jitter de pista del catálogo; el valor efectivo se muestra junto al slider. En auto, `moq_target_ms` queda vacío en el CSV |
 
 Los cuatro primeros requieren pulsar **Aplicar Cambios**; los sliders actúan al momento y su valor queda en el CSV (`dash_target_ms`, `dash_max_drift_s`, `moq_target_ms`).
 

@@ -151,12 +151,13 @@ const Telemetry: React.FC<{
   engine: string;
   color: string;
   bufferLabel: string;
+  bufferHint?: React.ReactNode;
   networkHint: React.ReactNode;
   qualityHint: React.ReactNode;
   estimateHint: React.ReactNode;
   metrics: PlayerMetrics;
   stats: ReturnType<typeof summarize>;
-}> = ({ title, engine, color, bufferLabel, networkHint, qualityHint, estimateHint, metrics, stats }) => (
+}> = ({ title, engine, color, bufferLabel, bufferHint, networkHint, qualityHint, estimateHint, metrics, stats }) => (
   <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl">
     <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-800">
       <span className={`font-semibold text-sm ${color}`}>{title}</span>
@@ -181,7 +182,7 @@ const Telemetry: React.FC<{
       <Stat label="Ancho de banda estimado" value={fmt(metrics.bandwidthEstimateKbps, 'kbps')} hint={estimateHint} />
       <Stat label="Bitrate vídeo recibido" value={fmt(metrics.bitrateKbps, 'kbps')} hint={VIDEO_HINT} />
       <Stat label="Descarga total" value={fmt(metrics.networkKbps, 'kbps')} hint={networkHint} />
-      <Stat label={bufferLabel} value={fmt(metrics.bufferLengthSec, 's')} />
+      <Stat label={bufferLabel} value={fmt(metrics.bufferLengthSec, 's')} hint={bufferHint} />
       <Stat label="Congelados" value={`${metrics.stalls} (${metrics.stallMs} ms)`} />
     </div>
     <p className="mt-3 text-[11px] font-mono text-slate-400">
@@ -309,7 +310,14 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           title="Telemetría Media over QUIC"
           engine="WebTransport QUIC"
           color="text-emerald-400"
-          bufferLabel="Jitter búfer"
+          bufferLabel="Búfer de jitter"
+          bufferHint={
+            <p>
+              Tiempo medio que cada frame pasa retenido en el reproductor: desde que @moq/watch lo lee de la red hasta que lo entrega para
+              pintarlo. Es la misma medida que en WebRTC, con una diferencia: aquí incluye la decodificación (1-2 ms por frame), que en
+              WebRTC ocurre después del búfer.
+            </p>
+          }
           networkHint={moqMetrics.networkSource === 'transport' ? MOQ_TRANSPORT_HINT : MOQ_PAYLOAD_HINT}
           qualityHint={
             <p>
@@ -328,6 +336,12 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           engine="RTCPeerConnection"
           color="text-amber-400"
           bufferLabel="Búfer de jitter"
+          bufferHint={
+            <p>
+              Tiempo medio que cada frame pasa en el búfer de jitter del navegador: desde que llega su primer paquete hasta que sale hacia el
+              decodificador (<code>jitterBufferDelay / jitterBufferEmittedCount</code> de <code>getStats()</code>).
+            </p>
+          }
           networkHint={RTC_NETWORK_HINT}
           qualityHint={<p>Altura del vídeo recibido. WebRTC sirve siempre la calidad más alta de la escalera: en esta rama no hay adaptación.</p>}
           estimateHint={<p>No aplica: en esta rama no hay adaptación de calidad en el reproductor.</p>}

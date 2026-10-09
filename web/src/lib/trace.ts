@@ -172,6 +172,48 @@ export class RtcTracer {
   }
 }
 
+type TimestampSignal = { subscribe(fn: (ms: number | undefined) => void): () => void };
+
+// Tiempo que cada frame pasa retenido en el reproductor de @moq/watch: desde que lo lee de la red hasta que
+// lo entrega para pintarlo. Es el equivalente a jitterBufferDelay / jitterBufferEmittedCount de WebRTC, con
+// una diferencia: aquí la decodificación ocurre dentro de ese intervalo y en WebRTC después.
+export class MoqBufferMeter {
+  #arrivals = new Map<number, number>(); // marca de tiempo del frame -> cuándo llegó
+  #sum = 0;
+  #count = 0;
+  #disposes: (() => void)[];
+
+  constructor(player: { sync: { out: { timestamp: TimestampSignal } }; video: { out: { timestamp: TimestampSignal } } }) {
+    this.#disposes = [
+      player.sync.out.timestamp.subscribe((ms) => {
+        if (ms === undefined) return;
+        this.#arrivals.set(ms, performance.now());
+        // Los frames que nunca se entregan (saltados, o avisos agrupados) no deben acumularse
+        if (this.#arrivals.size > 600) this.#arrivals.delete(this.#arrivals.keys().next().value!);
+      }),
+      player.video.out.timestamp.subscribe((ms) => {
+        const arrived = ms === undefined ? undefined : this.#arrivals.get(ms);
+        if (ms === undefined || arrived === undefined) return;
+        this.#arrivals.delete(ms);
+        this.#sum += performance.now() - arrived;
+        this.#count++;
+      }),
+    ];
+  }
+
+  // Media, en segundos, de los frames entregados desde la llamada anterior; null si no ha habido ninguno
+  take(): number | null {
+    const mean = this.#count ? this.#sum / this.#count / 1000 : null;
+    this.#sum = 0;
+    this.#count = 0;
+    return mean;
+  }
+
+  close() {
+    this.#disposes.forEach((dispose) => dispose());
+  }
+}
+
 // Lo que se necesita del reproductor de @moq/watch, sin atarse a sus tipos internos
 interface MoqPlayerLike {
   sync: { out: { timestamp: { subscribe(fn: (ms: number | undefined) => void): () => void } } };

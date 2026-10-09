@@ -3,7 +3,7 @@ import * as Watch from '@moq/watch';
 import * as Net from '@moq/net';
 import { Signal } from '@moq/signals';
 import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
-import { MoqTracer } from '../lib/trace';
+import { MoqBufferMeter, MoqTracer } from '../lib/trace';
 import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
 interface MoqPlayerProps {
@@ -26,7 +26,10 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  // 0 = auto: no se fija nada y @moq/watch dimensiona el búfer con el RTT que le comunica el relay
   const [targetLatencyMs, setTargetLatencyMs] = useState<number>(200);
+  const [resolvedDelayMs, setResolvedDelayMs] = useState<number | null>(null);
+  const toDelay = (ms: number) => (ms > 0 ? Net.Time.Milli(ms) : 'auto');
   const playerRef = useRef<Watch.Player | null>(null);
   const connectionRef = useRef<Net.Connection | null>(null);
   const delaySignalRef = useRef<Signal<any> | null>(null);
@@ -34,7 +37,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   const handleLatencyChange = (newMs: number) => {
     setTargetLatencyMs(newMs);
     if (delaySignalRef.current) {
-      delaySignalRef.current.set(Net.Time.Milli(newMs));
+      delaySignalRef.current.set(toDelay(newMs));
     }
   };
 
@@ -61,7 +64,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   };
 
   useEffect(() => {
-    onMetricsUpdate({ targetLatencyMs });
+    onMetricsUpdate({ targetLatencyMs: targetLatencyMs > 0 ? targetLatencyMs : null });
   }, [targetLatencyMs]);
 
   useEffect(() => {
@@ -109,6 +112,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
     let retryTimer: any = null;
     let metricsInterval: any = null;
     let tracer: MoqTracer | null = null;
+    let bufferMeter: MoqBufferMeter | null = null;
     const rate = new RateWindow();
     const networkRate = new RateWindow();
     let networkSource: PlayerMetrics['networkSource'];
@@ -156,7 +160,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
         connectionRef.current = connection;
 
         // 3. Instanciar el reproductor oficial @moq/watch con jitter buffer y control reactivo
-        const delaySignal = new Signal(Net.Time.Milli(targetLatencyMs));
+        const delaySignal = new Signal<Watch.Delay>(toDelay(targetLatencyMs));
         delaySignalRef.current = delaySignal;
 
         const targetSignal = new Signal<Watch.Video.Target | undefined>(undefined);
@@ -190,6 +194,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           (stages) => onMetricsUpdate({ stages }),
         );
 
+        bufferMeter = new MoqBufferMeter(player);
+
         if (isAborted) return;
         setStatus('playing');
         console.log('[MoQ] Reproductor @moq/watch inicializado con éxito en live.hang');
@@ -199,7 +205,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           if (isAborted || !playerRef.current) return;
           try {
             const syncDelay = player.sync.out.delay.peek();
-            const jitter = player.sync.out.jitter.peek();
+            if (typeof syncDelay === 'number') setResolvedDelayMs(Math.round(syncDelay));
+            const held = bufferMeter?.take() ?? null;
             const videoStats = player.video.out.stats.peek();
             if (videoStats) rate.push(videoStats.bytesReceived);
             // Descarga total: bytes recibidos por la conexión WebTransport (todas las pistas y la señalización).
@@ -242,7 +249,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
               networkKbps: networkRate.kbps(),
               networkSource,
               fps: glass.fps,
-              bufferLengthSec: typeof jitter === 'number' ? Number((jitter / 1000).toFixed(3)) : null,
+              // Tiempo medio que los frames entregados desde la última muestra pasaron retenidos en el reproductor
+              bufferLengthSec: held === null ? null : Number(held.toFixed(3)),
               stalls: glass.stalls,
               stallMs: glass.stallMs,
               restarts: restartsRef.current,
@@ -279,6 +287,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
       clearInterval(metricsInterval);
       clearInterval(watchdog);
       tracer?.close();
+      bufferMeter?.close();
       if (playerRef.current) {
         try {
           playerRef.current.close();
@@ -337,16 +346,22 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
       </div>
 
       {/* Control de Latencia Objetivo en Vivo */}
-      <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs">
+      <div
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs"
+        title="Búfer de jitter de @moq/watch (opción delay). En auto, que es el valor por defecto de la librería, lo calcula con el RTT que le comunica el relay: 1,25 veces el RTT mínimo, con un suelo de 20 ms. En ambos casos la librería le suma el jitter que el catálogo declara para las pistas; el valor resultante es el que se muestra entre paréntesis."
+      >
         <div className="flex items-center space-x-2">
           <span className="text-slate-400 font-medium">Latencia objetivo:</span>
-          <span className="font-mono text-emerald-400 font-semibold">{targetLatencyMs}ms ({(targetLatencyMs / 1000).toFixed(2)}s)</span>
+          <span className="font-mono text-emerald-400 font-semibold">
+            {targetLatencyMs === 0 ? 'auto (RTT)' : `${targetLatencyMs}ms`}
+            {resolvedDelayMs !== null && ` (efectiva ${resolvedDelayMs}ms)`}
+          </span>
         </div>
         <div className="flex items-center space-x-3 w-1/2 max-w-xs">
-          <span className="text-[10px] text-slate-500 font-mono">50ms</span>
+          <span className="text-[10px] text-slate-500 font-mono">auto</span>
           <input
             type="range"
-            min={50}
+            min={0}
             max={2000}
             step={50}
             value={targetLatencyMs}

@@ -233,7 +233,7 @@ export function App() {
         moq_kbps: currentMoq.bitrateKbps,
         moq_net_kbps: currentMoq.networkKbps,
         moq_fps: currentMoq.fps,
-        moq_jitter_s: currentMoq.bufferLengthSec,
+        moq_jitter_buffer_s: currentMoq.bufferLengthSec,
         moq_stalls: currentMoq.stalls,
         moq_stall_ms: currentMoq.stallMs,
         moq_player_restarts: currentMoq.restarts,

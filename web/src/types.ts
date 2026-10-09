@@ -142,7 +142,7 @@ export interface SampleRow {
   moq_kbps: number | null;
   moq_net_kbps: number | null;
   moq_fps: number | null;
-  moq_jitter_s: number | null;
+  moq_jitter_buffer_s: number | null; // tiempo medio retenido en el reproductor, como rtc_jitter_buffer_s
   moq_stalls: number;
   moq_stall_ms: number;
   moq_player_restarts: number;

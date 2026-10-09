@@ -661,7 +661,7 @@ Los tres modos de la opción `delay`:
 | Valor | Comportamiento |
 | :--- | :--- |
 | `"auto"` (por defecto de la librería) | Se calcula del RTT que informa el relay: 1,25 × el RTT mínimo visto, con un suelo de 20 ms. Es el margen para una retransmisión. Sin RTT, 100 ms. |
-| Una duración | Valor fijo. **Es lo que hace el slider del testbed** (200 ms por defecto). |
+| Una duración | Valor fijo. **Es lo que hace el slider del testbed** (200 ms al abrir); en su extremo izquierdo pasa a `auto`. |
 | `"instant"` | Sin búfer ni espera: cada frame se pinta en cuanto se decodifica. Desactiva el audio. |
 
 **La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
@@ -706,7 +706,7 @@ que la medida no se interrumpa al hacer scroll.
 
 | Opción | Valor por defecto | Aquí | Efecto |
 | :--- | :--- | :--- | :--- |
-| `delay` | `auto` | Slider, 50 a 2000 ms | Distancia al directo. |
+| `delay` | `auto` | Slider: `auto` o de 50 a 2000 ms (200 ms al abrir) | Distancia al directo. |
 | `buffer` | `0ms` | `0ms` (por defecto) | Media adelantada tolerada antes de recolocar. |
 | `target` | sin restricción | Solo al fijar calidad a mano | Restringe la rendition elegida. |
 | `announced` | `true` | `true` | Espera a que el broadcast esté anunciado antes de suscribirse. |
