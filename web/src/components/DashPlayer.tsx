@@ -25,7 +25,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [playerStatus, setPlayerStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
-  const [targetLatency, setTargetLatency] = useState<number>(3.0);
+  const [targetLatency, setTargetLatency] = useState<number>(0.3);
   // Desvío respecto al objetivo a partir del cual dash.js deja de corregir con la velocidad de
   // reproducción y salta al directo, abortando las descargas en curso. 0 = no saltar nunca.
   const [maxDrift, setMaxDrift] = useState<number>(1.5);

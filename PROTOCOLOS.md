@@ -241,7 +241,7 @@ cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
 
 `dash.js` no reproduce lo último que tiene, sino que se coloca a una distancia fija del directo:
 
-- **`liveDelay`** (el slider "Latencia objetivo", 3 s por defecto) es esa distancia. Todo lo que hay
+- **`liveDelay`** (el slider "Latencia objetivo", 0,3 s al abrir la página) es esa distancia. Todo lo que hay
   entre el punto de reproducción y el directo es búfer.
 - **Catch-up** (`liveCatchup`). Si la latencia real se desvía del objetivo, `dash.js` la corrige
   **cambiando la velocidad de reproducción**: hasta un 50 % más rápido o más lento por defecto. Aquí
@@ -661,7 +661,7 @@ Los tres modos de la opción `delay`:
 | Valor | Comportamiento |
 | :--- | :--- |
 | `"auto"` (por defecto de la librería) | Se calcula del RTT que informa el relay: 1,25 × el RTT mínimo visto, con un suelo de 20 ms. Es el margen para una retransmisión. Sin RTT, 100 ms. |
-| Una duración | Valor fijo. **Es lo que hace el slider del testbed** (200 ms al abrir); en su extremo izquierdo pasa a `auto`. |
+| Una duración | Valor fijo. **Es lo que hace el slider del testbed** al moverlo; al abrir la página está en `auto`, su extremo izquierdo. |
 | `"instant"` | Sin búfer ni espera: cada frame se pinta en cuanto se decodifica. Desactiva el audio. |
 
 **La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
@@ -673,8 +673,8 @@ Los tres modos de la opción `delay`:
 
 El *max age* que se envía en el SUBSCRIBE es `delay + buffer`.
 
-**Lo que ocurre en este testbed.** El reproductor se crea con `delay` = slider (200 ms) y `buffer`
-en su valor por defecto, 0. Con el slider en 200 ms, la librería resuelve:
+**Lo que ocurre en este testbed.** El reproductor se crea con `delay` = slider y `buffer` en su valor
+por defecto, 0. El slider arranca en `auto`; puesto en 200 ms, la librería resuelve:
 
 ```
 delay efectivo = 200 ms (slider) + 46 ms (jitter de rendition, el del audio del catálogo) = 246 ms
@@ -706,7 +706,7 @@ que la medida no se interrumpa al hacer scroll.
 
 | Opción | Valor por defecto | Aquí | Efecto |
 | :--- | :--- | :--- | :--- |
-| `delay` | `auto` | Slider: `auto` o de 50 a 2000 ms (200 ms al abrir) | Distancia al directo. |
+| `delay` | `auto` | Slider: `auto` (al abrir) o de 50 a 2000 ms | Distancia al directo. |
 | `buffer` | `0ms` | `0ms` (por defecto) | Media adelantada tolerada antes de recolocar. |
 | `target` | sin restricción | Solo al fijar calidad a mano | Restringe la rendition elegida. |
 | `announced` | `true` | `true` | Espera a que el broadcast esté anunciado antes de suscribirse. |

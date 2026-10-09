@@ -92,7 +92,7 @@ class StreamConfig(BaseModel):
     gop_size: int = 60           # 1 segundo a 60 fps
     fps: int = 60
     seg_duration: float = 2.0    # Segundos por segmento DASH
-    frag_duration: float = 0.2   # Chunks CMAF de 200ms para LL-DASH
+    frag_duration: float = 0.1   # Chunks CMAF de 100ms para LL-DASH
     # Escalera de calidades que se codifica en vivo, de mayor a menor. Una sola entrada = sin adaptación.
     renditions: list[Rendition] = Field(default_factory=default_ladder, min_length=1, max_length=5)
 

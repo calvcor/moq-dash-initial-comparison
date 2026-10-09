@@ -143,7 +143,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
           >
             <option value={0.1}>100 ms</option>
-            <option value={0.2}>200 ms (Recomendado)</option>
+            <option value={0.2}>200 ms</option>
             <option value={0.5}>500 ms</option>
             <option value={1.0}>1.0 s</option>
           </select>

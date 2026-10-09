@@ -27,7 +27,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
   // 0 = auto: no se fija nada y @moq/watch dimensiona el búfer con el RTT que le comunica el relay
-  const [targetLatencyMs, setTargetLatencyMs] = useState<number>(200);
+  const [targetLatencyMs, setTargetLatencyMs] = useState<number>(0);
   const [resolvedDelayMs, setResolvedDelayMs] = useState<number | null>(null);
   const toDelay = (ms: number) => (ms > 0 ? Net.Time.Milli(ms) : 'auto');
   const playerRef = useRef<Watch.Player | null>(null);

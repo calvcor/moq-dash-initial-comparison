@@ -28,7 +28,7 @@ export function App() {
       { height: 360, bitrate_kbps: 700 },
     ],
     seg_duration: 2.0,
-    frag_duration: 0.2,
+    frag_duration: 0.1,
   });
 
   const [dashMetrics, setDashMetrics] = useState<PlayerMetrics>({
