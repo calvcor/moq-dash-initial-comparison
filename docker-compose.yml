@@ -3,8 +3,9 @@
 # Red de dos tramos: DASH y MoQ solo se alcanzan a través del router, que emula el enlace.
 # La ingesta (orquestador -> nginx / relay) va por la red interna "core" y no se degrada.
 #
-# Variables opcionales (fichero .env): HTTP_PORT (80), MOQ_PORT (4433) y PUBLIC_HOST (localhost),
-# el nombre con el que el navegador accede, para el certificado autofirmado del relay.
+# Variables opcionales (fichero .env): HTTP_PORT (80), MOQ_PORT (4433), PUBLIC_HOST (localhost), el nombre
+# con el que el navegador accede, para el certificado autofirmado del relay, y MOQ_HOST, la dirección a la
+# que el navegador debe conectar por MoQ cuando el nombre de la página apunta a un proxy y no a este servidor.
 services:
   # Entrada HTTP única: reparte entre dashboard, API, LL-DASH y huella del certificado
   edge:
@@ -78,6 +79,7 @@ services:
       - MOQ_RELAY_URL=https://moq-relay:4433/anon
       - ROUTER_URL=http://172.30.50.2:9000
       - MOQ_PORT=${MOQ_PORT:-4433}
+      - MOQ_HOST=${MOQ_HOST:-}
     networks:
       - default
       - core

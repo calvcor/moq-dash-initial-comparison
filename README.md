@@ -56,6 +56,7 @@ Fuera de `localhost` el navegador solo permite WebTransport y WebCodecs en pági
 2. `docker compose up -d --build`.
 3. En el proxy, un único host que reenvíe `https://testbed.ejemplo.org` a `http://<servidor>:80`. No hace falta definir rutas.
 4. El puerto **4433/udp** del servidor debe ser alcanzable directamente desde los navegadores: MoQ no pasa por el proxy.
+5. Si el nombre público resuelve al proxy y no al servidor (lo habitual con un comodín DNS), añadir al `.env` la dirección directa del servidor para MoQ: `MOQ_HOST=10.0.0.5`. El relay usa un certificado autofirmado fijado por huella, así que vale una IP. La alternativa es que el proxy reenvíe el puerto 4433/udp como *stream*.
 
 A tener en cuenta en las medidas: detrás del proxy, DASH llega al navegador por la conexión del proxy (normalmente HTTP/2) y la emulación de red actúa sobre el tramo interno, no sobre la conexión TCP del navegador. MoQ sí va extremo a extremo.
 

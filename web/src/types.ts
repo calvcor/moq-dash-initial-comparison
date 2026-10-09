@@ -58,6 +58,7 @@ export interface ServerStatus {
   };
   dash_url: string;
   moq_port?: number;
+  moq_host?: string | null; // dirección directa para MoQ; null = el host de la página
   spki_fingerprint: string;
   master_start_time_ms?: number;
   timecodes?: TimecodeLayout[]; // uno por calidad de la escalera

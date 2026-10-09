@@ -418,7 +418,7 @@ export function App() {
 
           <MoqPlayer
             key={`moq-${moqStreamId}`}
-            url={`https://${window.location.hostname}:${serverStatus?.moq_port ?? 4433}/anon`}
+            url={`https://${serverStatus?.moq_host || window.location.hostname}:${serverStatus?.moq_port ?? 4433}/anon`}
             spkiFingerprint={serverStatus?.spki_fingerprint}
             timecodes={serverStatus?.timecodes}
             renditions={serverStatus?.config.renditions}

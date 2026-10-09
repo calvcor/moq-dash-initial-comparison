@@ -322,6 +322,9 @@ def get_status():
         # Rutas relativas al punto de entrada; MoQ va directo por UDP al puerto indicado
         "dash_url": "/media/dash/manifest.mpd",
         "moq_port": int(os.getenv("MOQ_PORT", "4433")),
+        # Vacío: el mismo nombre de host que la página. Detrás de un proxy HTTP ese nombre apunta al proxy,
+        # que no reenvía QUIC, y hay que indicar la dirección directa de este servidor.
+        "moq_host": os.getenv("MOQ_HOST") or None,
         "spki_fingerprint": get_spki_fingerprint(),
         "timecodes": [timecode_layout(r.width, r.height) for r in current_config.renditions],
         "ingest_anomalies": {name: count_anomalies(name) for name in log_state},
