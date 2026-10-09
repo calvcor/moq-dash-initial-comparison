@@ -60,7 +60,7 @@ El testbed está completamente containerizado en **Docker Compose** y reproduce 
    - Proporciona endpoints REST:
      - `GET /api/status`: Estado del pipeline, configuraciones activas y `master_start_time_ms`.
      - `POST /api/start`: Inicia la emisión.
-     - `POST /api/stop`: Detiene los empaquetadores sin parar la fuente maestra de vídeo.
+     - `POST /api/stop`: Detiene empaquetadores y fuente maestra; la parada se recuerda entre reinicios (`media/.stopped`).
      - `POST /api/config`: Aplica configuraciones en caliente y auto-inicia el stream.
 4. **`testbed-web`** (`React 19 + Vite + TypeScript + TailwindCSS + Nginx`):
    - Puerto: `5173/tcp`.

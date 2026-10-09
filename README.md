@@ -163,7 +163,7 @@ ffmpeg -re -stream_loop -1 -i <vídeo> -re -stream_loop -1 -i <vídeo> \
 - **Etiqueta de calidad**: cada calidad lleva quemado arriba a la derecha su nombre (`720p 2000 kbps`), para ver de un vistazo cuál se reproduce.
 - **Timecode binario**: se quema en cada calidad después de escalarla. Ver sección 4.
 
-Cambiar el GOP o la escalera reinicia la fuente; cambiar segmento o fragmento solo reinicia los empaquetadores.
+Cambiar el GOP o la escalera reinicia la fuente; cambiar segmento o fragmento solo reinicia los empaquetadores. **Detener Pipeline** para también la fuente, que es la que consume CPU, y el servidor queda en reposo; la parada se conserva aunque se reinicie el contenedor o la máquina.
 
 ### 3.2. Compuerta `tsgate.py`
 
@@ -389,7 +389,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | :--- | :--- |
 | `GET /api/status` | Estado, configuración, `stream_ids`, reinicios del supervisor, disposición del timecode, anomalías de ingesta, deriva DASH y red (perfil y contadores del router) |
 | `POST /api/start` | Arranca los empaquetadores (cuerpo opcional: configuración) |
-| `POST /api/stop` | Detiene los empaquetadores; la fuente sigue emitiendo |
+| `POST /api/stop` | Detiene todo, incluida la codificación de la fuente. La parada se recuerda entre reinicios: no vuelve a emitir hasta `POST /api/start` |
 | `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |

@@ -41,6 +41,8 @@ app.include_router(origin_router)
 DASH_PUBLISH_URL = "http://127.0.0.1:8000/media/dash/manifest.mpd"
 # Agente del router que emula la red entre el navegador y los servidores finales (ver router/agent.py)
 ROUTER_URL = os.getenv("ROUTER_URL", "http://172.30.50.2:9000")
+# Marca de "detenido a mano", junto al vídeo para que sobreviva a reinicios del contenedor
+STOPPED_MARKER = os.path.join(os.path.dirname(VIDEO_FILE), ".stopped")
 TSGATE = os.path.join(os.path.dirname(__file__), "tsgate.py")
 # Reloj que usará dash.js; debe ser el mismo con el que se calcula el availabilityStartTime
 # Relativa al manifiesto: vale para cualquier nombre de host y para HTTP o HTTPS
@@ -411,21 +413,25 @@ def start_pipeline(config: Optional[StreamConfig] = None):
         start_dash()
         start_moq()
         desired_running = True
+        if os.path.exists(STOPPED_MARKER):
+            os.remove(STOPPED_MARKER)
 
     return {"message": "Streaming iniciado con éxito (fuente en directo)", "config": current_config}
 
 @app.post("/api/stop")
 def stop_pipeline():
+    """Detiene todo, incluida la codificación de la fuente, que es lo que consume CPU."""
     global desired_running
     with lifecycle:
-        logger.info("Deteniendo empaquetadores DASH y MoQ (fuente maestra sigue en directo)...")
+        logger.info("Deteniendo la emisión: empaquetadores DASH y MoQ y fuente maestra...")
         desired_running = False
-        kill_proc(processes.get("dash_pipeline"))
-        kill_proc(processes.get("moq_pipeline"))
-        processes["dash_pipeline"] = None
-        processes["moq_pipeline"] = None
+        for name in ("dash_pipeline", "moq_pipeline", "master_source"):
+            kill_proc(processes.get(name))
+            processes[name] = None
         origin.reset(current_config.seg_duration, 0)
-    return {"message": "DASH y MoQ detenidos. Fuente maestra sigue en directo."}
+        # La parada se recuerda: si el contenedor o el servidor se reinician, no vuelve a emitir solo
+        open(STOPPED_MARKER, "w").close()
+    return {"message": "Emisión detenida: empaquetadores y fuente maestra parados."}
 
 @app.post("/api/config")
 def update_config(config: StreamConfig):
@@ -478,6 +484,9 @@ def boot():
             logger.error(f"No se pudo obtener el vídeo fuente: {e}; se reintenta en 30 s")
             source.state.update(state="error", error=str(e))
             time.sleep(30)
+    if os.path.exists(STOPPED_MARKER):
+        logger.info("La emisión se detuvo a mano antes del reinicio: no se arranca hasta que se pida")
+        return
     logger.info("Iniciando fuente continua maestra y pipelines al arrancar...")
     start_pipeline()
 
