@@ -43,7 +43,8 @@ DASH_PUBLISH_URL = "http://127.0.0.1:8000/media/dash/manifest.mpd"
 ROUTER_URL = os.getenv("ROUTER_URL", "http://172.30.50.2:9000")
 TSGATE = os.path.join(os.path.dirname(__file__), "tsgate.py")
 # Reloj que usará dash.js; debe ser el mismo con el que se calcula el availabilityStartTime
-UTC_TIMING_URL = os.getenv("UTC_TIMING_URL", "http://localhost:8000/api/utc")
+# Relativa al manifiesto: vale para cualquier nombre de host y para HTTP o HTTPS
+UTC_TIMING_URL = os.getenv("UTC_TIMING_URL", "/api/utc")
 CERTS_DIR = "/certs"
 
 # MoQ relay URL dentro de la red docker
@@ -316,8 +317,9 @@ def get_status():
         "stream_ids": stream_ids,
         "source": source.state,
         "restarts": restarts,
-        "dash_url": "http://localhost:8080/media/dash/manifest.mpd",
-        "moq_url": "https://localhost:4433/anon",
+        # Rutas relativas al punto de entrada; MoQ va directo por UDP al puerto indicado
+        "dash_url": "/media/dash/manifest.mpd",
+        "moq_port": int(os.getenv("MOQ_PORT", "4433")),
         "spki_fingerprint": get_spki_fingerprint(),
         "timecodes": [timecode_layout(r.width, r.height) for r in current_config.renditions],
         "ingest_anomalies": {name: count_anomalies(name) for name in log_state},

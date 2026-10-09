@@ -41,6 +41,7 @@ type Counter = { packets: number; bytes: number; dropped: number; queued: number
 
 export interface NetworkState {
   profile: NetworkProfile;
+  emulation_error?: string | null; // motivo por el que el servidor no puede emular la red, si es el caso
   stats: {
     dash_down: Counter;
     dash_up: Counter;
@@ -56,7 +57,7 @@ export interface ServerStatus {
     pipeline: boolean;
   };
   dash_url: string;
-  moq_url: string;
+  moq_port?: number;
   spki_fingerprint: string;
   master_start_time_ms?: number;
   timecodes?: TimecodeLayout[]; // uno por calidad de la escalera

@@ -35,6 +35,8 @@ MTU_BITS = 1500 * 8
 
 profile = {name: dict(EMPTY) for name in DIRECTIONS}
 shaped = {name: False for name in QUEUES}
+# None si la emulación funciona; si no, el motivo (p. ej. faltan módulos sch_* en el kernel del anfitrión)
+emulation_error = None
 
 
 def run(cmd: str, check: bool = True) -> str:
@@ -65,15 +67,24 @@ def setup():
     ):
         run(f"iptables -A FORWARD {rule} -m comment --comment {name}")
 
-    # Clasificación en todas las interfaces, sin depender de por cuál publique Docker los puertos.
-    # Bajada = servidor -> cliente, subida = cliente -> servidor; 1:5 es el resto del tráfico, sin tocar.
-    for dev in interfaces():
-        run(f"tc qdisc replace dev {dev} root handle 1: prio bands 5 priomap 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4")
-        u32 = f"tc filter add dev {dev} parent 1: protocol ip u32"
-        run(f"{u32} match ip protocol 6 0xff match ip sport {DASH_PORT} 0xffff flowid {QUEUES['dash_down'][0]}")
-        run(f"{u32} match ip protocol 17 0xff match ip sport {MOQ_PORT} 0xffff flowid {QUEUES['moq_down'][0]}")
-        run(f"{u32} match ip protocol 6 0xff match ip dst {NGINX_IP}/32 match ip dport 80 0xffff flowid {QUEUES['dash_up'][0]}")
-        run(f"{u32} match ip protocol 17 0xff match ip dst {RELAY_IP}/32 match ip dport {MOQ_PORT} 0xffff flowid {QUEUES['moq_up'][0]}")
+    # La emulación necesita en el kernel sch_prio, sch_tbf, sch_netem y cls_u32. Si faltan (p. ej. en un
+    # contenedor LXC cuyo anfitrión no los tiene cargados) el reenvío sigue funcionando, sin emulación.
+    global emulation_error
+    try:
+        # Clasificación en todas las interfaces, sin depender de por cuál publique Docker los puertos.
+        # Bajada = servidor -> cliente, subida = cliente -> servidor; 1:5 es el resto del tráfico, sin tocar.
+        for dev in interfaces():
+            run(f"tc qdisc replace dev {dev} root handle 1: prio bands 5 priomap 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4")
+            u32 = f"tc filter add dev {dev} parent 1: protocol ip u32"
+            run(f"{u32} match ip protocol 6 0xff match ip sport {DASH_PORT} 0xffff flowid {QUEUES['dash_down'][0]}")
+            run(f"{u32} match ip protocol 17 0xff match ip sport {MOQ_PORT} 0xffff flowid {QUEUES['moq_down'][0]}")
+            run(f"{u32} match ip protocol 6 0xff match ip dst {NGINX_IP}/32 match ip dport 80 0xffff flowid {QUEUES['dash_up'][0]}")
+            run(f"{u32} match ip protocol 17 0xff match ip dst {RELAY_IP}/32 match ip dport {MOQ_PORT} 0xffff flowid {QUEUES['moq_up'][0]}")
+    except RuntimeError as e:
+        emulation_error = str(e)
+        for dev in interfaces():
+            run(f"tc qdisc del dev {dev} root", check=False)
+        print(f"Emulación de red no disponible: {e}", flush=True)
 
 
 def apply_queue(queue: str, link: dict):
@@ -136,10 +147,12 @@ class Agent(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        self.reply(200, {"profile": profile, "stats": stats()})
+        self.reply(200, {"profile": profile, "stats": stats(), "emulation_error": emulation_error})
 
     def do_POST(self):
         try:
+            if emulation_error:
+                raise RuntimeError(f"Emulación de red no disponible en este servidor: {emulation_error}")
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             for direction in DIRECTIONS:
                 link = {**EMPTY, **(body.get(direction) or {})}
@@ -147,7 +160,7 @@ class Agent(BaseHTTPRequestHandler):
                     if queue.endswith(direction):
                         apply_queue(queue, link)
                 profile[direction] = link
-            self.reply(200, {"profile": profile, "stats": stats()})
+            self.reply(200, {"profile": profile, "stats": stats(), "emulation_error": None})
         except Exception as e:
             self.reply(400, {"error": str(e)})
 

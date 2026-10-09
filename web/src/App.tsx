@@ -9,7 +9,8 @@ import { syncClock, getClockSync } from './lib/clock';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile } from './types';
 import { Activity, Radio, Cpu, Network } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+// Mismo origen que el dashboard: el punto de entrada (edge) reparte /api, /media/dash y el resto
+const API_BASE = '';
 
 export function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
@@ -408,7 +409,7 @@ export function App() {
         <div className="grid grid-cols-2 gap-6">
           <DashPlayer
             key={`dash-${dashStreamId}`}
-            url={serverStatus?.dash_url || 'http://localhost:8080/media/dash/manifest.mpd'}
+            url={serverStatus?.dash_url || '/media/dash/manifest.mpd'}
             timecodes={serverStatus?.timecodes}
             renditions={serverStatus?.config.renditions}
             isStreaming={isStreaming}
@@ -417,7 +418,7 @@ export function App() {
 
           <MoqPlayer
             key={`moq-${moqStreamId}`}
-            url={serverStatus?.moq_url || 'https://localhost:4433/anon/live'}
+            url={`https://${window.location.hostname}:${serverStatus?.moq_port ?? 4433}/anon`}
             spkiFingerprint={serverStatus?.spki_fingerprint}
             timecodes={serverStatus?.timecodes}
             renditions={serverStatus?.config.renditions}

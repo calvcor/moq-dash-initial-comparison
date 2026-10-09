@@ -12,12 +12,14 @@ interface DashPlayerProps {
 }
 
 export const DashPlayer: React.FC<DashPlayerProps> = ({
-  url,
+  url: manifestPath,
   isStreaming,
   timecodes,
   renditions,
   onMetricsUpdate,
 }) => {
+  // El servidor da la ruta del manifiesto relativa al punto de entrada; dash.js la necesita absoluta
+  const url = new URL(manifestPath, window.location.href).href;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [playerStatus, setPlayerStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');

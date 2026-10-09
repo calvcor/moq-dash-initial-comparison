@@ -28,7 +28,7 @@ docker compose up -d --build
 
 El vídeo fuente (Big Buck Bunny 1080p60, 355 MB) no va en el repositorio. La primera vez el orquestador lo descarga de [download.blender.org](https://download.blender.org/demo/movies/BBB/) y lo descomprime en `media/`; el panel muestra el progreso y la emisión arranca sola al terminar. En arranques posteriores se reutiliza. Para usar una copia que ya tengas, déjala en `media/bbb_sunflower_1080p_60fps_normal.mp4` antes de arrancar.
 
-Abrir <http://localhost:5173> en Chrome o Edge (hace falta WebTransport y WebCodecs). La emisión arranca sola.
+Abrir <http://localhost> en Chrome o Edge (hace falta WebTransport y WebCodecs). La emisión arranca sola.
 
 ```bash
 docker compose logs -f orchestrator
@@ -45,6 +45,21 @@ Tras editar código:
 | `server/app/*.py` | `docker compose restart orchestrator` (el directorio está montado, pero uvicorn no recarga solo) |
 | `server/nginx.conf` | `docker compose restart nginx-dash` |
 | `web/` | `docker compose up -d --build web` |
+
+---
+
+### Despliegue en un servidor, detrás de un proxy con HTTPS
+
+Fuera de `localhost` el navegador solo permite WebTransport y WebCodecs en páginas HTTPS, así que hace falta un proxy inverso con certificado (por ejemplo Nginx Proxy Manager) delante del puerto 80.
+
+1. En el servidor, crear un `.env` con el nombre por el que se accederá: `PUBLIC_HOST=testbed.ejemplo.org`. Se usa para el certificado autofirmado del relay.
+2. `docker compose up -d --build`.
+3. En el proxy, un único host que reenvíe `https://testbed.ejemplo.org` a `http://<servidor>:80`. No hace falta definir rutas.
+4. El puerto **4433/udp** del servidor debe ser alcanzable directamente desde los navegadores: MoQ no pasa por el proxy.
+
+A tener en cuenta en las medidas: detrás del proxy, DASH llega al navegador por la conexión del proxy (normalmente HTTP/2) y la emulación de red actúa sobre el tramo interno, no sobre la conexión TCP del navegador. MoQ sí va extremo a extremo.
+
+La emulación de red necesita en el kernel los módulos `sch_prio`, `sch_tbf`, `sch_netem` y `cls_u32`. En un contenedor LXC deben estar cargados en el anfitrión; si faltan, todo lo demás funciona y el panel lo indica.
 
 ---
 
@@ -93,7 +108,7 @@ Tras editar código:
                                └───────────┬───────────┘
                                            ▼
                     ┌──────────────────────────────────────────────┐
-                    │ Dashboard React (:5173)                      │
+                    │ Dashboard React (entrada única, puerto 80)   │
                     │ lectura del timecode en píxeles de ambos     │
                     │ reproductores · estadísticos · export CSV    │
                     └──────────────────────────────────────────────┘
@@ -103,13 +118,16 @@ Las dos ramas reciben **el mismo bitstream H.264**: la fuente codifica una sola 
 
 ### Contenedores
 
-| Contenedor | Imagen | Puertos | Función |
+| Contenedor | Imagen | Puertos publicados | Función |
 | :--- | :--- | :--- | :--- |
-| `testbed-orchestrator` | Python 3.12 + FastAPI + FFmpeg 7.1 + `moq` CLI 0.14.2 | 8000/tcp | Fuente maestra, empaquetadores, origen LL-DASH en memoria y API de control |
-| `testbed-router` | Alpine + `tc` + `iptables` + agente Python | 8080/tcp, 4433/udp, 8081/tcp | Único punto de entrada del navegador a DASH y MoQ; reenvía a nivel IP y emula la red |
-| `testbed-nginx-dash` | `nginx:alpine` | solo red interna | Reenvía `/media/dash/` al origen con `proxy_buffering off` |
-| `testbed-moq-relay` | `moqdev/moq-relay:latest` | solo red interna | Relay MoQ; expone `/certificate.sha256` del certificado autogenerado |
-| `testbed-web` | React 19 + Vite + Tailwind, servido por Nginx | 5173/tcp | Dashboard, con cabeceras COOP/COEP para `SharedArrayBuffer` |
+| `testbed-edge` | `nginx:alpine` | 80/tcp | Entrada HTTP única: reparte entre dashboard (`/`), API (`/api`), LL-DASH (`/media/dash`) y huella del certificado del relay |
+| `testbed-router` | Alpine + `tc` + `iptables` + agente Python | 4433/udp | Paso obligado hacia DASH y MoQ; reenvía a nivel IP y emula la red |
+| `testbed-orchestrator` | Python 3.12 + FastAPI + FFmpeg 7.1 + `moq` CLI 0.14.2 | ninguno | Fuente maestra, empaquetadores, origen LL-DASH en memoria y API de control |
+| `testbed-nginx-dash` | `nginx:alpine` | ninguno | Reenvía `/media/dash/` al origen con `proxy_buffering off` |
+| `testbed-moq-relay` | `moqdev/moq-relay:latest` | ninguno | Relay MoQ con certificado autofirmado |
+| `testbed-web` | React 19 + Vite + Tailwind, servido por Nginx | ninguno | Dashboard, con cabeceras COOP/COEP para `SharedArrayBuffer` |
+
+Solo se publican dos puertos: **80/tcp** para todo el HTTP y **4433/udp** para MoQ, al que el navegador va directo porque es QUIC. Se pueden cambiar con `HTTP_PORT` y `MOQ_PORT` en un fichero `.env`.
 
 Los puertos UDP 5001 y 5002 son internos al contenedor del orquestador.
 
@@ -161,7 +179,7 @@ python3 tsgate.py 5001 | ffmpeg -analyzeduration 1000000 -i pipe:0 \
   -map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 -tag:a mp4a -b:v:0 <kbps>k ... \
   -f dash -adaptation_sets "id=0,streams=v id=1,streams=a" -seg_duration <seg> -frag_type duration -frag_duration <frag> \
   -streaming 1 -ldash 1 -use_template 1 -use_timeline 0 \
-  -utc_timing_url http://localhost:8000/api/utc \
+  -utc_timing_url /api/utc \
   -window_size <30 s en segmentos> -extra_window_size <ídem> \
   -method PUT -http_persistent 1 http://127.0.0.1:8000/media/dash/manifest.mpd
 ```
@@ -365,7 +383,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 
 ---
 
-## 9. API del orquestador (`:8000`)
+## 9. API del orquestador (bajo `/api`)
 
 | Método y ruta | Descripción |
 | :--- | :--- |
@@ -376,9 +394,9 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |
 | `GET /api/utc` | Reloj del servidor en ISO 8601, para el `UTCTiming` del manifiesto |
-| `PUT` / `GET` / `DELETE /media/dash/{nombre}` | Origen LL-DASH; el navegador accede a través de Nginx en `:8080` |
+| `PUT` / `GET` / `DELETE /media/dash/{nombre}` | Origen LL-DASH; el navegador accede por el punto de entrada, a través del router y de Nginx |
 
-Documentación interactiva en <http://localhost:8000/docs>.
+Documentación interactiva en <http://localhost/docs>.
 
 ---
 
@@ -390,6 +408,8 @@ moq-dash-initial-comparison/
 ├── CONTEXT_SUMMARY.md            # Decisiones y problemas resueltos
 ├── docker-compose.yml
 ├── media/                        # Vídeo fuente; se descarga solo y no se versiona
+├── edge/
+│   └── nginx.conf                # Entrada HTTP única (puerto 80)
 ├── router/
 │   ├── Dockerfile
 │   └── agent.py                  # Reenvío IP, emulación con tc y agente de control

@@ -118,7 +118,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
         // 1. Obtener certificado SHA-256 generado dinámicamente por moq-relay
         let hexFingerprint = '';
         try {
-          const res = await fetch('http://localhost:8081/certificate.sha256');
+          const res = await fetch('/certificate.sha256', { cache: 'no-store' });
           if (res.ok) {
             hexFingerprint = (await res.text()).trim();
             console.log('[MoQ] Fingerprint de moq-relay obtenido:', hexFingerprint);
@@ -130,7 +130,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
         if (isAborted) return;
 
         // 2. Conexión segura QUIC con pinning SHA-256
-        const targetUrl = new URL(url || 'https://localhost:4433/anon');
+        const targetUrl = new URL(url);
         const connection = new Net.Connection({
           url: targetUrl,
           enabled: true,
@@ -329,7 +329,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
       </div>
 
       <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
-        <span>Relay: https://localhost:4433/anon/live.hang</span>
+        <span>Relay: {url}/live.hang</span>
         <label className="flex items-center space-x-1.5" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
           <span>Calidad:</span>
           <select

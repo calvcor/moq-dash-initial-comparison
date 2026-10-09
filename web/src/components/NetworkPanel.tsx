@@ -69,6 +69,14 @@ export const NetworkPanel: React.FC<NetworkPanelProps> = ({ network, ipRates, is
           {!network && (
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">Router no disponible</span>
           )}
+          {network?.emulation_error && (
+            <span
+              className="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30"
+              title={`El servidor no puede emular la red; suele faltar cargar en su kernel los módulos sch_prio, sch_tbf, sch_netem y cls_u32. ${network.emulation_error}`}
+            >
+              Emulación no disponible en este servidor
+            </span>
+          )}
           {pending && (
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">Cambios pendientes</span>
           )}
@@ -87,7 +95,7 @@ export const NetworkPanel: React.FC<NetworkPanelProps> = ({ network, ipRates, is
           ))}
           <button
             onClick={() => onApply(draft)}
-            disabled={isLoading || !network || !pending}
+            disabled={isLoading || !network || !pending || Boolean(network.emulation_error)}
             className="flex items-center space-x-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-default"
           >
             <Check className="w-4 h-4" />

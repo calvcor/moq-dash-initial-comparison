@@ -1,6 +1,28 @@
-# Red de dos tramos: el navegador solo llega a DASH y a MoQ a través del router, que emula el enlace.
+# Un único punto de entrada HTTP (edge, puerto 80) más el puerto UDP de MoQ. Un proxy inverso externo
+# con HTTPS (p. ej. Nginx Proxy Manager) solo tiene que reenviar al puerto 80.
+# Red de dos tramos: DASH y MoQ solo se alcanzan a través del router, que emula el enlace.
 # La ingesta (orquestador -> nginx / relay) va por la red interna "core" y no se degrada.
+#
+# Variables opcionales (fichero .env): HTTP_PORT (80), MOQ_PORT (4433) y PUBLIC_HOST (localhost),
+# el nombre con el que el navegador accede, para el certificado autofirmado del relay.
 services:
+  # Entrada HTTP única: reparte entre dashboard, API, LL-DASH y huella del certificado
+  edge:
+    image: nginx:alpine
+    container_name: testbed-edge
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./edge/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - default
+      - core
+    depends_on:
+      - router
+      - web
+      - orchestrator
+    restart: unless-stopped
+
   # 0. Router de emulación de red (tc + netem) entre el navegador y los servidores finales
   router:
     build: ./router
@@ -13,9 +35,7 @@ services:
       - NGINX_IP=172.30.50.10
       - RELAY_IP=172.30.50.11
     ports:
-      - "8080:8080"       # LL-DASH -> nginx-dash:80
-      - "4433:4433/udp"   # MoQ / QUIC -> moq-relay:4433
-      - "8081:8081"       # huella del certificado del relay
+      - "${MOQ_PORT:-4433}:4433/udp"   # MoQ / QUIC -> moq-relay:4433 (el navegador va directo)
     networks:
       default:
       core:
@@ -28,7 +48,7 @@ services:
     container_name: testbed-moq-relay
     command: >
       --listen 0.0.0.0:4433
-      --listen-tls-generate localhost
+      --listen-tls-generate ${PUBLIC_HOST:-localhost}
       --web-http-listen 0.0.0.0:8081
       --auth-public anon/**
     networks:
@@ -57,11 +77,10 @@ services:
     environment:
       - MOQ_RELAY_URL=https://moq-relay:4433/anon
       - ROUTER_URL=http://172.30.50.2:9000
+      - MOQ_PORT=${MOQ_PORT:-4433}
     networks:
       - default
       - core
-    ports:
-      - "8000:8000"
     volumes:
       - ./media:/data  # vídeo fuente; si falta, el orquestador lo descarga aquí al arrancar
       - ./server/app:/app/app
@@ -77,8 +96,6 @@ services:
       context: ./web
       dockerfile: Dockerfile
     container_name: testbed-web
-    ports:
-      - "5173:80"
     depends_on:
       - orchestrator
     restart: unless-stopped
