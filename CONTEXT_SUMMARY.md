@@ -147,6 +147,13 @@ Los siguientes parámetros son modificables desde el Panel de Control Web:
 - **Causa:** una conexión TCP fría tarda ~2,5 s en coger ritmo con RTT de 500 ms (arranque lento). Mientras tanto la latencia supera `liveCatchup.maxDrift` (1,5 s) y dash.js salta al directo, lo que aborta las descargas, cierra la conexión y obliga a abrir otra fría. Es metaestable: se sale cuando un salto pilla una conexión caliente.
 - **Solución:** `maxDrift` es ahora un slider del reproductor DASH (0 = no saltar nunca) y se registra en el CSV. Con 0, la misma red da ~0,3 s de congelados al arrancar y luego estabilidad.
 
+### 4.12. Desglose de latencia por etapas (panel "Recorrido de un frame")
+- **Identidad del frame:** por su timecode quemado. FFmpeg escribe en su log, con `print()` dentro de la expresión `enable` del bit más alto, la marca exacta y `n*10+stream`; `pump_master_log` lo aparta del log y `trace.py` guarda marca → número de frame por calidad.
+- **De número de frame a PTS:** `PTS = PTS del frame 0 + n × 90000/fps`. El PTS del frame 0 lo ven las compuertas porque `start_all` las arranca antes que la fuente. Se probó identificar los frames por las marcas de tiempo de cada reproductor y no sirve en MoQ: `moq import` las reescribe con un desfase no documentado.
+- **Puntos de medida:** llegada al kernel y reenvío en `tsgate.py` (envía lotes por UDP a `trace.listen`, puerto 5010), fragmento completo en `origin.py` (`FragmentParser`), llegada al navegador y pintado en `web/src/lib/trace.ts` (`DashTracer` con `requestVideoFrameCallback` y sondeo de `buffered`; `MoqTracer` suscrito a `sync.out.timestamp`).
+- **API:** `POST /api/trace` con las marcas de frames pintados. El navegador calcula las etapas y elige como representante el frame de latencia total mediana.
+- **Hallazgos:** el grueso de la latencia de MoQ (~400 de ~470 ms) está en el búfer del reproductor, no en publicador, relay ni red; y con un navegador suscrito el publicador a veces deja de vaciar su entrada y los frames esperan en la compuerta (etapa "Entrada al publicador").
+
 ### 4.8. Emulación de red
 - **Router (`router/agent.py`):** contenedor con `NET_ADMIN` entre el navegador y Nginx/relay. Publica 8080, 4433/udp y 8081, reenvía con DNAT (sin terminar conexiones) y aplica `tc` en los dos sentidos. Nginx y el relay ya no publican puertos y tienen IP fija en la red interna `core`.
 - **Una cola por protocolo y sentido** con el mismo perfil: `tbf` (ancho de banda, y trocea los superpaquetes GSO que netem descartaría enteros) con `netem` hijo (retardo, jitter, pérdida y cola). DASH y MoQ no compiten entre sí.

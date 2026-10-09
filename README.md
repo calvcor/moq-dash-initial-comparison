@@ -248,7 +248,36 @@ Cada tarjeta muestra n, media, σ, p50, p95, mínimo y máximo de la latencia gl
 > [!NOTE]
 > Con la pestaña en segundo plano el navegador pausa el vídeo y el muestreo. Esas filas quedan marcadas con `tab_hidden`.
 
-### 4.5. Valores de referencia
+### 4.5. Desglose de la latencia por etapas
+
+El panel **Recorrido de un frame** reparte la latencia glass-to-glass entre las etapas del camino, con medidas y sin estimaciones. Sigue frames concretos (unos cinco por segundo y rama) y anota la hora en cada punto donde se les puede observar:
+
+| Punto de medida | Dónde y cómo |
+| :--- | :--- |
+| Marca de origen | FFmpeg, al quemar el timecode, escribe en su log la marca exacta, el número de frame y la calidad (`print()` en la expresión del filtro). El orquestador lo lee y puede identificar después cualquier frame por su timecode |
+| Salida del codificador | `tsgate.py`: hora a la que el kernel recibe el último paquete del frame (`SO_TIMESTAMPNS`) |
+| Entrega al empaquetador | `tsgate.py`: hora a la que lee ese paquete y lo escribe hacia FFmpeg o `moq import`. Se retrasa si el empaquetador no vacía la tubería |
+| Fragmento completo (DASH) | `origin.py` sigue las cajas `moof`/`mdat` según llegan y anota cuándo se completa cada fragmento |
+| Llegada al reproductor | DASH: primer instante en que `video.buffered` contiene el frame (cada 20 ms). MoQ: cuando `@moq/watch` lo lee de la conexión, antes de decodificar |
+| Pintado | El mismo lector de timecode del medidor glass-to-glass |
+
+Cada etapa es la diferencia entre dos puntos consecutivos:
+
+- **LL-DASH:** codificación → empaquetado CMAF → entrega → búfer y pintado.
+- **MoQ:** codificación → entrada al publicador → publicación y transporte → búfer de jitter y pintado.
+
+Lo que hay que saber para interpretarlo:
+
+- **Las cifras son las de un frame real**, el de latencia total mediana entre los seguidos en el último segundo, así que las etapas suman exactamente su latencia.
+- **La resolución es la de los puntos de medida, no la de cada caja del esquema.** Dentro de una etapa no se sabe cómo se reparte el tiempo; en MoQ, publicador, relay y red van juntos porque el relay es un binario de terceros.
+- **Incertidumbre:** las etapas con las dos horas en el servidor son exactas al milisegundo; las que cruzan al navegador añaden el error de sincronización de relojes (se muestra) y, en DASH, los 20 ms del sondeo del búfer.
+- **El PTS del frame 0** se obtiene arrancando las compuertas antes que la fuente. Si una medida no cuadra (codificación fuera de 0-1 s) se descarta en vez de mostrarse.
+
+Los puntos animados recorren cada carril a velocidad real: tardan en cada etapa lo medido. Las etapas van también al CSV (`dash_stage_*_ms`, `moq_stage_*_ms`).
+
+Primera observación con este panel (Chrome headless, red sin restricción): en MoQ, de ~470 ms, unos 400 ms se pasan en el búfer del reproductor y solo 15-40 ms en publicador, relay y red; en DASH, de ~3,06 s, unos 2,8 s son búfer.
+
+### 4.6. Valores de referencia
 
 Medidos en Chrome headless en la misma máquina, con latencia objetivo de 3,0 s en DASH y 200 ms en MoQ:
 
@@ -393,6 +422,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `POST /api/stop` | Detiene todo, incluida la codificación de la fuente. La parada se recuerda entre reinicios: no vuelve a emitir hasta `POST /api/start` |
 | `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
+| `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |
 | `GET /api/utc` | Reloj del servidor en ISO 8601, para el `UTCTiming` del manifiesto |
 | `PUT` / `GET` / `DELETE /media/dash/{nombre}` | Origen LL-DASH; el navegador accede por el punto de entrada, a través del router y de Nginx |
@@ -421,6 +451,7 @@ moq-dash-initial-comparison/
 │   └── app/
 │       ├── main.py               # API de control y ciclo de vida de los procesos
 │       ├── source.py             # Descarga del vídeo fuente si falta
+│       ├── trace.py              # Registro de por dónde pasa cada frame, para el desglose por etapas
 │       ├── origin.py             # Origen LL-DASH en memoria y calibración del AST
 │       └── tsgate.py             # Compuerta MPEG-TS: arranque en IDR y continuidad
 └── web/
@@ -430,10 +461,12 @@ moq-dash-initial-comparison/
         ├── types.ts
         ├── lib/
         │   ├── clock.ts          # Sincronización con el reloj del servidor
-        │   └── glass.ts          # Lectura del timecode y medidor glass-to-glass
+        │   ├── glass.ts          # Lectura del timecode y medidor glass-to-glass
+        │   └── trace.ts          # Seguimiento de frames por etapas en el navegador
         └── components/
             ├── ControlPanel.tsx
             ├── NetworkPanel.tsx
+            ├── PipelineDiagram.tsx
             ├── DashPlayer.tsx
             ├── MoqPlayer.tsx
             └── MetricsDashboard.tsx
