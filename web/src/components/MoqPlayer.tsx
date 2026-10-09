@@ -173,8 +173,9 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           visible: 'always',
           canvas: canvasRef.current || undefined,
           muted: new Signal(true),
+          // `buffer` se deja en su valor por defecto (0): tolera media adelantada sin recolocarse hacia el
+          // directo, y con un valor mayor la latencia real queda por encima de la que marca el slider.
           delay: delaySignal,
-          buffer: new Signal(Net.Time.Milli(150)),
           target: targetSignal,
         });
         playerRef.current = player;
