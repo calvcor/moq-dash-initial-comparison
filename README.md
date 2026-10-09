@@ -224,7 +224,10 @@ Las métricas principales se obtienen igual en las dos ramas, **leyendo píxeles
 
 1. La fuente quema en cada frame un **timecode binario**: el reloj de pared del servidor en milisegundos (módulo 2²⁰), en código Gray, como una fila de celdas blancas y negras abajo a la izquierda. Las celdas de los extremos son referencias fijas blanco/negro. Cada calidad lleva el suyo, con celdas de 32 px (16 px en las calidades pequeñas); `/api/status` publica la disposición de cada una y el lector usa la de la altura que está viendo.
 2. El navegador sincroniza su reloj con el del servidor contra `GET /api/time` (estilo NTP, se queda con el sondeo de menor RTT, cada 10 s).
-3. En cada frame de pantalla, `GlassMeter` (`web/src/lib/glass.ts`) lee esas celdas del `<video>` de DASH y del `<canvas>` de MoQ y calcula `latencia = hora del servidor − timecode`.
+3. En cada frame de pantalla, `GlassMeter` (`web/src/lib/glass.ts`) toma el frame que muestra cada reproductor, copia solo dos filas de la franja del timecode (`VideoFrame.copyTo`, asíncrono) y calcula `latencia = hora del servidor − timecode`.
+
+> [!WARNING]
+> **El medidor no debe alterar lo que mide.** Hasta el 9 de octubre de 2026 el timecode se leía dibujando el vídeo en un canvas y leyéndolo con `getImageData` en cada frame. Con tres reproductores eso saturaba el hilo principal de la página (en Brave bajaba a 35 vueltas por segundo, y a menos en una ventana real). El reproductor MoQ pinta en ese hilo: se quedaba atrás, dejaba de leer de la red y la presión llegaba hasta el publicador, con latencias de varios segundos. **Las observaciones sobre MoQ anteriores a ese cambio (congelados, oscilación de calidad, esperas en el publicador, pruebas con ancho de banda limitado) están contaminadas por ese efecto y hay que repetirlas.**
 
 Incluye codificación, empaquetado, red, búfer del reproductor, decodificación y pintado. No incluye el retardo de composición y pantalla (1-2 refrescos), que es idéntico en ambas ramas.
 

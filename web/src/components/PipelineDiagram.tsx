@@ -164,18 +164,20 @@ const Particles: React.FC<{ stages: Stage[]; breakdown?: StageBreakdown | null; 
       const host = track.current;
       if (!current || !host || document.hidden || current.totalMs <= 0) return;
       const nodes = stages.reduce((sum, s) => sum + s.nodes.length, 0);
-      // Fotogramas clave en las fronteras entre etapas: posición según el esquema, tiempo según lo medido
+      // Fotogramas clave en las fronteras entre etapas: posición según el esquema, tiempo según lo medido.
+      // Se anima transform y no left, para que lo mueva el compositor sin recalcular el layout.
+      const width = host.clientWidth;
       let position = 0;
       let elapsed = 0;
-      const frames: Keyframe[] = [{ left: '0%', offset: 0 }];
+      const frames: Keyframe[] = [{ transform: 'translateX(0px)', offset: 0 }];
       for (const s of stages) {
         position += s.nodes.length / nodes;
         elapsed += Math.max(0, stageMs(current, s.key) ?? 0);
-        frames.push({ left: `${position * 100}%`, offset: Math.min(1, elapsed / current.totalMs) });
+        frames.push({ transform: `translateX(${Math.round(position * width)}px)`, offset: Math.min(1, elapsed / current.totalMs) });
       }
       frames[frames.length - 1].offset = 1;
       const dot = document.createElement('span');
-      dot.style.cssText = `position:absolute;top:-3px;width:8px;height:8px;margin-left:-4px;border-radius:9999px;background:${color};box-shadow:0 0 8px ${color}`;
+      dot.style.cssText = `position:absolute;top:-3px;left:-4px;width:8px;height:8px;border-radius:9999px;background:${color};box-shadow:0 0 8px ${color};will-change:transform`;
       host.appendChild(dot);
       dot.animate(frames, { duration: Math.max(200, current.totalMs), easing: 'linear' }).onfinish = () => dot.remove();
     }, 400);

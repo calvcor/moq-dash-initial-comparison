@@ -6,7 +6,7 @@
 // diferencia entre dos de esas horas, así que la suma de etapas es la latencia total de ese frame.
 
 import { serverNowMs } from './clock';
-import { DEFAULT_TIMECODE, type GlassMeter } from './glass';
+import { DEFAULT_TIMECODE, grabFromVideo, type GlassMeter } from './glass';
 import type { StageBreakdown } from '../types';
 
 const SAMPLE_EVERY_MS = 200; // un frame de cada ~12
@@ -37,6 +37,15 @@ function summarize(rows: Record<string, number>[]): StageBreakdown | null {
   return { stages, totalMs: stages.reduce((sum, stage) => sum + stage.ms, 0), samples: valid.length };
 }
 
+/** Lee el timecode de un frame y lo libera. */
+async function readAndClose(meter: GlassMeter, frame: VideoFrame): Promise<number | null> {
+  try {
+    return await meter.decode(frame);
+  } finally {
+    frame.close();
+  }
+}
+
 async function askServer(body: object): Promise<{ dash: any[]; moq: any[]; rtc: any[] } | null> {
   try {
     const res = await fetch('/api/trace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -58,12 +67,12 @@ export class DashTracer {
     const onFrame = (now: number, metadata: VideoFrameCallbackMetadata) => {
       if (this.#closed) return;
       const seenMs = serverNowMs(now);
-      if (now - lastSample >= SAMPLE_EVERY_MS && seenMs !== null) {
-        const code = meter.readCode();
-        if (code !== null) {
-          lastSample = now;
-          this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id: metadata.mediaTime });
-        }
+      const frame = now - lastSample >= SAMPLE_EVERY_MS && seenMs !== null ? grabFromVideo(video) : null;
+      if (frame && seenMs !== null) {
+        lastSample = now;
+        readAndClose(meter, frame).then((code) => {
+          if (code !== null) this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id: metadata.mediaTime });
+        });
       }
       video.requestVideoFrameCallback(onFrame);
     };
@@ -126,12 +135,12 @@ export class RtcTracer {
       if (this.#closed) return;
       const seenMs = serverNowMs(now);
       const receivedMs = metadata.receiveTime === undefined ? null : serverNowMs(metadata.receiveTime);
-      if (now - lastSample >= SAMPLE_EVERY_MS && seenMs !== null && receivedMs !== null) {
-        const code = meter.readCode();
-        if (code !== null) {
-          lastSample = now;
-          this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id: 0, receivedMs });
-        }
+      const frame = now - lastSample >= SAMPLE_EVERY_MS && seenMs !== null && receivedMs !== null ? grabFromVideo(video) : null;
+      if (frame && seenMs !== null && receivedMs !== null) {
+        lastSample = now;
+        readAndClose(meter, frame).then((code) => {
+          if (code !== null) this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id: 0, receivedMs });
+        });
       }
       video.requestVideoFrameCallback(onFrame);
     };
@@ -193,12 +202,20 @@ export class MoqTracer {
     let lastSample = 0;
     this.#channel.port1.onmessage = () => {
       const seenMs = serverNowMs(frameTime);
-      const frame = player.renderer.out.frame.peek();
-      if (frameTime - lastSample < SAMPLE_EVERY_MS || seenMs === null || !frame) return;
-      const code = meter.readCode();
-      if (code === null) return;
+      if (frameTime - lastSample < SAMPLE_EVERY_MS || seenMs === null) return;
+      // El frame que el reproductor acaba de dibujar: de él salen a la vez su timecode y su marca de tiempo
+      let frame: VideoFrame | undefined;
+      try {
+        frame = player.renderer.out.frame.peek()?.clone();
+      } catch (_) {
+        return;
+      }
+      if (!frame) return;
       lastSample = frameTime;
-      this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id: frame.timestamp });
+      const id = frame.timestamp;
+      readAndClose(meter, frame).then((code) => {
+        if (code !== null) this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id });
+      });
     };
     const tick = (t: number) => {
       frameTime = t;

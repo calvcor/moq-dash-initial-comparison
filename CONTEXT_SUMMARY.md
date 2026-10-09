@@ -161,6 +161,12 @@ Los siguientes parámetros son modificables desde el Panel de Control Web:
 - **Sin adaptación ni audio**, por decisión del usuario (una calidad basta) y porque WebRTC no admite AAC.
 - **Observado en local con los tres reproductores a la vez (Chrome headless, Mac saturado):** WebRTC 100-370 ms; y el publicador de MoQ deja de leer su entrada cuando el navegador no da abasto, con esperas de varios segundos en la etapa "Entrada al publicador" que no aparecen sin navegador conectado.
 
+### 4.14. Efecto del observador: el medidor degradaba a MoQ
+- **Síntoma (usuario, Brave):** MoQ lentísimo y "Frames presentados" de 13-14 fps en DASH y WebRTC aunque se veían fluidos.
+- **Causa:** `GlassMeter` dibujaba el vídeo en un canvas `willReadFrequently` y hacía `getImageData` en cada frame, por reproductor, más las lecturas de los trazadores: copias síncronas GPU→CPU que saturaban el hilo principal (35 rAF/s en Brave headless con GPU; 55 en Chrome). El muestreo solo veía 13-14 frames/s, y `@moq/watch`, que decodifica y pinta en el hilo principal, se quedaba atrás; al no leer de la conexión, la presión subía por el relay hasta `moq import`, que dejaba de leer su entrada (etapa "Entrada al publicador" de segundos, anomalías de ingesta).
+- **Solución:** lectura con `VideoFrame.copyTo` de dos filas de la franja, asíncrona y sin canvas (`GlassMeter.decode`); los trazadores usan el mismo método sobre el frame concreto. Las partículas del esquema animan `transform`. Tras el cambio, en Brave: 60 rAF/s, DASH 60 fps, WebRTC 58 fps, MoQ 462 ms con 0 ms de espera en el publicador.
+- **Consecuencia:** las observaciones de MoQ anteriores (secciones 4.11 y 4.13: oscilación de calidad, congelados a 4 Mbit, esperas en el publicador) están contaminadas y hay que repetirlas. Lo que sí sigue en pie como mecanismo: un suscriptor que no lee a tiempo acaba frenando al publicador.
+
 ### 4.8. Emulación de red
 - **Router (`router/agent.py`):** contenedor con `NET_ADMIN` entre el navegador y Nginx/relay. Publica 8080, 4433/udp y 8081, reenvía con DNAT (sin terminar conexiones) y aplica `tc` en los dos sentidos. Nginx y el relay ya no publican puertos y tienen IP fija en la red interna `core`.
 - **Una cola por protocolo y sentido** con el mismo perfil: `tbf` (ancho de banda, y trocea los superpaquetes GSO que netem descartaría enteros) con `netem` hijo (retardo, jitter, pérdida y cola). DASH y MoQ no compiten entre sí.

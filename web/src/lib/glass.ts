@@ -1,15 +1,31 @@
 // Medida glass-to-glass leyendo el timecode binario que el servidor quema en el vídeo.
-// El mismo medidor se aplica al <video> de dash.js y al <canvas> de MoQ, así que ambas ramas
-// se miden con idéntico método e incluyen codificación, empaquetado, red, búfer, decodificación y pintado.
+// El mismo medidor se aplica a los tres reproductores, así que todas las ramas se miden con idéntico
+// método e incluyen codificación, empaquetado, red, búfer, decodificación y pintado.
+//
+// El timecode se lee del propio frame de vídeo (VideoFrame.copyTo), copiando solo dos filas de la franja
+// y de forma asíncrona. La versión anterior dibujaba el vídeo en un canvas y lo leía con getImageData en
+// cada frame: una copia síncrona de GPU a CPU por reproductor que saturaba el hilo principal, sobre todo
+// en Brave, y con ello degradaba al reproductor MoQ, que pinta en ese mismo hilo. Un medidor que altera
+// lo que mide no sirve.
 
 import { serverNowMs } from './clock';
 import type { TimecodeLayout } from '../types';
 
 export const DEFAULT_TIMECODE: TimecodeLayout = { bits: 20, cell: 32, x: 64, y: 992, width: 1920, height: 1080 };
 
-type Source = HTMLVideoElement | HTMLCanvasElement;
+/** Devuelve un VideoFrame propio con lo que el reproductor muestra ahora, o null. Quien lo pide lo cierra. */
+export type FrameGrabber = () => VideoFrame | null;
 
-const PX = 4; // píxeles de sonda por celda
+/** El frame que está mostrando un <video>. */
+export function grabFromVideo(video: HTMLVideoElement | null): VideoFrame | null {
+  if (!video || video.readyState < 2 || !video.videoWidth) return null;
+  try {
+    return new VideoFrame(video);
+  } catch (_) {
+    return null;
+  }
+}
+
 const WINDOW_MS = 1000;
 const FPS_WINDOW_MS = 2000;
 const STALL_MS = 150; // ~9 frames a 60 fps sin imagen nueva
@@ -29,9 +45,9 @@ export interface GlassSnapshot {
 
 export class GlassMeter {
   #getLayouts: () => TimecodeLayout[];
-  #getSource: () => Source | null;
-  #ctx: CanvasRenderingContext2D;
-  #cells: number;
+  #grab: FrameGrabber;
+  #buffer = new Uint8Array(0);
+  #reading = false;
   #raf = 0;
   #channel = new MessageChannel();
   #frameTime = 0;
@@ -43,14 +59,9 @@ export class GlassMeter {
   #stallMs = 0;
   #samples: { t: number; latency: number }[] = [];
 
-  constructor(getSource: () => Source | null, getLayouts: () => TimecodeLayout[] = () => [DEFAULT_TIMECODE]) {
-    this.#getSource = getSource;
+  constructor(grab: FrameGrabber, getLayouts: () => TimecodeLayout[] = () => [DEFAULT_TIMECODE]) {
+    this.#grab = grab;
     this.#getLayouts = getLayouts;
-    this.#cells = DEFAULT_TIMECODE.bits + 4;
-    const canvas = document.createElement('canvas');
-    canvas.width = this.#cells * PX;
-    canvas.height = PX;
-    this.#ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     // Se lee en una tarea posterior a la fase de requestAnimationFrame para ver lo que este frame
     // acaba de entregar al compositor, sea cual sea el orden de los callbacks de cada reproductor.
@@ -95,7 +106,7 @@ export class GlassMeter {
     };
   }
 
-  #sample(t: number) {
+  async #sample(t: number) {
     // Si el muestreo estuvo parado no se puede distinguir un congelado real: no se cuenta
     if (t - this.#lastTick > SAMPLER_GAP_MS) {
       this.#lastChange = t;
@@ -103,7 +114,18 @@ export class GlassMeter {
     }
     this.#lastTick = t;
 
-    const code = this.#read();
+    // La lectura es asíncrona: si la anterior no ha terminado, este frame de pantalla se salta
+    if (this.#reading) return;
+    const frame = this.#grab();
+    if (!frame) return;
+    this.#reading = true;
+    let code: number | null = null;
+    try {
+      code = await this.decode(frame);
+    } finally {
+      frame.close();
+      this.#reading = false;
+    }
     if (code === null) return;
 
     if (code === this.#lastCode) {
@@ -129,41 +151,54 @@ export class GlassMeter {
     this.#samples.push({ t, latency });
   }
 
-  /** Timecode del frame que se ve ahora mismo, para quien necesite seguir un frame concreto. */
-  readCode(): number | null {
-    return this.#read();
-  }
-
-  /** Devuelve el timecode (ms mod 2^bits) del frame visible, o null si no se puede leer con garantías. */
-  #read(): number | null {
-    const src = this.#getSource();
-    if (!src) return null;
-    const w = src instanceof HTMLVideoElement ? src.videoWidth : src.width;
-    const h = src instanceof HTMLVideoElement ? src.videoHeight : src.height;
+  /**
+   * Timecode (ms mod 2^bits) quemado en ese frame, o null si no se puede leer con garantías.
+   * No cierra el frame. Lo usan también los trazadores de etapas, que necesitan seguir un frame concreto.
+   */
+  async decode(frame: VideoFrame): Promise<number | null> {
+    const w = frame.displayWidth;
+    const h = frame.displayHeight;
     if (!w || !h) return null;
 
     // Cada calidad lleva su timecode con su propio tamaño de celda: se usa el de la altura que se está viendo
     const layouts = this.#getLayouts();
     const layout = layouts.find((l) => l.height === h) ?? layouts[0] ?? DEFAULT_TIMECODE;
-    const { bits, cell, x, y, width, height } = layout;
-    const n = this.#cells;
+    const { bits, cell } = layout;
+    const n = bits + 4;
+    const scale = w / layout.width;
+    const cellPx = cell * scale;
+
+    // Solo dos filas del centro de la franja. Coordenadas pares, como exigen los formatos 4:2:0.
+    const even = (value: number) => Math.floor(value / 2) * 2;
+    const visible = frame.visibleRect!;
+    const rect = {
+      x: visible.x + even(layout.x * scale),
+      y: visible.y + even((layout.y + cell / 2) * scale - 1),
+      width: Math.min(even(n * cellPx + 1), even(visible.width - layout.x * scale)),
+      height: 2,
+    };
+    let planes: PlaneLayout[];
     try {
-      this.#ctx.drawImage(src, (x * w) / width, (y * h) / height, (n * cell * w) / width, (cell * h) / height, 0, 0, n * PX, PX);
+      const size = frame.allocationSize({ rect });
+      if (this.#buffer.length < size) this.#buffer = new Uint8Array(size);
+      planes = await frame.copyTo(this.#buffer, { rect });
     } catch (_) {
       return null;
     }
-    const px = this.#ctx.getImageData(0, 0, n * PX, PX).data;
+    // Formatos planares (NV12, I420...): el primer plano es la luma. Empaquetados (RGBA, BGRA...): 4 bytes
+    // por píxel, y como luma basta la media de los tres primeros.
+    const px = this.#buffer;
+    const { offset, stride } = planes[0];
+    const packed = planes.length === 1;
+    const at = (row: number, col: number) => {
+      const o = offset + row * stride + (packed ? col * 4 : col);
+      return packed ? (px[o] + px[o + 1] + px[o + 2]) / 3 : px[o];
+    };
 
     // Luma media de los 2x2 píxeles centrales de cada celda
     const luma = (i: number) => {
-      let sum = 0;
-      for (let row = 1; row <= 2; row++) {
-        for (let col = 1; col <= 2; col++) {
-          const o = (row * n * PX + i * PX + col) * 4;
-          sum += 0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2];
-        }
-      }
-      return sum / 4;
+      const col = Math.min(rect.width - 2, Math.floor((i + 0.5) * cellPx) - 1);
+      return (at(0, col) + at(0, col + 1) + at(1, col) + at(1, col + 1)) / 4;
     };
 
     // Las celdas de referencia de los extremos fijan el umbral y delatan una imagen sin timecode

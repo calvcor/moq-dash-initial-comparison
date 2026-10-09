@@ -65,7 +65,16 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   }, [targetLatencyMs]);
 
   useEffect(() => {
-    const glassMeter = new GlassMeter(() => canvasRef.current, () => timecodesRef.current);
+    // El frame que el reproductor acaba de dibujar en el canvas. Se clona porque el reproductor cierra el
+    // suyo en cuanto dibuja el siguiente.
+    const grab = () => {
+      try {
+        return playerRef.current?.renderer.out.frame.peek()?.clone() ?? null;
+      } catch (_) {
+        return null;
+      }
+    };
+    const glassMeter = new GlassMeter(grab, () => timecodesRef.current);
     meterRef.current = glassMeter;
     return () => glassMeter.close();
   }, []);

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as dashjs from 'dashjs';
-import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
+import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { DashTracer } from '../lib/trace';
 import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
@@ -85,7 +85,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   }, [targetLatency, maxDrift]);
 
   useEffect(() => {
-    const glassMeter = new GlassMeter(() => videoRef.current, () => timecodesRef.current);
+    const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
     meterRef.current = glassMeter;
     return () => glassMeter.close();
   }, []);
