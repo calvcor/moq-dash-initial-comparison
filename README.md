@@ -292,7 +292,7 @@ Lo que hay que saber para interpretarlo:
 
 Los puntos animados recorren cada carril a velocidad real: tardan en cada etapa lo medido. Las etapas van también al CSV (`dash_stage_*_ms`, `moq_stage_*_ms`).
 
-Primera observación con este panel (Chrome headless, red sin restricción): en MoQ, de ~470 ms, unos 400 ms se pasan en el búfer del reproductor y solo 15-40 ms en publicador, relay y red; en DASH, de ~3,06 s, unos 2,8 s son búfer.
+Primera observación con este panel (Chrome headless, red sin restricción): en MoQ, de ~470 ms, unos 400 ms se pasan en el búfer del reproductor (medido con `buffer` a 150 ms; desde que se usa el valor por defecto de la librería, 0, son unos 200 de ~300 ms) y solo 15-40 ms en publicador, relay y red; en DASH, de ~3,06 s, unos 2,8 s son búfer.
 
 ### 4.6. Valores de referencia
 
