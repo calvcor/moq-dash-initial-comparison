@@ -167,6 +167,10 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           // Esperar al anuncio de la emisión antes de suscribirse: justo tras un reinicio del publicador
           // todavía no existe y una suscripción a ciegas se rechaza sin reintento.
           announced: true,
+          // Por defecto @moq/watch deja de descargar el vídeo cuando el canvas sale de la vista (al hacer
+          // scroll hasta las métricas, por ejemplo). Aquí debe seguir, como hacen los otros dos reproductores,
+          // o la medida se interrumpe cada vez que se mira otra parte de la página.
+          visible: 'always',
           canvas: canvasRef.current || undefined,
           muted: new Signal(true),
           delay: delaySignal,
