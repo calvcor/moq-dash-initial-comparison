@@ -154,6 +154,13 @@ Los siguientes parámetros son modificables desde el Panel de Control Web:
 - **API:** `POST /api/trace` con las marcas de frames pintados. El navegador calcula las etapas y elige como representante el frame de latencia total mediana.
 - **Hallazgos:** el grueso de la latencia de MoQ (~400 de ~470 ms) está en el búfer del reproductor, no en publicador, relay ni red; y con un navegador suscrito el publicador a veces deja de vaciar su entrada y los frames esperan en la compuerta (etapa "Entrada al publicador").
 
+### 4.13. Tercera rama: WebRTC
+- **Servidor:** contenedor `mediamtx` (IP fija 172.30.50.12). `start_rtc()` lanza `tsgate.py 5003 rtc | ffmpeg -c copy -an -f rtsp` con solo la calidad más alta; la fuente añade una tercera salida UDP (5003) a su `tee`.
+- **Red:** el router reenvía 8189/udp a MediaMTX y tiene colas de emulación y contadores propios (`rtc_down`, `rtc_up`). MediaMTX anuncia como candidato ICE `MOQ_HOST` (127.0.0.1 en local). La señalización WHEP va por `edge` en `/rtc/`.
+- **Navegador:** `RtcPlayer.tsx` (WHEP sin trickle, `getStats`, slider de `jitterBufferTarget`, misma vigilancia y mismo medidor de timecode) y `RtcTracer` en `trace.ts`, que usa `receiveTime` de `requestVideoFrameCallback` como hora de llegada.
+- **Sin adaptación ni audio**, por decisión del usuario (una calidad basta) y porque WebRTC no admite AAC.
+- **Observado en local con los tres reproductores a la vez (Chrome headless, Mac saturado):** WebRTC 100-370 ms; y el publicador de MoQ deja de leer su entrada cuando el navegador no da abasto, con esperas de varios segundos en la etapa "Entrada al publicador" que no aparecen sin navegador conectado.
+
 ### 4.8. Emulación de red
 - **Router (`router/agent.py`):** contenedor con `NET_ADMIN` entre el navegador y Nginx/relay. Publica 8080, 4433/udp y 8081, reenvía con DNAT (sin terminar conexiones) y aplica `tc` en los dos sentidos. Nginx y el relay ya no publican puertos y tienen IP fija en la red interna `core`.
 - **Una cola por protocolo y sentido** con el mismo perfil: `tbf` (ancho de banda, y trocea los superpaquetes GSO que netem descartaría enteros) con `netem` hijo (retardo, jitter, pérdida y cola). DASH y MoQ no compiten entre sí.

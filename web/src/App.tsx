@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { DashPlayer } from './components/DashPlayer';
 import { MoqPlayer } from './components/MoqPlayer';
+import { RtcPlayer } from './components/RtcPlayer';
 import { MetricsDashboard } from './components/MetricsDashboard';
 import { ControlPanel } from './components/ControlPanel';
 import { NetworkPanel } from './components/NetworkPanel';
@@ -70,18 +71,42 @@ export function App() {
     status: 'idle',
   });
 
+  const [rtcMetrics, setRtcMetrics] = useState<PlayerMetrics>({
+    protocol: 'WebRTC',
+    latencyMs: null,
+    reportedLatencyMs: null,
+    bitrateKbps: null,
+    networkKbps: null,
+    fps: null,
+    bufferLengthSec: null,
+    stalls: 0,
+    stallMs: 0,
+    restarts: 0,
+    targetLatencyMs: null,
+    renditionHeight: null,
+    renditionKbps: null,
+    qualitySwitches: 0,
+    bandwidthEstimateKbps: null,
+    qualityMode: 'manual',
+    status: 'idle',
+  });
+
   const [history, setHistory] = useState<{
     labels: string[];
     dashLatency: (number | null)[];
     moqLatency: (number | null)[];
     dashBitrate: (number | null)[];
     moqBitrate: (number | null)[];
+    rtcLatency: (number | null)[];
+    rtcBitrate: (number | null)[];
   }>({
     labels: [],
     dashLatency: [],
     moqLatency: [],
     dashBitrate: [],
     moqBitrate: [],
+    rtcLatency: [],
+    rtcBitrate: [],
   });
 
   const hasInitializedConfig = useRef(false);
@@ -101,10 +126,10 @@ export function App() {
   };
 
   // Tráfico IP por protocolo y sentido, a partir de los contadores acumulados del router
-  const ipWindows = useRef({ dash_down: new RateWindow(), dash_up: new RateWindow(), moq_down: new RateWindow(), moq_up: new RateWindow() });
+  const ipWindows = useRef({ dash_down: new RateWindow(), dash_up: new RateWindow(), moq_down: new RateWindow(), moq_up: new RateWindow(), rtc_down: new RateWindow(), rtc_up: new RateWindow() });
   const ipRates = () => {
     const w = ipWindows.current;
-    return { dash_down: w.dash_down.kbps(), dash_up: w.dash_up.kbps(), moq_down: w.moq_down.kbps(), moq_up: w.moq_up.kbps() };
+    return { dash_down: w.dash_down.kbps(), dash_up: w.dash_up.kbps(), moq_down: w.moq_down.kbps(), moq_up: w.moq_up.kbps(), rtc_down: w.rtc_down.kbps(), rtc_up: w.rtc_up.kbps() };
   };
 
   // Mantener el reloj del navegador referido al del servidor que quema el timecode
@@ -123,8 +148,8 @@ export function App() {
         setServerStatus(data);
         serverStatusRef.current = data;
         if (data.network) {
-          for (const key of ['dash_down', 'dash_up', 'moq_down', 'moq_up'] as const) {
-            ipWindows.current[key].push(data.network.stats[key].bytes);
+          for (const key of ['dash_down', 'dash_up', 'moq_down', 'moq_up', 'rtc_down', 'rtc_up'] as const) {
+            if (data.network.stats[key]) ipWindows.current[key].push(data.network.stats[key].bytes);
           }
         }
         if (data.config && !hasInitializedConfig.current) {
@@ -151,6 +176,7 @@ export function App() {
 
   const dashMetricsRef = useRef(dashMetrics);
   const moqMetricsRef = useRef(moqMetrics);
+  const rtcMetricsRef = useRef(rtcMetrics);
 
   useEffect(() => {
     dashMetricsRef.current = dashMetrics;
@@ -160,6 +186,10 @@ export function App() {
     moqMetricsRef.current = moqMetrics;
   }, [moqMetrics]);
 
+  useEffect(() => {
+    rtcMetricsRef.current = rtcMetrics;
+  }, [rtcMetrics]);
+
   // Actualizar historial de gráficos cada segundo si el servidor está emitiendo
   useEffect(() => {
     if (serverStatus?.status !== 'running') return;
@@ -168,6 +198,7 @@ export function App() {
       const timeStr = new Date().toLocaleTimeString();
       const currentDash = dashMetricsRef.current;
       const currentMoq = moqMetricsRef.current;
+      const currentRtc = rtcMetricsRef.current;
 
       const status = serverStatusRef.current;
       const clock = getClockSync();
@@ -221,13 +252,28 @@ export function App() {
         moq_stage_ingest_ms: stage(currentMoq, 'ingest'),
         moq_stage_transport_ms: stage(currentMoq, 'transport'),
         moq_stage_player_ms: stage(currentMoq, 'player'),
+        rtc_g2g_ms: currentRtc.latencyMs,
+        rtc_kbps: currentRtc.bitrateKbps,
+        rtc_net_kbps: currentRtc.networkKbps,
+        rtc_fps: currentRtc.fps,
+        rtc_jitter_buffer_s: currentRtc.bufferLengthSec,
+        rtc_stalls: currentRtc.stalls,
+        rtc_stall_ms: currentRtc.stallMs,
+        rtc_player_restarts: currentRtc.restarts,
+        rtc_target_ms: currentRtc.targetLatencyMs,
+        rtc_height: currentRtc.renditionHeight,
+        rtc_packets_lost: currentRtc.packetsLost ?? null,
+        rtc_stage_encode_ms: stage(currentRtc, 'encode'),
+        rtc_stage_ingest_ms: stage(currentRtc, 'ingest'),
+        rtc_stage_transport_ms: stage(currentRtc, 'transport'),
+        rtc_stage_player_ms: stage(currentRtc, 'player'),
         clock_offset_ms: clock ? Number(clock.offsetMs.toFixed(2)) : null,
         clock_rtt_ms: clock ? Number(clock.rttMs.toFixed(2)) : null,
         ingest_anomalies: status?.ingest_anomalies
-          ? status.ingest_anomalies.master + status.ingest_anomalies.dash + status.ingest_anomalies.moq
+          ? status.ingest_anomalies.master + status.ingest_anomalies.dash + status.ingest_anomalies.moq + (status.ingest_anomalies.rtc ?? 0)
           : null,
         dash_availability_drift_ms: status?.dash_availability_drift_ms ?? null,
-        pipeline_restarts: status?.restarts ? status.restarts.master + status.restarts.dash + status.restarts.moq : null,
+        pipeline_restarts: status?.restarts ? status.restarts.master + status.restarts.dash + status.restarts.moq + (status.restarts.rtc ?? 0) : null,
         net_down_rate_kbit: net?.down.rate_kbit ?? null,
         net_down_delay_ms: net?.down.delay_ms ?? null,
         net_down_jitter_ms: net?.down.jitter_ms ?? null,
@@ -242,10 +288,14 @@ export function App() {
         dash_ip_up_kbps: ip.dash_up,
         moq_ip_down_kbps: ip.moq_down,
         moq_ip_up_kbps: ip.moq_up,
+        rtc_ip_down_kbps: ip.rtc_down,
+        rtc_ip_up_kbps: ip.rtc_up,
         dash_down_dropped: status?.network?.stats.dash_down.dropped ?? null,
         moq_down_dropped: status?.network?.stats.moq_down.dropped ?? null,
         dash_up_dropped: status?.network?.stats.dash_up.dropped ?? null,
         moq_up_dropped: status?.network?.stats.moq_up.dropped ?? null,
+        rtc_down_dropped: status?.network?.stats.rtc_down?.dropped ?? null,
+        rtc_up_dropped: status?.network?.stats.rtc_up?.dropped ?? null,
         tab_hidden: document.hidden,
       });
 
@@ -262,6 +312,8 @@ export function App() {
           moqLatency: newMoqLat,
           dashBitrate: newDashBit,
           moqBitrate: newMoqBit,
+          rtcLatency: [...prev.rtcLatency, currentRtc.latencyMs].slice(-25),
+          rtcBitrate: [...prev.rtcBitrate, currentRtc.bitrateKbps].slice(-25),
         };
       });
     }, 1000);
@@ -358,13 +410,14 @@ export function App() {
   // quien la haya reiniciado (esta pestaña, otra, la API o el supervisor).
   const dashStreamId = serverStatus?.stream_ids?.dash ?? 0;
   const moqStreamId = serverStatus?.stream_ids?.moq ?? 0;
+  const rtcStreamId = serverStatus?.stream_ids?.rtc ?? 0;
   useEffect(() => {
     startMeasureEpoch();
-  }, [dashStreamId, moqStreamId]);
+  }, [dashStreamId, moqStreamId, rtcStreamId]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-[1800px] mx-auto space-y-6">
         {/* Cabecera Doctoral */}
         <header className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div>
@@ -413,11 +466,11 @@ export function App() {
           onApplyConfig={handleApplyConfig}
         />
 
-        {/* Emulación de red, igual para las dos ramas */}
+        {/* Emulación de red, igual para las tres ramas */}
         <NetworkPanel network={serverStatus?.network} ipRates={ipRates()} isLoading={isLoading} onApply={handleApplyNetwork} />
 
         {/* Reproductores Lado a Lado (Split-Screen) */}
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-3 gap-4">
           <DashPlayer
             key={`dash-${dashStreamId}`}
             url={serverStatus?.dash_url || '/media/dash/manifest.mpd'}
@@ -436,10 +489,20 @@ export function App() {
             isStreaming={isStreaming}
             onMetricsUpdate={(m) => setMoqMetrics((prev) => ({ ...prev, ...m }))}
           />
+
+          <RtcPlayer
+            key={`rtc-${rtcStreamId}`}
+            timecodes={serverStatus?.timecodes}
+            isStreaming={isStreaming}
+            onMetricsUpdate={(m) => setRtcMetrics((prev) => ({ ...prev, ...m }))}
+          />
         </div>
 
         {/* Recorrido de un frame con la latencia medida en cada etapa */}
-        <PipelineDiagram dash={dashMetrics.stages} moq={moqMetrics.stages} dashLatencyMs={dashMetrics.latencyMs} moqLatencyMs={moqMetrics.latencyMs} />
+        <PipelineDiagram
+          stages={{ dash: dashMetrics.stages, moq: moqMetrics.stages, rtc: rtcMetrics.stages }}
+          latency={{ dash: dashMetrics.latencyMs, moq: moqMetrics.latencyMs, rtc: rtcMetrics.latencyMs }}
+        />
 
         {/* Panel de Métricas y Telemetría */}
         <div className="pt-2">
@@ -452,6 +515,7 @@ export function App() {
           <MetricsDashboard
             dashMetrics={dashMetrics}
             moqMetrics={moqMetrics}
+            rtcMetrics={rtcMetrics}
             history={history}
             samples={samplesRef.current.filter((r) => r.epoch === measureEpoch)}
             anomalies={serverStatus?.ingest_anomalies}

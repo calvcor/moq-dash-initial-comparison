@@ -47,6 +47,8 @@ export interface NetworkState {
     dash_up: Counter;
     moq_down: Counter;
     moq_up: Counter;
+    rtc_down: Counter;
+    rtc_up: Counter;
   };
 }
 
@@ -62,21 +64,21 @@ export interface ServerStatus {
   spki_fingerprint: string;
   master_start_time_ms?: number;
   timecodes?: TimecodeLayout[]; // uno por calidad de la escalera
-  ingest_anomalies?: { master: number; dash: number; moq: number };
+  ingest_anomalies?: { master: number; dash: number; moq: number; rtc: number };
   // Desfase del último segmento DASH respecto al calendario de disponibilidad anunciado en el manifiesto
   dash_availability_drift_ms?: number | null;
   network?: NetworkState | null;
   // Cambian cuando arranca el empaquetador de cada rama: señal para reconectar ese reproductor
-  stream_ids?: { dash: number; moq: number };
+  stream_ids?: { dash: number; moq: number; rtc: number };
   // Reinicios automáticos del supervisor del servidor
-  restarts?: { master: number; dash: number; moq: number };
+  restarts?: { master: number; dash: number; moq: number; rtc: number };
   // Vídeo fuente: se descarga al primer arranque si no está
   source?: { state: 'ready' | 'downloading' | 'extracting' | 'error'; progress_pct: number; error: string | null };
 }
 
 // Los valores numéricos son null cuando no hay medida: nunca se rellenan con valores supuestos
 export interface PlayerMetrics {
-  protocol: 'LL-DASH' | 'Media over QUIC';
+  protocol: 'LL-DASH' | 'Media over QUIC' | 'WebRTC';
   latencyMs: number | null; // glass-to-glass por timecode, mediana del último segundo
   reportedLatencyMs: number | null; // la que declara el propio reproductor, como contraste
   bitrateKbps: number | null; // vídeo recibido, ventana deslizante
@@ -97,6 +99,7 @@ export interface PlayerMetrics {
   bandwidthEstimateKbps: number | null; // estimación en la que se basa la adaptación
   qualityMode: 'auto' | 'manual';
   maxDriftSec?: number; // solo DASH: desvío a partir del cual dash.js salta al directo (0 = nunca)
+  packetsLost?: number | null; // solo WebRTC: paquetes RTP perdidos según el navegador
   stages?: StageBreakdown | null;
   status: 'idle' | 'connecting' | 'playing' | 'error';
   errorMessage?: string;
@@ -159,6 +162,22 @@ export interface SampleRow {
   moq_stage_ingest_ms: number | null;
   moq_stage_transport_ms: number | null;
   moq_stage_player_ms: number | null;
+  // WebRTC: siempre la calidad más alta, sin adaptación
+  rtc_g2g_ms: number | null;
+  rtc_kbps: number | null;
+  rtc_net_kbps: number | null;
+  rtc_fps: number | null;
+  rtc_jitter_buffer_s: number | null;
+  rtc_stalls: number;
+  rtc_stall_ms: number;
+  rtc_player_restarts: number;
+  rtc_target_ms: number | null;
+  rtc_height: number | null;
+  rtc_packets_lost: number | null;
+  rtc_stage_encode_ms: number | null;
+  rtc_stage_ingest_ms: number | null;
+  rtc_stage_transport_ms: number | null;
+  rtc_stage_player_ms: number | null;
   clock_offset_ms: number | null;
   clock_rtt_ms: number | null;
   ingest_anomalies: number | null;
@@ -180,9 +199,13 @@ export interface SampleRow {
   dash_ip_up_kbps: number | null;
   moq_ip_down_kbps: number | null;
   moq_ip_up_kbps: number | null;
+  rtc_ip_down_kbps: number | null;
+  rtc_ip_up_kbps: number | null;
   dash_down_dropped: number | null;
   moq_down_dropped: number | null;
   dash_up_dropped: number | null;
   moq_up_dropped: number | null;
+  rtc_down_dropped: number | null;
+  rtc_up_dropped: number | null;
   tab_hidden: boolean;
 }

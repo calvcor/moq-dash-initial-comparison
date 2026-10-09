@@ -19,17 +19,20 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 interface MetricsDashboardProps {
   dashMetrics: PlayerMetrics;
   moqMetrics: PlayerMetrics;
+  rtcMetrics: PlayerMetrics;
   history: {
     labels: string[];
     dashLatency: (number | null)[];
     moqLatency: (number | null)[];
     dashBitrate: (number | null)[];
     moqBitrate: (number | null)[];
+    rtcLatency: (number | null)[];
+    rtcBitrate: (number | null)[];
   };
   samples: SampleRow[];
-  anomalies?: { master: number; dash: number; moq: number };
+  anomalies?: { master: number; dash: number; moq: number; rtc: number };
   availabilityDriftMs?: number | null;
-  pipelineRestarts?: { master: number; dash: number; moq: number };
+  pipelineRestarts?: { master: number; dash: number; moq: number; rtc: number };
   onExport: () => void;
   onReset: () => void;
 }
@@ -128,6 +131,21 @@ const MOQ_PAYLOAD_HINT = (
   </>
 );
 
+const RTC_NETWORK_HINT = (
+  <>
+    <p>
+      <b>Qué mide:</b> bytes recibidos por el transporte de la conexión WebRTC (RTP con el vídeo, RTCP y retransmisiones). Media de 10 s.
+    </p>
+    <p>
+      <b>Fuente:</b> estadísticas del navegador (<code>RTCPeerConnection.getStats()</code>, transporte, <code>bytesReceived</code>).
+    </p>
+    <p>
+      <b>No incluye:</b> cabeceras UDP/IP ni las comprobaciones de conectividad ICE. Esta rama no lleva audio.
+    </p>
+    {LAYER_WARNING}
+  </>
+);
+
 const Telemetry: React.FC<{
   title: string;
   engine: string;
@@ -144,7 +162,7 @@ const Telemetry: React.FC<{
       <span className={`font-semibold text-sm ${color}`}>{title}</span>
       <span className="text-xs text-slate-500">{engine}</span>
     </div>
-    <div className="grid grid-cols-4 gap-3 text-center">
+    <div className="grid grid-cols-2 gap-3 text-center">
       <Stat label="Latencia glass-to-glass" value={fmt(metrics.latencyMs, 'ms')} accent wide />
       <Stat label="Latencia según reproductor" value={fmt(metrics.reportedLatencyMs, 'ms')} />
       <Stat label="Frames presentados" value={fmt(metrics.fps, 'fps')} />
@@ -177,6 +195,7 @@ const Telemetry: React.FC<{
 export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   dashMetrics,
   moqMetrics,
+  rtcMetrics,
   history,
   samples,
   anomalies,
@@ -190,10 +209,11 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   const steady = samples.filter((r) => r.elapsed_s >= WARMUP_S && !r.tab_hidden);
   const dashStats = summarize(steady.map((r) => r.dash_g2g_ms));
   const moqStats = summarize(steady.map((r) => r.moq_g2g_ms));
+  const rtcStats = summarize(steady.map((r) => r.rtc_g2g_ms));
   const clock = getClockSync();
-  const totalAnomalies = anomalies ? anomalies.master + anomalies.dash + anomalies.moq : 0;
-  const serverRestarts = pipelineRestarts ? pipelineRestarts.master + pipelineRestarts.dash + pipelineRestarts.moq : 0;
-  const playerRestarts = dashMetrics.restarts + moqMetrics.restarts;
+  const totalAnomalies = anomalies ? anomalies.master + anomalies.dash + anomalies.moq + (anomalies.rtc ?? 0) : 0;
+  const serverRestarts = pipelineRestarts ? pipelineRestarts.master + pipelineRestarts.dash + pipelineRestarts.moq + (pipelineRestarts.rtc ?? 0) : 0;
+  const playerRestarts = dashMetrics.restarts + moqMetrics.restarts + rtcMetrics.restarts;
 
   const latencyChartData = {
     labels: history.labels,
@@ -210,6 +230,13 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         data: history.moqLatency,
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.5)',
+        tension: 0.3,
+      },
+      {
+        label: 'WebRTC Latencia G2G (ms)',
+        data: history.rtcLatency,
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.5)',
         tension: 0.3,
       },
     ],
@@ -230,6 +257,13 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         data: history.moqBitrate,
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.5)',
+        tension: 0.3,
+      },
+      {
+        label: 'WebRTC Bitrate Recibido (kbps)',
+        data: history.rtcBitrate,
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.5)',
         tension: 0.3,
       },
     ],
@@ -258,8 +292,8 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Tarjetas comparativas: mismas métricas y mismo método de medida en ambas ramas */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Tarjetas comparativas: mismas métricas y mismo método de medida en las tres ramas */}
+      <div className="grid grid-cols-3 gap-4">
         <Telemetry
           title="Telemetría LL-DASH"
           engine="dash.js engine"
@@ -289,6 +323,17 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           metrics={moqMetrics}
           stats={moqStats}
         />
+        <Telemetry
+          title="Telemetría WebRTC"
+          engine="RTCPeerConnection"
+          color="text-amber-400"
+          bufferLabel="Búfer de jitter"
+          networkHint={RTC_NETWORK_HINT}
+          qualityHint={<p>Altura del vídeo recibido. WebRTC sirve siempre la calidad más alta de la escalera: en esta rama no hay adaptación.</p>}
+          estimateHint={<p>No aplica: en esta rama no hay adaptación de calidad en el reproductor.</p>}
+          metrics={rtcMetrics}
+          stats={rtcStats}
+        />
       </div>
 
       {/* Validez de la medida y exportación */}
@@ -298,7 +343,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
             Reloj servidor: {clock ? `offset ${clock.offsetMs.toFixed(1)} ms · incertidumbre ±${(clock.rttMs / 2).toFixed(1)} ms` : 'sin sincronizar'}
           </span>
           <span className={totalAnomalies ? 'text-rose-400 font-bold' : 'text-slate-400'}>
-            Anomalías de ingesta: {anomalies ? `${totalAnomalies} (fuente ${anomalies.master} · DASH ${anomalies.dash} · MoQ ${anomalies.moq})` : '--'}
+            Anomalías de ingesta: {anomalies ? `${totalAnomalies} (fuente ${anomalies.master} · DASH ${anomalies.dash} · MoQ ${anomalies.moq} · WebRTC ${anomalies.rtc ?? 0})` : '--'}
           </span>
           <span className={Math.abs(availabilityDriftMs ?? 0) > 100 ? 'text-amber-400' : 'text-slate-400'}>
             Deriva disponibilidad DASH: {availabilityDriftMs == null ? '--' : `${availabilityDriftMs} ms`}
@@ -307,7 +352,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
             className={playerRestarts + serverRestarts ? 'text-amber-400' : 'text-slate-400'}
             title="Recuperaciones automáticas. Servidor: el supervisor relanzó la fuente o un empaquetador caído o colgado. Reproductores: llevaban 10 s sin imagen nueva y se recrearon."
           >
-            Reinicios: servidor {pipelineRestarts ? serverRestarts : '--'} · DASH {dashMetrics.restarts} · MoQ {moqMetrics.restarts}
+            Reinicios: servidor {pipelineRestarts ? serverRestarts : '--'} · DASH {dashMetrics.restarts} · MoQ {moqMetrics.restarts} · WebRTC {rtcMetrics.restarts}
           </span>
           <span className="text-slate-500">{samples.length} muestras</span>
         </div>

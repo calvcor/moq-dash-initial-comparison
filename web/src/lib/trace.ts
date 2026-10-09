@@ -37,7 +37,7 @@ function summarize(rows: Record<string, number>[]): StageBreakdown | null {
   return { stages, totalMs: stages.reduce((sum, stage) => sum + stage.ms, 0), samples: valid.length };
 }
 
-async function askServer(body: object): Promise<{ dash: any[]; moq: any[] } | null> {
+async function askServer(body: object): Promise<{ dash: any[]; moq: any[]; rtc: any[] } | null> {
   try {
     const res = await fetch('/api/trace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return res.ok ? await res.json() : null;
@@ -111,6 +111,55 @@ export class DashTracer {
   close() {
     this.#closed = true;
     this.#timers.forEach(clearInterval);
+  }
+}
+
+export class RtcTracer {
+  #closed = false;
+  #samples: (Sample & { receivedMs: number })[] = [];
+  #timer: ReturnType<typeof setInterval>;
+
+  constructor(video: HTMLVideoElement, meter: GlassMeter, onResult: (breakdown: StageBreakdown | null) => void) {
+    // En WebRTC el navegador da, con cada frame presentado, la hora a la que recibió su último paquete
+    let lastSample = 0;
+    const onFrame = (now: number, metadata: VideoFrameCallbackMetadata) => {
+      if (this.#closed) return;
+      const seenMs = serverNowMs(now);
+      const receivedMs = metadata.receiveTime === undefined ? null : serverNowMs(metadata.receiveTime);
+      if (now - lastSample >= SAMPLE_EVERY_MS && seenMs !== null && receivedMs !== null) {
+        const code = meter.readCode();
+        if (code !== null) {
+          lastSample = now;
+          this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id: 0, receivedMs });
+        }
+      }
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+
+    this.#timer = setInterval(async () => {
+      const samples = this.#samples.splice(0);
+      if (!samples.length) return onResult(null);
+      const answer = await askServer({ rtc_stamps_ms: samples.map((s) => s.stampMs) });
+      if (this.#closed) return;
+      const rows: Record<string, number>[] = [];
+      samples.forEach((sample, i) => {
+        const server = answer?.rtc[i];
+        if (!server || server.encoded_ms === null) return;
+        rows.push({
+          encode: server.encoded_ms - server.stamp_ms,
+          ingest: server.forwarded_ms - server.encoded_ms,
+          transport: sample.receivedMs - server.forwarded_ms,
+          player: sample.paintedMs - sample.receivedMs,
+        });
+      });
+      onResult(summarize(rows));
+    }, REPORT_EVERY_MS);
+  }
+
+  close() {
+    this.#closed = true;
+    clearInterval(this.#timer);
   }
 }
 

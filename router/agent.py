@@ -5,6 +5,7 @@ finales y degrada ese tráfico con tc en los dos sentidos:
 
     navegador -> :8080/tcp -> nginx-dash:80      (LL-DASH)
     navegador -> :4433/udp -> moq-relay:4433     (MoQ sobre QUIC)
+    navegador -> :8189/udp -> mediamtx:8189      (WebRTC: ICE, DTLS y SRTP)
 
 La ingesta (orquestador -> nginx / relay) va por la red interna sin pasar por aquí, así que la emulación
 solo afecta al tramo servidor-cliente y lo hace igual para las dos ramas.
@@ -19,7 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NGINX_IP = os.environ["NGINX_IP"]
 RELAY_IP = os.environ["RELAY_IP"]
-DASH_PORT, MOQ_PORT, CERT_PORT = 8080, 4433, 8081
+RTC_IP = os.environ["RTC_IP"]
+DASH_PORT, MOQ_PORT, CERT_PORT, RTC_PORT = 8080, 4433, 8081, 8189
 
 # Cada protocolo tiene su propia cola por sentido, con el mismo perfil: los dos ven un enlace idéntico
 # en vez de competir entre sí por uno compartido. Clase de la qdisc raíz y handles del limitador y de netem.
@@ -28,6 +30,8 @@ QUEUES = {
     "moq_down": ("1:2", "20", "200"),
     "dash_up": ("1:3", "30", "300"),
     "moq_up": ("1:4", "40", "400"),
+    "rtc_down": ("1:5", "50", "500"),
+    "rtc_up": ("1:6", "60", "600"),
 }
 DIRECTIONS = ("down", "up")
 EMPTY = {"rate_kbit": None, "delay_ms": 0, "jitter_ms": 0, "loss_pct": 0, "queue_ms": 100}
@@ -56,6 +60,7 @@ def setup():
         ("tcp", DASH_PORT, NGINX_IP, 80),
         ("udp", MOQ_PORT, RELAY_IP, MOQ_PORT),
         ("tcp", CERT_PORT, RELAY_IP, CERT_PORT),
+        ("udp", RTC_PORT, RTC_IP, RTC_PORT),
     ):
         run(f"iptables -t nat -A PREROUTING -p {proto} --dport {port} -j DNAT --to-destination {dest_ip}:{dest_port}")
     run("iptables -t nat -A POSTROUTING -m conntrack --ctstate DNAT -j MASQUERADE")
@@ -64,6 +69,8 @@ def setup():
         ("dash_up", f"-d {NGINX_IP} -p tcp --dport 80"),
         ("moq_down", f"-s {RELAY_IP} -p udp --sport {MOQ_PORT}"),
         ("moq_up", f"-d {RELAY_IP} -p udp --dport {MOQ_PORT}"),
+        ("rtc_down", f"-s {RTC_IP} -p udp --sport {RTC_PORT}"),
+        ("rtc_up", f"-d {RTC_IP} -p udp --dport {RTC_PORT}"),
     ):
         run(f"iptables -A FORWARD {rule} -m comment --comment {name}")
 
@@ -72,14 +79,16 @@ def setup():
     global emulation_error
     try:
         # Clasificación en todas las interfaces, sin depender de por cuál publique Docker los puertos.
-        # Bajada = servidor -> cliente, subida = cliente -> servidor; 1:5 es el resto del tráfico, sin tocar.
+        # Bajada = servidor -> cliente, subida = cliente -> servidor; 1:7 es el resto del tráfico, sin tocar.
         for dev in interfaces():
-            run(f"tc qdisc replace dev {dev} root handle 1: prio bands 5 priomap 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4")
+            run(f"tc qdisc replace dev {dev} root handle 1: prio bands 7 priomap 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6")
             u32 = f"tc filter add dev {dev} parent 1: protocol ip u32"
             run(f"{u32} match ip protocol 6 0xff match ip sport {DASH_PORT} 0xffff flowid {QUEUES['dash_down'][0]}")
             run(f"{u32} match ip protocol 17 0xff match ip sport {MOQ_PORT} 0xffff flowid {QUEUES['moq_down'][0]}")
             run(f"{u32} match ip protocol 6 0xff match ip dst {NGINX_IP}/32 match ip dport 80 0xffff flowid {QUEUES['dash_up'][0]}")
             run(f"{u32} match ip protocol 17 0xff match ip dst {RELAY_IP}/32 match ip dport {MOQ_PORT} 0xffff flowid {QUEUES['moq_up'][0]}")
+            run(f"{u32} match ip protocol 17 0xff match ip sport {RTC_PORT} 0xffff flowid {QUEUES['rtc_down'][0]}")
+            run(f"{u32} match ip protocol 17 0xff match ip dst {RTC_IP}/32 match ip dport {RTC_PORT} 0xffff flowid {QUEUES['rtc_up'][0]}")
     except RuntimeError as e:
         emulation_error = str(e)
         for dev in interfaces():

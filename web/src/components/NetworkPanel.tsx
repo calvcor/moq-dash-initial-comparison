@@ -4,7 +4,7 @@ import type { LinkProfile, NetworkProfile, NetworkState } from '../types';
 
 interface NetworkPanelProps {
   network: NetworkState | null | undefined;
-  ipRates: Record<'dash_down' | 'dash_up' | 'moq_down' | 'moq_up', number | null>;
+  ipRates: Record<'dash_down' | 'dash_up' | 'moq_down' | 'moq_up' | 'rtc_down' | 'rtc_up', number | null>;
   isLoading: boolean;
   onApply: (profile: NetworkProfile) => void;
 }
@@ -63,7 +63,7 @@ export const NetworkPanel: React.FC<NetworkPanelProps> = ({ network, ipRates, is
       <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
         <div className="flex items-center space-x-2">
           <Network className="w-5 h-5 text-indigo-400" />
-          <h3 className="font-semibold text-slate-200" title="El mismo perfil se aplica por separado a LL-DASH y a MoQ: cada protocolo ve un enlace idéntico y no compiten entre sí.">
+          <h3 className="font-semibold text-slate-200" title="El mismo perfil se aplica por separado a LL-DASH, a MoQ y a WebRTC: cada protocolo ve un enlace idéntico y no compiten entre sí.">
             Emulación de Red (un enlace idéntico por protocolo)
           </h3>
           {!network && (
@@ -135,12 +135,13 @@ export const NetworkPanel: React.FC<NetworkPanelProps> = ({ network, ipRates, is
 
       {/* Lo que ve el router: tráfico IP real por protocolo y descartes de la emulación */}
       <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
-        <span title="Bytes IP reenviados por el router (cabeceras TCP/UDP/IP y retransmisiones incluidas), medidos antes de aplicar la emulación. Misma capa para los dos protocolos.">
-          Tráfico IP en el router · DASH ↓ {kbps(ipRates.dash_down)} ↑ {kbps(ipRates.dash_up)} · MoQ ↓ {kbps(ipRates.moq_down)} ↑ {kbps(ipRates.moq_up)}
+        <span title="Bytes IP reenviados por el router (cabeceras TCP/UDP/IP y retransmisiones incluidas), medidos antes de aplicar la emulación. Misma capa para los tres protocolos.">
+          Tráfico IP en el router · DASH ↓ {kbps(ipRates.dash_down)} ↑ {kbps(ipRates.dash_up)} · MoQ ↓ {kbps(ipRates.moq_down)} ↑ {kbps(ipRates.moq_up)} · WebRTC ↓ {kbps(ipRates.rtc_down)} ↑ {kbps(ipRates.rtc_up)}
         </span>
         <span title="Paquetes descartados por la emulación desde que arrancó el router (pérdida aleatoria más desbordamiento de la cola) y paquetes retenidos ahora mismo en la cola de bajada. Cada protocolo tiene su propia cola con el mismo perfil.">
           Descartes ↓/↑ · DASH {stats?.dash_down.dropped ?? '--'}/{stats?.dash_up.dropped ?? '--'} · MoQ {stats?.moq_down.dropped ?? '--'}/
-          {stats?.moq_up.dropped ?? '--'} · en cola ↓ DASH {stats?.dash_down.queued ?? '--'} · MoQ {stats?.moq_down.queued ?? '--'} paq.
+          {stats?.moq_up.dropped ?? '--'} · WebRTC {stats?.rtc_down?.dropped ?? '--'}/{stats?.rtc_up?.dropped ?? '--'} · en cola ↓ DASH{' '}
+          {stats?.dash_down.queued ?? '--'} · MoQ {stats?.moq_down.queued ?? '--'} · WebRTC {stats?.rtc_down?.queued ?? '--'} paq.
         </span>
       </div>
     </div>

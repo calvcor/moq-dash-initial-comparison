@@ -1,10 +1,10 @@
-# Banco de Pruebas Comparativo: Media over QUIC (MoQ) vs. LL-DASH
+# Banco de Pruebas Comparativo: Media over QUIC (MoQ), LL-DASH y WebRTC
 
 Banco de pruebas (*testbed*) de la investigación doctoral:
 
 > **"Streaming de vídeo en directo de baja latencia mediante Media over QUIC: evaluación comparativa con WebRTC y HTTP adaptive streaming, y mecanismos de adaptación para la mejora de la QoE"**
 
-Emite la misma señal en directo por dos ramas, **LL-DASH** (CMAF por HTTP con chunked transfer) y **Media over QUIC** (WebTransport), y las reproduce lado a lado midiendo ambas con el mismo método.
+Emite la misma señal en directo por tres ramas, **LL-DASH** (CMAF por HTTP con chunked transfer), **Media over QUIC** (WebTransport) y **WebRTC** (WHEP), y las reproduce lado a lado midiéndolas con el mismo método.
 
 El detalle de las decisiones y de los problemas resueltos está en [`CONTEXT_SUMMARY.md`](CONTEXT_SUMMARY.md).
 
@@ -55,7 +55,7 @@ Fuera de `localhost` el navegador solo permite WebTransport y WebCodecs en pági
 1. En el servidor, crear un `.env` con el nombre por el que se accederá: `PUBLIC_HOST=testbed.ejemplo.org`. Se usa para el certificado autofirmado del relay.
 2. `docker compose up -d --build`.
 3. En el proxy, un único host que reenvíe `https://testbed.ejemplo.org` a `http://<servidor>:80`. No hace falta definir rutas.
-4. El puerto **4433/udp** del servidor debe ser alcanzable directamente desde los navegadores: MoQ no pasa por el proxy.
+4. Los puertos **4433/udp** (MoQ) y **8189/udp** (WebRTC) del servidor deben ser alcanzables directamente desde los navegadores: no pasan por el proxy.
 5. Si el nombre público resuelve al proxy y no al servidor (lo habitual con un comodín DNS), añadir al `.env` la dirección directa del servidor para MoQ: `MOQ_HOST=10.0.0.5`. El relay usa un certificado autofirmado fijado por huella, así que vale una IP. La alternativa es que el proxy reenvíe el puerto 4433/udp como *stream*.
 
 A tener en cuenta en las medidas: detrás del proxy, DASH llega al navegador por la conexión del proxy (normalmente HTTP/2) y la emulación de red actúa sobre el tramo interno, no sobre la conexión TCP del navegador. MoQ sí va extremo a extremo.
@@ -126,9 +126,10 @@ Las dos ramas reciben **el mismo bitstream H.264**: la fuente codifica una sola 
 | `testbed-orchestrator` | Python 3.12 + FastAPI + FFmpeg 7.1 + `moq` CLI 0.14.2 | ninguno | Fuente maestra, empaquetadores, origen LL-DASH en memoria y API de control |
 | `testbed-nginx-dash` | `nginx:alpine` | ninguno | Reenvía `/media/dash/` al origen con `proxy_buffering off` |
 | `testbed-moq-relay` | `moqdev/moq-relay:latest` | ninguno | Relay MoQ con certificado autofirmado |
+| `testbed-mediamtx` | `bluenviron/mediamtx:latest` | ninguno | Servidor WebRTC: recibe la calidad más alta por RTSP y la sirve por WHEP |
 | `testbed-web` | React 19 + Vite + Tailwind, servido por Nginx | ninguno | Dashboard, con cabeceras COOP/COEP para `SharedArrayBuffer` |
 
-Solo se publican dos puertos: **80/tcp** para todo el HTTP y **4433/udp** para MoQ, al que el navegador va directo porque es QUIC. Se pueden cambiar con `HTTP_PORT` y `MOQ_PORT` en un fichero `.env`.
+Solo se publican tres puertos: **80/tcp** para todo el HTTP, y **4433/udp** (MoQ, QUIC) y **8189/udp** (WebRTC), a los que el navegador va directo. Los dos primeros se pueden cambiar con `HTTP_PORT` y `MOQ_PORT` en un fichero `.env`. `MOQ_HOST` sirve también como dirección que WebRTC anuncia al navegador.
 
 Los puertos UDP 5001 y 5002 son internos al contenedor del orquestador.
 
@@ -191,6 +192,18 @@ python3 tsgate.py 5001 | ffmpeg -analyzeduration 1000000 -i pipe:0 \
 - **`availabilityStartTime` calibrado**: el origen sustituye el que escribe FFmpeg (retrasado por su sondeo de entrada) por el deducido del instante real en que se abre un segmento. El manifiesto no se publica hasta tenerlo, unos segundos tras cada arranque.
 
 El segmento no puede ser más corto que el GOP; backend y frontend lo validan.
+
+### 3.4b. Rama WebRTC
+
+```bash
+python3 tsgate.py 5003 rtc | ffmpeg -fflags nobuffer -analyzeduration 1000000 -i pipe:0 \
+  -map 0:v:0 -c:v copy -an -f rtsp -rtsp_transport tcp rtsp://mediamtx:8554/live
+```
+
+- **MediaMTX** recibe por RTSP la calidad más alta, sin recodificar, y la sirve por WebRTC. El navegador negocia por WHEP (`/rtc/live/whep`, a través del punto de entrada) y recibe el vídeo directo por UDP 8189, pasando por el router de emulación.
+- **Una sola calidad y sin audio.** WebRTC no admite el AAC de la fuente, y no hay adaptación: esta rama sirve siempre la calidad más alta de la escalera.
+- **El reproductor** es un `RTCPeerConnection` sobre un `<video>`, sin ajustes: el búfer de jitter lo decide el navegador. Un slider permite pedirle un búfer concreto (`jitterBufferTarget`); en "auto" no se pide nada.
+- **Métricas propias** de las estadísticas del navegador (`getStats`): bitrate, búfer de jitter y paquetes perdidos. No declara una latencia respecto al directo, así que esa tarjeta queda vacía.
 
 ### 3.4. Rama MoQ
 
@@ -265,6 +278,7 @@ Cada etapa es la diferencia entre dos puntos consecutivos:
 
 - **LL-DASH:** codificación → empaquetado CMAF → entrega → búfer y pintado.
 - **MoQ:** codificación → entrada al publicador → publicación y transporte → búfer de jitter y pintado.
+- **WebRTC:** codificación → entrada al empaquetador → publicación y transporte → búfer de jitter y pintado. La llegada al reproductor la da el propio navegador con cada frame (`receiveTime`), con unos pocos ms de imprecisión.
 
 Lo que hay que saber para interpretarlo:
 
@@ -441,7 +455,7 @@ moq-dash-initial-comparison/
 ├── media/                        # Vídeo fuente; se descarga solo y no se versiona
 ├── edge/
 │   └── nginx.conf                # Entrada HTTP única (puerto 80)
-├── router/
+├── router/                       # (MediaMTX no tiene carpeta: se configura por variables en docker-compose.yml)
 │   ├── Dockerfile
 │   └── agent.py                  # Reenvío IP, emulación con tc y agente de control
 ├── server/
@@ -483,14 +497,14 @@ Hecho:
 - [x] LL-DASH con entrega chunked real y MoQ sobre WebTransport.
 - [x] Dashboard unificado con parametrización en caliente.
 - [x] Medida glass-to-glass homogénea, estadísticos y exportación CSV.
-- [x] Emulación de red en los dos sentidos (ancho de banda, retardo, jitter, pérdida), idéntica para ambas ramas.
+- [x] Emulación de red en los dos sentidos (ancho de banda, retardo, jitter, pérdida), idéntica para las tres ramas.
+- [x] Rama WebRTC con MediaMTX (una calidad, sin adaptación).
 
 Pendiente:
 
 - [ ] Atribuir los ~200 ms entre latencia real y declarada en MoQ, repitiendo la medida con decodificación por hardware.
 - [ ] Perfiles de red dinámicos (trazas o escalones programados) y modo de enlace compartido, para estudiar la competencia entre protocolos.
 - [ ] Cliente fuera del host (contenedor u otra máquina) para que TCP sea extremo a extremo también en macOS.
-- [ ] Rama WebRTC, prevista en el título de la tesis.
 - [ ] Adaptación de calidad: elegir el algoritmo ABR de dash.js (L2A, LoL+) desde el panel y corregir el bitrate inflado del catálogo MoQ.
 - [ ] Carga de CPU: tres calidades a 1080p60 más dos reproductores en la misma máquina la dejan cerca de la saturación.
 

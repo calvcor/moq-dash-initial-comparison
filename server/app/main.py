@@ -43,6 +43,8 @@ DASH_PUBLISH_URL = "http://127.0.0.1:8000/media/dash/manifest.mpd"
 ROUTER_URL = os.getenv("ROUTER_URL", "http://172.30.50.2:9000")
 # Marca de "detenido a mano", junto al vídeo para que sobreviva a reinicios del contenedor
 STOPPED_MARKER = os.path.join(os.path.dirname(VIDEO_FILE), ".stopped")
+PACKAGERS = ("dash_pipeline", "moq_pipeline", "rtc_pipeline")
+RTC_PUBLISH_URL = os.getenv("RTC_PUBLISH_URL", "rtsp://172.30.50.12:8554/live")
 TSGATE = os.path.join(os.path.dirname(__file__), "tsgate.py")
 # Reloj que usará dash.js; debe ser el mismo con el que se calcula el availabilityStartTime
 # Relativa al manifiesto: vale para cualquier nombre de host y para HTTP o HTTPS
@@ -57,6 +59,7 @@ processes = {
     "master_source": None,
     "dash_pipeline": None,
     "moq_pipeline": None,
+    "rtc_pipeline": None,
 }
 master_start_time: float = time.time()
 
@@ -65,10 +68,10 @@ lifecycle = threading.RLock()
 desired_running = False
 # Identificador de cada emisión. Cambia cada vez que arranca su empaquetador, lo provoque quien lo provoque:
 # así cualquier dashboard abierto sabe que debe reconectar ese reproductor.
-stream_ids = {"dash": 0, "moq": 0}
-started_at = {"dash": 0.0, "moq": 0.0}
+stream_ids = {"dash": 0, "moq": 0, "rtc": 0}
+started_at = {"dash": 0.0, "moq": 0.0, "rtc": 0.0}
 # Reinicios automáticos hechos por el supervisor (procesos caídos o colgados)
-restarts = {"master": 0, "dash": 0, "moq": 0}
+restarts = {"master": 0, "dash": 0, "moq": 0, "rtc": 0}
 # Ambos empaquetadores leen la fuente a través de tsgate.py, que abre el paso justo en un IDR.
 # Así el sondeo inicial de FFmpeg (5 s por defecto) puede acortarse a 1 s.
 PROBE_S = 1.0
@@ -177,7 +180,7 @@ def timecode_filter(layout: dict, stream: int) -> str:
 
 # Anomalías de ingesta en los logs de FFmpeg (pérdida UDP interna, paquetes corruptos): invalidan la comparación
 ANOMALY_RE = re.compile(rb"buffer overrun|corrupt|continuity check|non[- ]monoton", re.I)
-log_state = {name: {"offset": 0, "count": 0} for name in ("master", "dash", "moq")}
+log_state = {name: {"offset": 0, "count": 0} for name in ("master", "dash", "moq", "rtc")}
 
 def count_anomalies(name: str) -> int:
     st = log_state[name]
@@ -272,7 +275,7 @@ def ensure_master_source(force_restart: bool = False):
 
         # pes_payload_size=0: un PES por frame de audio. Por defecto MPEG-TS agrupa ~180 ms de audio y los
         # empaquetadores retienen el vídeo ese tiempo al intercalar.
-        # Emite continuamente por UDP 5001 (DASH) y 5002 (MoQ) con cabeceras repetidas para sincronización en caliente
+        # Emite continuamente por UDP 5001 (DASH), 5002 (MoQ) y 5003 (WebRTC) con cabeceras repetidas para sincronización en caliente
         # Vídeo y audio se leen por entradas separadas: el fichero los intercala en bloques de 0,5 s y con
         # una sola entrada a ritmo real el audio llega a ráfagas, el muxer retiene el vídeo hasta tenerlo
         # y ambas ramas reciben los frames a trompicones y con retardo añadido.
@@ -283,7 +286,7 @@ def ensure_master_source(force_restart: bool = False):
             f"-x264opts \"repeat-headers=1\" "
             f"{rates}-g {current_config.gop_size} -keyint_min {current_config.gop_size} -sc_threshold 0 "
             f"-r {current_config.fps} -c:a aac -ac 2 -b:a 128k "
-            f"-f tee \"[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316\""
+            f"-f tee \"[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5003?pkt_size=1316\""
         )
         logger.info(f"Iniciando Fuente Maestra Continua FFmpeg con reloj en vivo (epoch {start_epoch_sec})...")
         processes["master_source"] = subprocess.Popen(
@@ -343,6 +346,7 @@ def get_status():
             "master_source": alive("master_source"),
             "dash_pipeline": alive("dash_pipeline"),
             "moq_pipeline": alive("moq_pipeline"),
+            "rtc_pipeline": alive("rtc_pipeline"),
             "pipeline": desired_running,
         },
         "stream_ids": stream_ids,
@@ -422,12 +426,30 @@ def start_moq():
     started_at["moq"] = time.time()
     stream_ids["moq"] = int(started_at["moq"] * 1000)
 
+def start_rtc():
+    """Empaquetador WebRTC: lee de UDP 5003 y publica por RTSP en MediaMTX la calidad más alta, sin recodificar.
+
+    Solo vídeo: WebRTC no admite el audio AAC de la fuente y los reproductores van silenciados.
+    """
+    kill_proc(processes.get("rtc_pipeline"))
+    trace.frame_log.reset("rtc")
+    rtc_cmd = (
+        f"python3 -u {TSGATE} 5003 rtc | "
+        f"ffmpeg -y -fflags nobuffer -analyzeduration {int(PROBE_S * 1_000_000)} -i pipe:0 "
+        f"-map 0:v:0 -c:v copy -an -f rtsp -rtsp_transport tcp '{RTC_PUBLISH_URL}'"
+    )
+    logger.info("Iniciando Empaquetador WebRTC hacia MediaMTX...")
+    launch("rtc_pipeline", rtc_cmd, "/tmp/ffmpeg_rtc.log")
+    started_at["rtc"] = time.time()
+    stream_ids["rtc"] = int(started_at["rtc"] * 1000)
+
 class TraceQuery(BaseModel):
     """Frames que el dashboard acaba de pintar, identificados por la marca de tiempo quemada en ellos (ms)."""
     dash_stream: int = 0
     dash_stamps_ms: list[float] = []
     moq_stream: int = 0
     moq_stamps_ms: list[float] = []
+    rtc_stamps_ms: list[float] = []  # WebRTC sirve siempre la calidad más alta (stream 0)
 
 @app.post("/api/trace")
 def trace_frames(query: TraceQuery):
@@ -468,19 +490,24 @@ def trace_frames(query: TraceQuery):
     for stamp in query.moq_stamps_ms:
         exact_stamp, encoded, forwarded, _ = follow("moq", query.moq_stream, stamp)
         moq.append({"stamp_ms": exact_stamp, "encoded_ms": ms(encoded), "forwarded_ms": ms(forwarded)})
-    return {"dash": dash, "moq": moq}
+    rtc = []
+    for stamp in query.rtc_stamps_ms:
+        exact_stamp, encoded, forwarded, _ = follow("rtc", 0, stamp)
+        rtc.append({"stamp_ms": exact_stamp, "encoded_ms": ms(encoded), "forwarded_ms": ms(forwarded)})
+    return {"dash": dash, "moq": moq, "rtc": rtc}
 
 def start_all(restart_master: bool):
     """Arranca los dos empaquetadores y, si hace falta, la fuente."""
     # Detener los empaquetadores antes de tocar la fuente, para que no mezclen dos emisiones
-    kill_proc(processes.get("dash_pipeline"))
-    kill_proc(processes.get("moq_pipeline"))
+    for name in PACKAGERS:
+        kill_proc(processes.get(name))
     if restart_master:
         kill_proc(processes.get("master_source"))
         processes["master_source"] = None
         trace.frame_log.master_restarted()
     start_dash()
     start_moq()
+    start_rtc()
     if restart_master:
         # Las compuertas ya están escuchando cuando la fuente emite su primer frame: su primer PTS es
         # entonces el del frame 0, la referencia para pasar de número de frame a PTS.
@@ -519,7 +546,7 @@ def stop_pipeline():
     with lifecycle:
         logger.info("Deteniendo la emisión: empaquetadores DASH y MoQ y fuente maestra...")
         desired_running = False
-        for name in ("dash_pipeline", "moq_pipeline", "master_source"):
+        for name in (*PACKAGERS, "master_source"):
             kill_proc(processes.get(name))
             processes[name] = None
         origin.reset(current_config.seg_duration, 0)
@@ -561,6 +588,10 @@ def supervise():
                     logger.warning("Supervisor: empaquetador MoQ caído; se relanza")
                     restarts["moq"] += 1
                     start_moq()
+                if not alive("rtc_pipeline") and now - started_at["rtc"] > BACKOFF_S:
+                    logger.warning("Supervisor: empaquetador WebRTC caído; se relanza")
+                    restarts["rtc"] += 1
+                    start_rtc()
         except Exception as e:
             logger.error(f"Supervisor: {e}")
 
@@ -592,6 +623,5 @@ def on_shutdown():
     global desired_running
     with lifecycle:
         desired_running = False  # que el supervisor no relance nada mientras se apaga
-    kill_proc(processes.get("dash_pipeline"))
-    kill_proc(processes.get("moq_pipeline"))
-    kill_proc(processes.get("master_source"))
+    for name in (*PACKAGERS, "master_source"):
+        kill_proc(processes.get(name))

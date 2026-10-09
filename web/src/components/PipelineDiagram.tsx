@@ -26,7 +26,9 @@ const ENCODE: Stage = {
   uncertainty: 'server',
 };
 
-const LANES: { id: 'dash' | 'moq'; title: string; color: string; bar: string; stages: Stage[] }[] = [
+type LaneId = 'dash' | 'moq' | 'rtc';
+
+const LANES: { id: LaneId; title: string; color: string; bar: string; stages: Stage[] }[] = [
   {
     id: 'dash',
     title: 'LL-DASH',
@@ -103,13 +105,49 @@ const LANES: { id: 'dash' | 'moq'; title: string; color: string; bar: string; st
       },
     ],
   },
+  {
+    id: 'rtc',
+    title: 'WebRTC',
+    color: 'text-amber-400',
+    bar: '#f59e0b',
+    stages: [
+      ENCODE,
+      {
+        key: 'ingest',
+        name: 'Entrada al empaquetador',
+        nodes: ['Compuerta'],
+        includes:
+          'Tiempo que el frame, ya codificado, espera a que el FFmpeg que lo publica por RTSP lo acepte. La compuerta le entrega los datos por una tubería y se bloquea si no la vacía.',
+        from: 'la llegada del frame al socket de la compuerta',
+        to: 'el instante en que la compuerta lo lee y lo escribe hacia FFmpeg',
+        uncertainty: 'server',
+      },
+      {
+        key: 'transport',
+        name: 'Publicación y transporte',
+        nodes: ['FFmpeg (RTSP)', 'MediaMTX', 'Router (emulación)', 'Red SRTP'],
+        includes:
+          'Reempaquetado a RTSP, MediaMTX y la red juntos: no se pueden separar sin instrumentar MediaMTX. Incluye las retransmisiones que pida el navegador si hay pérdidas.',
+        from: 'la entrega del frame al FFmpeg que publica',
+        to: 'la hora a la que el navegador recibe el último paquete de ese frame (la da el propio navegador con cada frame)',
+        uncertainty: 'both',
+      },
+      {
+        key: 'player',
+        name: 'Búfer de jitter y pintado',
+        nodes: ['Búfer de jitter', 'Decodificador', 'Pantalla'],
+        includes: 'Espera en el búfer de jitter del navegador, decodificación y presentación.',
+        from: 'la recepción del último paquete del frame',
+        to: 'el instante en que el navegador lo presenta',
+        uncertainty: 'browser',
+      },
+    ],
+  },
 ];
 
 interface PipelineDiagramProps {
-  dash?: StageBreakdown | null;
-  moq?: StageBreakdown | null;
-  dashLatencyMs: number | null;
-  moqLatencyMs: number | null;
+  stages: Record<LaneId, StageBreakdown | null | undefined>;
+  latency: Record<LaneId, number | null>;
 }
 
 const stageMs = (breakdown: StageBreakdown | null | undefined, key: string) => breakdown?.stages.find((s) => s.key === key)?.ms ?? null;
@@ -147,11 +185,9 @@ const Particles: React.FC<{ stages: Stage[]; breakdown?: StageBreakdown | null; 
   return <div ref={track} className="relative h-0.5 bg-slate-700/70 rounded mx-1 my-2" />;
 };
 
-export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ dash, moq, dashLatencyMs, moqLatencyMs }) => {
-  const [selected, setSelected] = useState<{ lane: 'dash' | 'moq'; key: string }>({ lane: 'dash', key: 'deliver' });
-  const data = { dash, moq };
-  const latency = { dash: dashLatencyMs, moq: moqLatencyMs };
-  const scaleMs = Math.max(dash?.totalMs ?? 0, moq?.totalMs ?? 0, 1);
+export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ stages: data, latency }) => {
+  const [selected, setSelected] = useState<{ lane: LaneId; key: string }>({ lane: 'dash', key: 'deliver' });
+  const scaleMs = Math.max(data.dash?.totalMs ?? 0, data.moq?.totalMs ?? 0, data.rtc?.totalMs ?? 0, 1);
   const clock = getClockSync();
   const clockError = clock ? clock.rttMs / 2 : null;
 

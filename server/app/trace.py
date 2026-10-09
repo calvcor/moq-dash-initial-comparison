@@ -28,8 +28,8 @@ PTS_TOLERANCE = 750      # medio frame a 60 fps, en ticks de 90 kHz
 class FrameLog:
     def __init__(self):
         self.lock = threading.Lock()
-        self.frames = {"dash": {}, "moq": {}}     # rama -> stream -> ([pts...], [(llegada, reenvío)...])
-        self.first_pts = {"dash": {}, "moq": {}}  # rama -> stream -> PTS del primer frame que dejó pasar la compuerta
+        self.frames = {"dash": {}, "moq": {}, "rtc": {}}     # rama -> stream -> ([pts...], [(llegada, reenvío)...])
+        self.first_pts = {"dash": {}, "moq": {}, "rtc": {}}  # rama -> stream -> PTS del primer frame que dejó pasar la compuerta
         self.stamps = {}    # stream -> ([marca ms...], [número de frame...])
         self.pts_base = {}  # stream -> PTS del frame 0 de la fuente actual
 

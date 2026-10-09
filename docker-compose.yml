@@ -1,4 +1,4 @@
-# Un único punto de entrada HTTP (edge, puerto 80) más el puerto UDP de MoQ. Un proxy inverso externo
+# Un único punto de entrada HTTP (edge, puerto 80) más los puertos UDP de MoQ (4433) y WebRTC (8189). Un proxy inverso externo
 # con HTTPS (p. ej. Nginx Proxy Manager) solo tiene que reenviar al puerto 80.
 # Red de dos tramos: DASH y MoQ solo se alcanzan a través del router, que emula el enlace.
 # La ingesta (orquestador -> nginx / relay) va por la red interna "core" y no se degrada.
@@ -35,8 +35,10 @@ services:
     environment:
       - NGINX_IP=172.30.50.10
       - RELAY_IP=172.30.50.11
+      - RTC_IP=172.30.50.12
     ports:
       - "${MOQ_PORT:-4433}:4433/udp"   # MoQ / QUIC -> moq-relay:4433 (el navegador va directo)
+      - "8189:8189/udp"                # WebRTC (ICE, DTLS, SRTP) -> mediamtx:8189 (el navegador va directo)
     networks:
       default:
       core:
@@ -55,6 +57,24 @@ services:
     networks:
       core:
         ipv4_address: 172.30.50.11
+    restart: unless-stopped
+
+  # Servidor WebRTC: recibe por RTSP la calidad más alta, sin recodificar, y la sirve por WHEP
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: testbed-mediamtx
+    environment:
+      # Dirección que se anuncia al navegador en los candidatos ICE: debe ser la de este servidor tal como
+      # la alcanza el navegador (la misma que MOQ_HOST detrás de un proxy; 127.0.0.1 en local)
+      - MTX_WEBRTCADDITIONALHOSTS=${MOQ_HOST:-127.0.0.1}
+      - MTX_WEBRTCLOCALUDPADDRESS=:8189
+      - MTX_WEBRTCIPSFROMINTERFACES=no
+      - MTX_RTMP=no
+      - MTX_HLS=no
+      - MTX_SRT=no
+    networks:
+      core:
+        ipv4_address: 172.30.50.12
     restart: unless-stopped
 
   # 2. Servidor Nginx para entrega HTTP de LL-DASH: reenvía sin búfer al origen chunked del orquestador
@@ -80,6 +100,7 @@ services:
       - ROUTER_URL=http://172.30.50.2:9000
       - MOQ_PORT=${MOQ_PORT:-4433}
       - MOQ_HOST=${MOQ_HOST:-}
+      - RTC_PUBLISH_URL=rtsp://172.30.50.12:8554/live
     networks:
       - default
       - core
@@ -89,6 +110,7 @@ services:
     depends_on:
       - moq-relay
       - nginx-dash
+      - mediamtx
       - router
     restart: unless-stopped
 
