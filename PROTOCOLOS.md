@@ -9,15 +9,15 @@ está leído del código fuente de las librerías instaladas, de la configuraci�
 registros del servidor desplegado (9 de octubre de 2026). Cuando algo es una deducción y no una
 comprobación directa, se dice.
 
-| Componente | Versión comprobada |
-| :--- | :--- |
-| Relay MoQ (`moqdev/moq-relay`) | 0.17.2 |
-| Publicador MoQ (`moq`, moq-cli) | 0.14.2 |
+| Componente                                                | Versión comprobada    |
+| :-------------------------------------------------------- | :-------------------- |
+| Relay MoQ (`moqdev/moq-relay`)                            | 0.17.2                |
+| Publicador MoQ (`moq`, moq-cli)                           | 0.14.2                |
 | Reproductor MoQ (`@moq/watch` / `@moq/net` / `@moq/hang`) | 0.6.2 / 0.4.2 / 0.5.2 |
-| Protocolo MoQ negociado (navegador y publicador) | `moq-lite-06` |
-| Reproductor DASH (`dash.js`) | 5.2.1 |
-| Servidor WebRTC (MediaMTX) | 1.21.2 |
-| Codificador | FFmpeg 7.1 + libx264 |
+| Protocolo MoQ negociado (navegador y publicador)          | `moq-lite-06`         |
+| Reproductor DASH (`dash.js`)                              | 5.2.1                 |
+| Servidor WebRTC (MediaMTX)                                | 1.21.2                |
+| Codificador                                               | FFmpeg 7.1 + libx264  |
 
 ---
 
@@ -34,6 +34,7 @@ comprobación directa, se dice.
 9. [Anexo A. El manifiesto MPD, campo a campo](#anexo-a-el-manifiesto-mpd-campo-a-campo)
 10. [Anexo B. El catálogo de MoQ, campo a campo](#anexo-b-el-catálogo-de-moq-campo-a-campo)
 11. [Anexo C. MPEG-TS: el formato intermedio del testbed](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed)
+12. [Anexo D. Cómo se mide la latencia](#anexo-d-cómo-se-mide-la-latencia)
 
 ---
 
@@ -60,6 +61,9 @@ Consecuencias para la comparación:
 - **`tsgate.py`** es una compuerta que deja pasar el flujo MPEG-TS a cada empaquetador empezando
   justo en un keyframe, y de paso apunta a qué hora salió cada frame del codificador. No altera los
   datos.
+- **La latencia se mide igual en las tres**, leyendo un timecode que la fuente quema en la imagen.
+  El método, incluido el reparto por etapas, está en el
+  [Anexo D](#anexo-d-cómo-se-mide-la-latencia).
 
 El formato intermedio entre la fuente y los empaquetadores es **MPEG-TS**: un contenedor de paquetes
 fijos de 188 bytes pensado para emisión, que permite engancharse al flujo en cualquier momento. Solo
@@ -2510,3 +2514,309 @@ Dos detalles de cómo se trata el PTS:
 | Contador de continuidad | Contador de 4 bits por PID para detectar pérdidas. |
 | Indicador de acceso aleatorio | Marca de que empieza un keyframe. |
 | Paquete nulo | Relleno, en el PID 8191. |
+
+---
+
+## Anexo D. Cómo se mide la latencia
+
+Este anexo explica cómo obtiene el testbed sus dos medidas de latencia: la total (*glass-to-glass*) y
+su reparto por etapas. En particular, cómo se sabe que la hora anotada en cada punto corresponde al
+mismo frame.
+
+El principio que lo rige todo: **se mide igual en las tres ramas, y se mide lo que se ve**. No se
+usa la latencia que declara cada reproductor, porque cada uno la define a su manera y ninguna incluye
+todo el recorrido. Se lee en la imagen.
+
+### D.1. El timecode quemado
+
+Antes de codificar, la fuente dibuja en cada frame la hora a la que lo procesa. No como texto, sino
+como una fila de cuadros blancos y negros en la esquina inferior izquierda, que una máquina puede
+leer sin ambigüedad aunque la compresión emborrone la imagen.
+
+```
+┌──────┬──────┬────┬────┬────┬─────┬────┬──────┬──────┐
+│blanco│negro │ b19│ b18│ b17│ ... │ b0 │negro │blanco│
+└──────┴──────┴────┴────┴────┴─────┴────┴──────┴──────┘
+ referencias     20 cuadros: un bit cada uno     referencias
+```
+
+| Característica | Valor | Motivo |
+| :--- | :--- | :--- |
+| Qué codifica | La hora del servidor, en milisegundos | Es la referencia común a todo el recorrido. |
+| Cuántos bits | 20 | Cabe un ciclo de 2²⁰ ms = 17,5 minutos, mucho más que cualquier latencia. |
+| Tamaño de cada cuadro | 32 px, o 16 px en las calidades pequeñas | Alineado con los bloques de compresión, para que sobreviva a ella. |
+| Cuadros de los extremos | Blanco y negro fijos | Dan el umbral de lectura y delatan una imagen sin timecode. |
+| Codificación | Código Gray | Ver abajo. |
+
+Cada calidad lleva su propio timecode, dibujado después de escalarla. Un timecode pensado para 1080p
+y reducido a 360p tendría cuadros de pocos píxeles, ilegibles tras la compresión.
+
+**Por qué código Gray.** En binario normal, pasar de 7 a 8 cambia cuatro bits a la vez (`0111` →
+`1000`). Si la lectura de un cuadro falla justo en ese momento, puede salir cualquier número. En
+código Gray, dos valores consecutivos difieren siempre en **un solo bit**, así que un fallo de lectura
+en la transición produce como mucho un error de 1 ms.
+
+**Por qué solo 20 bits.** La hora completa en milisegundos necesita unos 41 bits. Se queman solo los
+20 más bajos, y el navegador reconstruye el resto con su propia hora: sabe qué hora es con un margen
+muy inferior a 17,5 minutos, así que solo hay una hora posible que termine en esos 20 bits.
+
+```
+hora al leer el frame (servidor):        1 791 554 900 123 ms
+los 20 bits leídos equivalen a:                       ... 823 ms   (dentro del ciclo)
+la última hora anterior que acaba así:   1 791 554 899 823 ms  →  ese es el instante del quemado
+```
+
+### D.2. Poner de acuerdo los dos relojes
+
+El timecode lleva la hora **del servidor**. Para restarla de "ahora", el navegador tiene que saber
+qué hora es en el servidor, no en su propio reloj, que puede ir desviado.
+
+Cada 10 segundos el navegador pregunta la hora al servidor (`GET /api/time`) varias veces seguidas.
+En cada consulta apunta cuándo la envió y cuándo recibió la respuesta, y supone que la hora del
+servidor corresponde al punto medio:
+
+```
+desfase = hora que responde el servidor − (hora de envío + hora de recepción) / 2
+```
+
+De todas las consultas se queda con la de **menor tiempo de ida y vuelta**, que es la que menos
+margen de error tiene.
+
+| Dato | Ejemplo |
+| :--- | :--- |
+| Envío, en el reloj del navegador | 12:00:00,000 |
+| Recepción, en el reloj del navegador | 12:00:00,006 |
+| Hora que respondió el servidor | 12:00:00,105 |
+| Punto medio | 12:00:00,003 |
+| Desfase | +102 ms: el servidor va 102 ms adelantado |
+| Incertidumbre | ±3 ms: la mitad de los 6 ms de ida y vuelta |
+
+La incertidumbre sale de que no se sabe cómo se repartieron esos 6 ms entre la ida y la vuelta. Se
+muestra en el panel y se guarda en el CSV (`clock_offset_ms`, `clock_rtt_ms`). **Es el límite de
+exactitud de toda medida que compare una hora del servidor con una del navegador.** Afecta por igual
+a las tres ramas, así que no altera las diferencias entre ellas.
+
+### D.3. La latencia *glass-to-glass*
+
+Con el timecode y los relojes sincronizados, la medida es una resta. En cada refresco de pantalla,
+para cada reproductor:
+
+1. Se toma el frame que el reproductor acaba de mostrar.
+2. Se lee su timecode.
+3. Se calcula `latencia = hora actual del servidor − hora quemada en el frame`.
+
+La tarjeta muestra la mediana del último segundo.
+
+| Incluye | No incluye |
+| :--- | :--- |
+| Codificación | La lectura y decodificación del fichero de origen, anteriores al quemado |
+| Empaquetado | El último tramo hasta la pantalla: composición y refresco del monitor, de uno a dos refrescos |
+| Red | |
+| Búfer del reproductor | |
+| Decodificación y pintado | |
+
+Lo que queda fuera es idéntico en las tres ramas.
+
+El frame se identifica a sí mismo: no hace falta saber nada más de él que lo que lleva dibujado. Por
+eso esta medida es la más sólida del testbed.
+
+**El lector no debe alterar lo que mide.** Lee solo dos filas de píxeles de la franja del timecode,
+de forma asíncrona. Una versión anterior copiaba la imagen entera en cada frame y saturaba la página
+hasta degradar al reproductor de MoQ: las medidas anteriores a ese cambio no son válidas.
+
+### D.4. El desglose por etapas: la idea
+
+La latencia total dice cuánto, pero no dónde. Para repartirla hay que anotar la hora a la que **un
+mismo frame** pasa por varios puntos del recorrido y restar cada par consecutivo.
+
+```
+quemado ──▶ salida del ──▶ entrega al ──▶ (fragmento ──▶ llegada al ──▶ pintado
+            codificador    empaquetador    completo)     reproductor
+   │             │              │              │              │            │
+   └── etapa 1 ──┴── etapa 2 ───┴─── etapa 3 ──┴── etapa 4 ───┴─ etapa 5 ──┘
+```
+
+Como cada etapa es la diferencia entre dos horas del mismo frame, **las etapas suman exactamente su
+latencia total**. No hay estimaciones ni repartos proporcionales.
+
+La dificultad está en reconocer el frame en cada punto. El timecode solo se puede leer donde hay
+imagen: al principio (la fuente sabe qué quemó) y al final (el navegador lo lee). En medio, el frame
+es un bloque de bytes comprimidos, y cada tramo lo identifica de otra manera.
+
+### D.5. Cómo se sigue un frame de punta a punta
+
+Cinco veces por segundo, el navegador elige un frame recién pintado y reconstruye su recorrido. La
+cadena de identificadores es esta:
+
+| Paso | De qué se parte | Qué se obtiene | Cómo |
+| :--- | :--- | :--- | :--- |
+| 1 | La imagen pintada | La hora quemada | Leyendo el timecode. |
+| 2 | La hora quemada | El número de orden del frame | Registro de la fuente. |
+| 3 | El número de orden | Su PTS | Una cuenta. |
+| 4 | El PTS | Horas de salida del codificador y de entrega | Registro de la compuerta. |
+| 5 | El PTS (solo DASH) | Hora en que se completó su fragmento | Registro del origen. |
+| 6 | El frame pintado | Su hora de llegada al reproductor | Distinto en cada reproductor. |
+
+**Paso 2: de la hora al número de frame.** Al quemar el timecode, FFmpeg escribe en su registro, para
+cada frame, la hora exacta que quemó y su número de orden (0, 1, 2, …). El servidor guarda esa lista.
+Cuando el navegador envía una hora, busca el frame cuya hora coincide, con 4 ms de tolerancia. Como
+los frames distan 16,7 ms, no hay confusión posible.
+
+**Paso 3: del número de frame al PTS.** La compuerta no ve números de orden: solo puede leer el PTS,
+la marca de tiempo que cada frame lleva en el MPEG-TS (ver C.6). El PTS cuenta 90 000 unidades por
+segundo, así que a 60 fps avanza 1500 unidades por frame, siempre igual. Conociendo el PTS del
+frame 0, que la compuerta anota al verlo pasar, el de cualquier otro es:
+
+```
+PTS del frame n = PTS del frame 0 + n × 1500
+
+si el frame 0 llevaba el PTS 126 000:
+   frame 600  →  126 000 + 600 × 1500  =  1 026 000
+```
+
+Para que la compuerta vea el frame 0, el testbed arranca primero las compuertas y después la fuente.
+
+**Paso 4: del PTS a las horas del servidor.** La compuerta de cada rama (`tsgate.py`) apunta dos
+horas por cada frame, indexadas por su PTS (ver C.8). Se busca el PTS calculado, con medio frame de
+tolerancia.
+
+**Paso 5, solo en DASH.** El origen sigue los fragmentos CMAF según los recibe y apunta a qué hora se
+completa cada uno y qué intervalo de tiempo de medios cubre. El PTS del frame se convierte en tiempo
+de medios y se mira en qué fragmento cae.
+
+**Paso 6: la llegada al navegador.** Aquí cada reproductor ofrece algo distinto:
+
+| Rama | Cómo se identifica el frame pintado | De dónde sale su hora de llegada |
+| :--- | :--- | :--- |
+| DASH | Por su tiempo de medios, que da el navegador con cada frame mostrado | Se vigila el búfer del `<video>` cada 20 ms y se anota cuándo pasó a contener ese instante. |
+| MoQ | Por su marca de tiempo, que lleva el frame decodificado | El reproductor anuncia la marca de cada frame que lee de la red, antes de decodificarlo; se anota cuándo anunció esa. |
+| WebRTC | No hace falta | El navegador entrega, junto con cada frame mostrado, la hora a la que recibió su último paquete. |
+
+### D.6. Los puntos de medida y las etapas de cada rama
+
+Los seis puntos, con el reloj en que se toma cada hora:
+
+| Punto | Dónde se toma | Reloj |
+| :--- | :--- | :--- |
+| Quemado | Filtro de FFmpeg en la fuente | Servidor |
+| Salida del codificador | Compuerta: llegada al sistema del último paquete del frame | Servidor |
+| Entrega al empaquetador | Compuerta: cuando lo lee y lo escribe hacia el empaquetador | Servidor |
+| Fragmento completo (DASH) | Origen | Servidor |
+| Llegada al reproductor | Página web | Navegador, convertido |
+| Pintado | Página web | Navegador, convertido |
+
+La hora de salida del codificador la pone el propio sistema operativo en el instante en que recibe el
+paquete, no el programa cuando lo lee. Así no depende de lo ocupada que esté la compuerta.
+
+**LL-DASH**
+
+| Etapa | Entre qué puntos | Qué contiene |
+| :--- | :--- | :--- |
+| Codificación | Quemado → salida del codificador | Escalado, codificación x264 y multiplexado MPEG-TS. |
+| Empaquetado CMAF | Salida del codificador → fragmento completo | Paso por la compuerta, FFmpeg y la espera a que se cierre el fragmento. |
+| Entrega | Fragmento completo → llegada | Origen, nginx, router de emulación, red y lectura en `dash.js`. |
+| Búfer y pintado | Llegada → pintado | Espera en el búfer, decodificación y pintado. |
+
+**Media over QUIC**
+
+| Etapa | Entre qué puntos | Qué contiene |
+| :--- | :--- | :--- |
+| Codificación | Quemado → salida del codificador | Igual que en DASH. |
+| Entrada al publicador | Salida del codificador → entrega | Lo que el frame espera a que el publicador lo acepte. Normalmente 0 ms. |
+| Publicación y transporte | Entrega → llegada | Importador, relay, router de emulación y red. |
+| Búfer de jitter y pintado | Llegada → pintado | Decodificación, espera en el búfer y pintado. |
+
+**WebRTC**
+
+| Etapa | Entre qué puntos | Qué contiene |
+| :--- | :--- | :--- |
+| Codificación | Quemado → salida del codificador | Igual que en DASH. |
+| Entrada al empaquetador | Salida del codificador → entrega | Como en MoQ. |
+| Publicación y transporte | Entrega → llegada | FFmpeg, RTSP, MediaMTX, router de emulación y red. |
+| Búfer de jitter y pintado | Llegada → pintado | Búfer de jitter, decodificación y pintado. |
+
+La etapa "Codificación" es la misma medida en las tres ramas, porque es anterior al reparto. Las
+pequeñas diferencias que se ven entre carriles se deben a que cada rama muestrea frames distintos.
+
+**La resolución es la de los puntos de medida.** Dentro de una etapa no se sabe cómo se reparte el
+tiempo. En MoQ, por ejemplo, importador, relay y red van juntos, porque el relay es un programa de
+terceros en el que no hay donde anotar una hora.
+
+### D.7. Un ejemplo con cifras reales
+
+Dos frames medidos el 10 de octubre de 2026 contra el servidor. La conexión del cliente tenía ese día
+mucha variación de retardo, lo que infla las etapas que cruzan la red; sirven como ejemplo de lectura,
+no como valores de referencia.
+
+| Rama | Etapas | Suma |
+| :--- | :--- | :--- |
+| DASH (objetivo 3 s) | 38 + 97 + 76 + 2908 ms | 3119 ms |
+| MoQ (slider 200 ms) | 24 + 0 + 104 + 173 ms | 301 ms |
+
+Cómo se lee el de DASH: el frame tardó 38 ms en codificarse, pasaron 97 ms hasta que su fragmento
+quedó completo (el fragmento era de 100 ms), 76 ms hasta que llegó al reproductor, y esperó 2908 ms
+en el búfer. En total 3119 ms, que es lo que marcaba su tarjeta de latencia *glass-to-glass*.
+
+**Qué frame se muestra.** Cada segundo se siguen unos cinco frames por rama. No se promedia cada
+etapa por separado: se elige **un frame real**, el de latencia total mediana, y se muestran las suyas.
+Así las cifras suman exactamente y corresponden a algo que ocurrió.
+
+### D.8. Precisión y límites
+
+| Medida | Precisión | Por qué |
+| :--- | :--- | :--- |
+| Etapas con las dos horas en el servidor (codificación, entrada al empaquetador y, en DASH, empaquetado) | Del orden de 1 ms | Mismo reloj en los dos extremos. La hora del quemado puede tener 1 ms de error. |
+| Etapas que cruzan al navegador | La incertidumbre del reloj, ±RTT/2 | Comparan una hora del servidor con una del navegador. |
+| Llegada en DASH | Hasta 20 ms más | El búfer se consulta cada 20 ms. Además llega un fragmento entero, así que todos sus frames comparten hora de llegada. |
+| Llegada en MoQ | Unos milisegundos | El reproductor agrupa los avisos de frames que llegan casi a la vez; a un frame se le puede asignar la hora del siguiente. |
+| Llegada en WebRTC | Dudosa | Ver abajo. |
+
+**La llegada en WebRTC no cuadra con las estadísticas del navegador.** En una misma prueba, el
+desglose atribuía 11 ms a "Búfer de jitter y pintado", mientras que las estadísticas del propio
+navegador daban 55 ms de permanencia media en el búfer de jitter. Las dos cifras no pueden ser
+ciertas a la vez. La total de la rama es fiable, porque no depende de esa hora; el reparto entre
+"Publicación y transporte" y "Búfer de jitter y pintado" en WebRTC no lo es. Está sin resolver.
+
+Otros límites:
+
+- **Se descarta lo que no cuadra.** Si para un frame sale una etapa negativa, o una codificación
+  fuera de entre 0 y 1 s, alguna hora no era la suya y la muestra entera se desecha.
+- **El muestreo es de cinco frames por segundo**, no de todos.
+- **El final de un frame se conoce con retraso** en MPEG-TS, pero la medida lo compensa (C.4). Lo
+  que no se ha medido es si los empaquetadores añaden por su cuenta ese intervalo, que quedaría dentro
+  de la etapa siguiente.
+- **Tras un reinicio de la fuente** se pierde la referencia del frame 0 hasta que se restablece.
+
+### D.9. Otras dos medidas de búfer, y en qué se diferencian
+
+El panel muestra, además de la etapa de búfer del desglose, una cifra de búfer en la tarjeta de cada
+rama. No son lo mismo:
+
+| Medida | Qué es | Cómo se obtiene |
+| :--- | :--- | :--- |
+| Etapa "Búfer… y pintado" | Tiempo de un frame concreto desde que llega hasta que se pinta. | Como en D.5. |
+| "Búfer local" (DASH) | Segundos de vídeo descargados por delante del punto de reproducción. | Lo declara `dash.js`. |
+| "Búfer de jitter" (MoQ) | Tiempo medio que los frames pasan retenidos en el reproductor. | Se anota cuándo el reproductor lee cada frame y cuándo lo entrega para pintar. Incluye la decodificación. |
+| "Búfer de jitter" (WebRTC) | Tiempo medio que los frames pasan en el búfer de jitter. | Estadísticas del navegador. No incluye la decodificación. |
+
+En MoQ, la etapa del desglose y la cifra de la tarjeta deberían salir parecidas, y así ocurre. En
+WebRTC es donde aparece la discrepancia descrita en D.8.
+
+Hay una tercera cifra que conviene no confundir con ninguna de estas: el **retardo efectivo** que se
+muestra junto al slider de MoQ. No es una medida, sino el valor que el reproductor se ha fijado como
+objetivo. El búfer medido sale menor, porque el objetivo se cuenta desde el frame que más rápido
+llegó y los demás llegan algo más tarde (ver 4.11).
+
+### D.10. Dónde queda registrado
+
+Todo va al CSV que exporta el panel, una fila por segundo:
+
+| Columnas | Contenido |
+| :--- | :--- |
+| `dash_g2g_ms`, `moq_g2g_ms`, `rtc_g2g_ms` | Latencia *glass-to-glass*. |
+| `dash_stage_encode_ms`, `_package_ms`, `_deliver_ms`, `_player_ms` | Etapas de DASH. |
+| `moq_stage_encode_ms`, `_ingest_ms`, `_transport_ms`, `_player_ms` | Etapas de MoQ. |
+| `rtc_stage_encode_ms`, `_ingest_ms`, `_transport_ms`, `_player_ms` | Etapas de WebRTC. |
+| `dash_buffer_s`, `moq_jitter_buffer_s`, `rtc_jitter_buffer_s` | Las cifras de búfer de las tarjetas. |
+| `clock_offset_ms`, `clock_rtt_ms` | Sincronización de relojes y su incertidumbre. |
+| `ingest_anomalies`, `dash_availability_drift_ms` | Indicadores de validez de la sesión. |
