@@ -33,6 +33,7 @@ comprobación directa, se dice.
 8. [Glosario](#8-glosario)
 9. [Anexo A. El manifiesto MPD, campo a campo](#anexo-a-el-manifiesto-mpd-campo-a-campo)
 10. [Anexo B. El catálogo de MoQ, campo a campo](#anexo-b-el-catálogo-de-moq-campo-a-campo)
+11. [Anexo C. MPEG-TS: el formato intermedio del testbed](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed)
 
 ---
 
@@ -62,7 +63,8 @@ Consecuencias para la comparación:
 
 El formato intermedio entre la fuente y los empaquetadores es **MPEG-TS**: un contenedor de paquetes
 fijos de 188 bytes pensado para emisión, que permite engancharse al flujo en cualquier momento. Solo
-existe dentro del servidor; ninguna rama lo envía al navegador.
+existe dentro del servidor; ninguna rama lo envía al navegador. Su funcionamiento y el papel que
+cumple aquí se explican en el [Anexo C](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed).
 
 ---
 
@@ -2023,7 +2025,8 @@ desarrollo, de donde salen estas definiciones.
 | `program.pmtPid` | `4096` | PID de la tabla que describe el programa (PMT). |
 | `si` | PID 17, tabla 66 | Tablas de información de servicio que se conservan tal cual. |
 
-Un **PID** es el identificador de cada flujo elemental dentro de un MPEG-TS. Los valores coinciden
+Qué es un PID, una PMT o una SDT se explica en el
+[Anexo C](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed). En resumen: un **PID** es el identificador de cada flujo elemental dentro de un MPEG-TS. Los valores coinciden
 con los que produce FFmpeg en la fuente: 256 (`0x100`) para el primer vídeo y los siguientes en
 orden. Son los mismos que usa `tsgate.py` para reconocer los frames de cada calidad.
 
@@ -2135,3 +2138,375 @@ que el manifiesto tiene que darle una forma de calcular qué pedir y cuándo, y 
 hacerlo. En MoQ el servidor empuja, y al catálogo le basta con decir qué hay y cómo decodificarlo. A
 cambio, el catálogo lleva dos cosas que el MPD no tiene: el estado en vivo de cada calidad y la
 irregularidad del propio publicador.
+
+---
+
+## Anexo C. MPEG-TS: el formato intermedio del testbed
+
+MPEG-TS aparece en varios puntos de este documento sin haberse explicado: es lo que sale de la
+fuente, lo que lee `tsgate.py`, lo que consume cada empaquetador y lo que describe la sección
+`mpegts` del catálogo de MoQ. Este anexo explica qué es, cómo está hecho por dentro y qué papel
+cumple aquí.
+
+Lo primero, para situarlo: **MPEG-TS no llega nunca al navegador**. Solo existe dentro del servidor,
+en el tramo que va de la fuente a los tres empaquetadores. Cada rama lo deshace y vuelve a empaquetar
+el vídeo en su propio formato.
+
+```
+                      ┌── MPEG-TS ──▶ tsgate ──▶ ffmpeg -f dash ──▶ CMAF  (DASH)
+Fuente (FFmpeg) ──────┼── MPEG-TS ──▶ tsgate ──▶ moq import ts  ──▶ frames MoQ
+codifica y multiplexa └── MPEG-TS ──▶ tsgate ──▶ ffmpeg -f rtsp ──▶ RTP   (WebRTC)
+
+                      └─────── dentro del servidor ───────┘        └─ hacia el navegador ─┘
+```
+
+### C.1. Qué es un contenedor y por qué hace falta
+
+Un codificador produce **flujos elementales**: una sucesión de frames de vídeo comprimidos por un
+lado, y una sucesión de frames de audio por otro. Eso, tal cual, no se puede transmitir ni guardar de
+forma útil, porque faltan tres cosas:
+
+- **Juntarlos.** Vídeo y audio tienen que viajar por el mismo canal, mezclados en orden.
+- **Sincronizarlos.** Hay que saber en qué instante se muestra cada frame y cuál de audio le
+  corresponde.
+- **Describirlos.** Quien lo recibe tiene que saber qué hay dentro: cuántas pistas y de qué códec.
+
+Un **contenedor** es el formato que resuelve esas tres cosas. No comprime nada: envuelve lo ya
+comprimido. MP4, MPEG-TS, Matroska o WebM son contenedores. El proceso de juntar los flujos se llama
+**multiplexar**, y el de separarlos, **demultiplexar**.
+
+MPEG-TS (*MPEG Transport Stream*, también llamado M2TS o simplemente TS) es el contenedor diseñado
+en los años noventa para la **televisión digital**: satélite, cable, TDT. Está definido en la norma
+ISO/IEC 13818-1. Sigue siendo el formato de la emisión televisiva y de buena parte de la contribución
+profesional, y es también el formato original de los segmentos de HLS.
+
+### C.2. La idea de diseño: poder engancharse en cualquier momento
+
+Un MP4 normal tiene una cabecera con el índice de todo el fichero. Sin ella no se puede leer nada, y
+no se puede escribir hasta saber cuánto dura el contenido. Sirve para ficheros, no para una emisión
+que no termina nunca.
+
+MPEG-TS se diseñó para el caso contrario: una emisión continua, por un canal con errores, a la que
+los receptores se conectan cuando quieren (al encender el televisor o cambiar de canal). De ahí salen
+sus cuatro decisiones de diseño:
+
+| Decisión | Consecuencia |
+| :--- | :--- |
+| Paquetes de tamaño fijo, 188 bytes | Tras un error, el receptor encuentra el siguiente paquete sin interpretar nada: basta contar. |
+| Sin cabecera global ni final | El flujo no tiene principio. Se puede empezar a leer por cualquier paquete. |
+| La descripción del contenido se repite periódicamente | Quien llega tarde la recibe en una fracción de segundo. |
+| Cada paquete lleva un contador | Se detecta si se ha perdido alguno. |
+
+Es justo lo que necesita el testbed, y la razón de haberlo elegido como formato intermedio (C.9).
+
+### C.3. El paquete de 188 bytes
+
+Todo el flujo es una sucesión de paquetes idénticos en tamaño: 4 bytes de cabecera y 184 de carga.
+
+```
+┌────────────── 4 bytes ──────────────┬──────────────── 184 bytes ────────────────┐
+│ cabecera                            │ carga (o campo de adaptación + carga)     │
+└─────────────────────────────────────┴───────────────────────────────────────────┘
+```
+
+Los 32 bits de la cabecera:
+
+| Campo | Bits | Significado |
+| :--- | :--- | :--- |
+| Byte de sincronización | 8 | Siempre `0x47`. Marca el inicio de cada paquete. |
+| Indicador de error | 1 | El receptor de radiofrecuencia lo activa si no pudo corregir el paquete. |
+| **Inicio de unidad** | 1 | Este paquete empieza algo nuevo: un frame o una tabla. |
+| Prioridad | 1 | Apenas se usa. |
+| **PID** | 13 | A qué flujo pertenece el paquete. |
+| Cifrado | 2 | Si la carga va cifrada (televisión de pago). |
+| Control de adaptación | 2 | Si hay campo de adaptación, carga, o ambos. |
+| **Contador de continuidad** | 4 | Se incrementa en cada paquete del mismo PID: 0, 1, …, 15, 0, … |
+
+Los tres campos en negrita son los que usa el testbed.
+
+**El PID** (*Packet Identifier*) es la clave de todo el formato. Es un número de 13 bits, de 0 a
+8191, que dice a qué flujo pertenece el paquete. Los paquetes de vídeo, de audio y de tablas van
+mezclados en la misma sucesión, y el PID es lo que permite separarlos: para sacar el vídeo basta
+quedarse con los paquetes de su PID.
+
+```
+PID:   256  256  257  256  256    0  256  256  257  256 4096  256 ...
+       vídeo     audio          PAT            audio     PMT
+```
+
+**El contador de continuidad** permite detectar pérdidas. Si de un PID llegan los paquetes con
+contador 7, 8 y 10, falta el 9. Solo tiene 4 bits, así que detecta la pérdida pero no dice cuántos
+paquetes faltan si son 16 o más.
+
+**El campo de adaptación** es una extensión opcional de la cabecera, que ocupa parte de los 184
+bytes. Lleva tres cosas relevantes:
+
+| Contenido | Para qué |
+| :--- | :--- |
+| **PCR** | La referencia de reloj del emisor (C.6). |
+| **Indicador de acceso aleatorio** | Marca que en este paquete empieza un punto por el que se puede empezar a decodificar: un keyframe. |
+| Relleno | Bytes de relleno para completar los 188 cuando la carga no llega. |
+
+Hay además un PID reservado, el 8191 (`0x1FFF`), para **paquetes nulos**: relleno sin contenido que
+se inserta para mantener un caudal constante. En televisión son habituales; en el testbed, la fuente
+no los genera.
+
+### C.4. De un frame a paquetes: la capa PES
+
+Un frame de vídeo no cabe en 184 bytes. Entre el frame y los paquetes hay una capa intermedia, el
+**PES** (*Packetized Elementary Stream*).
+
+1. Cada frame se envuelve en un paquete PES: una pequeña cabecera, que incluye sus marcas de tiempo,
+   seguida del frame.
+2. Ese PES se trocea en porciones de 184 bytes.
+3. Cada porción va en un paquete TS con el PID de su flujo. El primero lleva activado el indicador de
+   inicio de unidad.
+
+```
+Frame de vídeo (8300 bytes)
+        │
+        ▼
+┌─────────────┬──────────────────────────────────────────┐
+│ cabecera PES│ frame H.264                              │   un PES
+│ (PTS, DTS)  │                                          │
+└─────────────┴──────────────────────────────────────────┘
+        │  se trocea en porciones de 184 bytes
+        ▼
+[TS inicio=1][TS][TS][TS][TS] ... [TS + relleno]            ≈ 46 paquetes, todos con PID 256
+```
+
+Con los valores por defecto del testbed, en órdenes de magnitud:
+
+| Unidad | Tamaño aproximado | Paquetes TS |
+| :--- | :--- | :--- |
+| Frame medio de vídeo (1080p a 4 Mbit/s y 60 fps) | 8,3 kB | Unos 46 |
+| Keyframe | Varias veces mayor | Varios cientos |
+| Frame de audio (AAC a 128 kbit/s) | 340 bytes | 2 |
+
+En total, unos 2900 paquetes por segundo para una calidad.
+
+**Cómo se sabe dónde acaba un frame.** La cabecera PES tiene un campo de longitud, pero en vídeo
+suele valer 0, que significa "sin límite declarado". El final de un frame se reconoce entonces
+porque **empieza el siguiente**: llega un paquete del mismo PID con el indicador de inicio activado.
+Así lo hace `tsgate.py`. Tiene una consecuencia: quien lee el flujo no puede dar un frame por
+completo hasta ver el principio del siguiente, 17 ms después a 60 fps. `tsgate.py` lo compensa
+anotando la hora de llegada del *último* paquete de cada frame, no la del momento en que supo que
+había terminado. No he medido si los empaquetadores añaden ese intervalo por su cuenta.
+
+### C.5. Las tablas: cómo se describe el contenido
+
+Con solo paquetes y PID, el receptor no sabría qué PID lleva qué. Esa información viaja en el propio
+flujo, en **tablas** (PSI, *Program Specific Information*) que ocupan sus propios PID y se repiten
+varias veces por segundo.
+
+Se leen en cadena:
+
+```
+PAT  (PID 0, siempre)
+ └─▶ "el programa 1 se describe en el PID 4096"
+        │
+        ▼
+PMT  (PID 4096)
+ └─▶ "el programa 1 tiene: vídeo H.264 en el PID 256
+                           audio AAC   en el PID 257"
+        │
+        ▼
+     paquetes con PID 256 y 257: la media
+```
+
+| Tabla | PID | Contenido |
+| :--- | :--- | :--- |
+| **PAT** (*Program Association Table*) | 0, fijo | La lista de programas del flujo y en qué PID está la PMT de cada uno. Es el punto de entrada: su PID es el único que se conoce de antemano. |
+| **PMT** (*Program Map Table*) | El que indique la PAT | Para un programa: qué flujos lo componen, de qué tipo es cada uno y en qué PID va. |
+| **SDT** (*Service Description Table*) | 17 | Nombre del servicio y del proveedor. Es de la norma DVB, no imprescindible para decodificar. |
+
+Un **programa** es lo que en televisión se llama un canal: un conjunto de flujos que se reproducen
+juntos. Un mismo MPEG-TS puede llevar varios, y así viajan varios canales por una sola frecuencia de
+TDT. El del testbed lleva uno solo.
+
+Los valores concretos del testbed son los que FFmpeg usa por defecto:
+
+| Qué | PID | En hexadecimal |
+| :--- | :--- | :--- |
+| PAT | 0 | `0x0000` |
+| SDT | 17 | `0x0011` |
+| PMT | 4096 | `0x1000` |
+| Primer flujo (el vídeo de mayor calidad) | 256 | `0x0100` |
+| Flujos siguientes | 257, 258, … | `0x0101`, … |
+
+Con una calidad, el vídeo va en el PID 256 y el audio en el 257. Con tres, los vídeos ocupan 256,
+257 y 258, de mayor a menor calidad, y el audio pasa al 259. **Las tres calidades viajan en el mismo
+flujo**, como tres pistas de vídeo de un mismo programa.
+
+Esto explica la sección `mpegts` del catálogo de MoQ (B.12), que ahora se puede leer entera:
+
+```json
+"mpegts": {
+  "tracks":  { "0.avc3": { "pid": 256 }, "1.aac": { "pid": 257 } },
+  "program": { "transportStreamId": 1, "programNumber": 1, "pmtPid": 4096 },
+  "si":      { "17": { "66": { "track": "0x0011-0x42.si", "interval": 2000 } } }
+}
+```
+
+- `tracks`: los PID que la PMT asignaba al vídeo y al audio.
+- `program`: lo que decía la PAT. Un flujo con identificador 1, que lleva el programa 1, descrito en
+  el PID 4096.
+- `si`: la SDT, que viajaba en el PID 17 y tiene el identificador de tabla 66 (`0x42`).
+
+El importador de MoQ guarda todo eso porque, al convertir el flujo en pistas de MoQ, esa información
+se perdería. Con ella, otra herramienta podría reconstruir un MPEG-TS equivalente al original a la
+salida del relay.
+
+### C.6. El tiempo: PTS, DTS y PCR
+
+MPEG-TS mide el tiempo con un reloj de **90 000 unidades por segundo** (90 kHz). Hay tres marcas:
+
+| Marca | Dónde va | Qué indica |
+| :--- | :--- | :--- |
+| **PTS** (*Presentation Time Stamp*) | Cabecera PES | En qué instante debe mostrarse el frame. |
+| **DTS** (*Decoding Time Stamp*) | Cabecera PES | En qué instante debe decodificarse. Solo difiere del PTS si hay B-frames. |
+| **PCR** (*Program Clock Reference*) | Campo de adaptación | La hora del reloj del emisor, para que el receptor ajuste el suyo. |
+
+**El PTS** es la marca de tiempo de cada frame. A 60 fps, dos frames consecutivos distan
+90 000 / 60 = **1500 unidades**. Es un número de 33 bits, así que da la vuelta cada 26,5 horas.
+
+```
+frame n     PTS = 1 260 000
+frame n+1   PTS = 1 261 500     (+1500 = 1/60 s)
+frame n+2   PTS = 1 263 000
+```
+
+El testbed usa el PTS para **identificar frames**. Las marcas de etapa del desglose de latencia se
+guardan por PTS: `tsgate.py` anota a qué hora llegó el frame con cada PTS, y el orquestador calcula
+el PTS de un frame a partir de su número de orden (PTS del frame 0 más 1500 por frame).
+
+**El DTS** existe porque, con B-frames, el orden de decodificación no coincide con el de
+presentación. La fuente del testbed no los usa (`-tune zerolatency`), así que DTS y PTS coinciden.
+
+**El PCR** resuelve un problema propio de la emisión televisiva: el receptor no tiene forma de
+preguntar la hora al emisor, y su reloj va ligeramente más rápido o más lento. El emisor inserta su
+hora varias veces por segundo y el receptor ajusta su reloj a ella, para consumir exactamente al
+ritmo al que se emite. En el testbed no cumple ninguna función práctica: los empaquetadores procesan
+el flujo según llega.
+
+### C.7. Cómo viaja dentro del servidor
+
+La fuente envía el MPEG-TS por **UDP** a tres puertos locales, uno por rama:
+
+| Puerto | Rama |
+| :--- | :--- |
+| 5001 | DASH |
+| 5002 | MoQ |
+| 5003 | WebRTC |
+
+Cada datagrama UDP lleva **7 paquetes TS**: 7 × 188 = 1316 bytes. Es el tamaño habitual, porque es el
+mayor múltiplo de 188 que cabe en un paquete de red corriente sin fragmentarse. Corresponde a la
+opción `pkt_size=1316`.
+
+El reparto lo hace el multiplexor `tee` de FFmpeg, que escribe el mismo flujo en los tres destinos.
+Las tres ramas reciben **exactamente los mismos paquetes**.
+
+UDP no garantiza la entrega ni siquiera dentro de una misma máquina: si un empaquetador lee más
+despacio de lo que la fuente escribe, el búfer del sistema se llena y se descartan datagramas. Esa
+pérdida afectaría solo a una rama y falsearía la comparación, y por eso se vigila (C.8).
+
+### C.8. Qué hace `tsgate.py`
+
+Es un programa pequeño colocado entre la fuente y cada empaquetador: lee los datagramas UDP y los
+escribe por una tubería. Usa directamente los campos descritos arriba, para tres cosas.
+
+**1. Empezar en un keyframe.** Los empaquetadores arrancan en un instante cualquiera de la emisión.
+La compuerta descarta todo hasta ver un paquete del PID 256 con el **indicador de acceso aleatorio**
+activado: ahí empieza un keyframe. Mientras espera, guarda la última copia de la PAT, la SDT y la
+PMT, y las envía justo antes de ese keyframe, para que el empaquetador pueda interpretar el flujo
+desde el primer byte. Así las tres ramas empiezan en un punto limpio.
+
+**2. Vigilar la continuidad.** Para cada PID comprueba que el **contador de continuidad** avanza de
+uno en uno. Si no, escribe una línea como esta:
+
+```
+continuity check failed: pid=257 expected=9 got=10
+```
+
+Significa que del PID 257 se esperaba el paquete con contador 9 y llegó el 10: se ha perdido uno. El
+orquestador cuenta esas líneas y las muestra como **anomalías de ingesta**. Con el servidor saturado
+se llegaron a ver 203 en la rama de MoQ; con 8 núcleos, ninguna.
+
+**3. Anotar cuándo llega cada frame.** Cada vez que ve un paquete con el **indicador de inicio de
+unidad** en un PID de vídeo, lee el **PTS** de la cabecera PES que empieza ahí y da por terminado el
+frame anterior. Envía al orquestador el PTS de cada frame junto con dos horas: cuándo llegó su último
+paquete al sistema y cuándo se reenvió al empaquetador. Son las etapas "Codificación" y "Entrada al
+empaquetador" del desglose de latencia.
+
+No modifica ningún byte de la media: solo decide por dónde empezar y observa.
+
+### C.9. Por qué se usa aquí, y qué coste tiene
+
+**Por qué MPEG-TS como formato intermedio:**
+
+- **Los empaquetadores pueden arrancar y reiniciarse por separado.** Como el flujo no tiene
+  principio, cualquiera puede engancharse a mitad de emisión. Es lo que permite que el supervisor
+  reinicie una rama sin tocar las otras ni la fuente.
+- **Es un formato que las tres herramientas saben leer:** FFmpeg para DASH y WebRTC, y el importador
+  de MoQ.
+- **Lleva varias pistas de vídeo en un mismo flujo**, lo que permite enviar toda la escalera de
+  calidades de una vez.
+- **Sus marcas de inicio de frame y de keyframe son fáciles de leer** sin decodificar el vídeo, que
+  es lo que hace posible la compuerta.
+
+**Lo que cuesta:**
+
+- **Sobrecarga.** 4 bytes de cabecera por cada 188 son un 2 %, más las cabeceras PES, las tablas y
+  el relleno. Solo afecta al tramo interno.
+- **El final de cada frame se conoce con un frame de retraso** (C.4).
+- **Un único canal para todo.** Vídeo, audio y tablas se serializan en una sola sucesión de
+  paquetes, así que el multiplexor tiene que decidir en qué orden los escribe.
+
+Este último punto está relacionado con una de las opciones de la fuente. Por defecto, el multiplexor
+de MPEG-TS de FFmpeg **agrupa varios frames de audio en un mismo PES**, unos 180 ms, para ahorrar
+cabeceras. El vídeo intercalado con ese audio se retenía ese tiempo. La opción
+`pes_payload_size=0` lo desactiva: un PES por cada frame de audio.
+
+También es el primer sitio donde buscar el origen de las ráfagas observadas a la salida de la fuente
+(final de 4.10). Es una sospecha, no un resultado: no he comprobado en qué punto se forman.
+
+### C.10. Lo que hace cada rama con el flujo
+
+Las tres hacen lo mismo en esencia: demultiplexar, es decir, separar los paquetes por PID,
+reconstruir los PES y extraer los frames con su PTS. Lo que cambia es en qué los vuelven a envolver.
+
+| Rama | Herramienta | Qué toma | En qué lo convierte |
+| :--- | :--- | :--- | :--- |
+| DASH | `ffmpeg -f dash` | Todos los vídeos y el audio | Fragmentos CMAF: cada frame pasa a un `mdat`, y su PTS a los tiempos del `moof`. |
+| MoQ | `moq import ts` | Todos los vídeos y el audio | Una pista por PID; cada frame, un frame de MoQ con su marca de tiempo; cada keyframe abre un grupo. |
+| WebRTC | `ffmpeg -f rtsp` | Solo el primer vídeo (PID 256) | Paquetes RTP, hacia MediaMTX. |
+
+En ninguna se recodifica: los bytes de H.264 de cada frame son los mismos a la entrada y a la salida.
+Lo que se desecha es el envoltorio de MPEG-TS, es decir, las cabeceras de 188 bytes, los PES y las
+tablas. El importador de MoQ conserva además un resumen de esas tablas en el catálogo.
+
+Dos detalles de cómo se trata el PTS:
+
+- **DASH** resta a todo el flujo el PTS del primer frame que recibe, de modo que el tiempo de medios
+  empieza en 0. Por eso importa que la compuerta haga empezar el flujo en un keyframe.
+- **MoQ** reescribe las marcas de tiempo con un desfase propio. Por esa razón el testbed no puede
+  seguir un frame por su marca de tiempo en la rama de MoQ, y lo identifica por el timecode quemado
+  en la imagen.
+
+### C.11. Vocabulario
+
+| Término | Significado |
+| :--- | :--- |
+| Flujo elemental | La salida de un codificador: solo vídeo o solo audio. |
+| Multiplexar / demultiplexar | Mezclar varios flujos en uno / separarlos. |
+| Paquete TS | La unidad de 188 bytes. |
+| PID | Identificador de flujo que lleva cada paquete. |
+| PES | Envoltorio de cada frame, con sus marcas de tiempo, antes de trocearlo. |
+| PAT, PMT | Tablas que describen qué programas hay y qué flujos tiene cada uno. |
+| SDT | Tabla con el nombre del servicio. |
+| Programa | Conjunto de flujos que se reproducen juntos: un canal. |
+| PTS, DTS | Instante de presentación y de decodificación de un frame, a 90 kHz. |
+| PCR | Referencia de reloj del emisor. |
+| Contador de continuidad | Contador de 4 bits por PID para detectar pérdidas. |
+| Indicador de acceso aleatorio | Marca de que empieza un keyframe. |
+| Paquete nulo | Relleno, en el PID 8191. |
