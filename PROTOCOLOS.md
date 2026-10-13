@@ -31,6 +31,7 @@ comprobación directa, se dice.
 6. [Comparación lado a lado](#6-comparación-lado-a-lado)
 7. [Qué controla cada mando del panel](#7-qué-controla-cada-mando-del-panel)
 8. [Glosario](#8-glosario)
+9. [Anexo A. El manifiesto MPD, campo a campo](#anexo-a-el-manifiesto-mpd-campo-a-campo)
 
 ---
 
@@ -173,47 +174,21 @@ Tres mecanismos, que tienen que darse a la vez:
 3. **Anuncio de disponibilidad adelantada.** El manifiesto le dice al reproductor que puede pedir un
    segmento antes de que esté completo.
 
-El manifiesto real que sirve ahora el testbed (resumido) lo muestra:
-
-```xml
-<MPD type="dynamic"
-     availabilityStartTime="2026-10-09T14:07:37.116Z"
-     timeShiftBufferDepth="PT30.0S" maxSegmentDuration="PT2.0S" minBufferTime="PT1.0S">
-  <ServiceDescription id="0"/>
-  <Period id="0" start="PT0.0S">
-    <AdaptationSet id="0" contentType="video" segmentAlignment="true" bitstreamSwitching="true">
-      <Representation id="0" codecs="avc1.42c02a" bandwidth="4000000" width="1920" height="1080">
-        <ProducerReferenceTime type="captured" wallClockTime="..." presentationTime="0"/>
-        <SegmentTemplate timescale="1000000" duration="2000000"
-                         availabilityTimeOffset="1.900" availabilityTimeComplete="false"
-                         initialization="init-stream$RepresentationID$.m4s"
-                         media="chunk-stream$RepresentationID$-$Number%05d$.m4s" startNumber="1"/>
-      </Representation>
-    </AdaptationSet>
-  </Period>
-  <UTCTiming schemeIdUri="urn:mpeg:dash:utc:http-xsdate:2014" value="/api/utc"/>
-</MPD>
-```
-
-Lo que significa cada campo:
+En el manifiesto eso se reduce a tres campos:
 
 | Campo | Significado |
 | :--- | :--- |
-| `type="dynamic"` | Es un directo: el contenido crece con el tiempo. |
-| `availabilityStartTime` (AST) | Hora de reloj en la que empezó la emisión. Es el ancla de todo el cálculo. |
-| `duration` / `timescale` | Duración de cada segmento: 2 000 000 / 1 000 000 = 2 s. |
-| `$Number$` | El reproductor **no descarga una lista** de segmentos: calcula el número con `(ahora − AST) / duración`. |
-| `availabilityTimeOffset="1.900"` | El segmento se puede pedir 1,9 s antes de estar completo, es decir, en cuanto existe su primer fragmento (2 s − 0,1 s). |
-| `availabilityTimeComplete="false"` | Avisa de que lo que se sirve puede estar incompleto: es la señal de baja latencia. |
-| `UTCTiming` | De dónde saca el reproductor la hora, para que su "ahora" coincida con el del servidor. |
-| `ProducerReferenceTime` | Relación entre el tiempo del vídeo y la hora de captura; permite al reproductor calcular su latencia. |
-| `timeShiftBufferDepth` | Cuánto pasado se conserva (30 s). |
-| `ServiceDescription` | Aquí está vacío: el manifiesto no impone una latencia objetivo y decide el reproductor. |
+| `availabilityStartTime` | Hora de reloj en la que empezó la emisión. Con ella y la duración de segmento, el reproductor **calcula** qué segmento toca en cada momento, sin descargar ninguna lista. |
+| `availabilityTimeOffset="1.900"` | El segmento se puede pedir 1,9 s antes de estar completo: en cuanto existe su primer fragmento (2 s − 0,1 s). |
+| `availabilityTimeComplete="false"` | Avisa de que lo que se sirve puede estar incompleto. Es la señal de baja latencia. |
 
-Un detalle importante: como las URL se calculan con el reloj, **si el reloj del reproductor o el AST
+Como las direcciones se calculan con el reloj, **si el reloj del reproductor o la hora de inicio
 están mal, el reproductor pide segmentos que aún no existen o va más atrasado de lo que cree**. Por
-eso el origen del testbed recalibra el AST con la hora real en que se abre cada segmento y expone
-el desfase como métrica (`dash_availability_drift_ms`).
+eso el manifiesto indica también de dónde sacar la hora (`UTCTiming`), y el origen del testbed
+recalibra la hora de inicio midiendo cuándo se abre realmente cada segmento.
+
+El manifiesto completo, con todos sus campos explicados y ejemplos de cálculo, está en el
+[Anexo A](#anexo-a-el-manifiesto-mpd-campo-a-campo).
 
 ### 3.4. El recorrido en este testbed
 
@@ -1070,3 +1045,515 @@ congestión.
 **WebTransport**. API del navegador para usar streams y datagramas QUIC, sobre HTTP/3.
 
 **WHEP**. Señalización estándar por HTTP para reproducir un flujo WebRTC.
+
+---
+
+## Anexo A. El manifiesto MPD, campo a campo
+
+Este anexo recorre el manifiesto que sirve el testbed, elemento por elemento y atributo por atributo:
+qué significa cada uno, qué valor tiene aquí, de dónde sale y qué hace el reproductor con él.
+
+El manifiesto de ejemplo se capturó del servidor el 9 de octubre de 2026, con una sola calidad
+(1080p a 4000 kbit/s), segmentos de 2 s y fragmentos de 100 ms. Los valores numéricos de los ejemplos
+salen de él.
+
+### A.1. El manifiesto completo
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xmlns="urn:mpeg:dash:schema:mpd:2011"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     xsi:schemaLocation="urn:mpeg:DASH:schema:MPD:2011 http://standards.iso.org/ittf/PubliclyAvailableStandards/MPEG-DASH_schema_files/DASH-MPD.xsd"
+     profiles="urn:mpeg:dash:profile:isoff-live:2011"
+     type="dynamic"
+     minimumUpdatePeriod="PT500S"
+     availabilityStartTime="2026-10-09T14:07:37.116Z"
+     publishTime="2026-10-09T17:13:13.056Z"
+     timeShiftBufferDepth="PT30.0S"
+     maxSegmentDuration="PT2.0S"
+     minBufferTime="PT1.0S">
+  <ProgramInformation>
+  </ProgramInformation>
+  <ServiceDescription id="0">
+  </ServiceDescription>
+  <Period id="0" start="PT0.0S">
+    <AdaptationSet id="0" contentType="video" startWithSAP="1" segmentAlignment="true"
+                   bitstreamSwitching="true" frameRate="60/1" maxWidth="1920" maxHeight="1080" par="16:9">
+      <Resync dT="100000" type="0"/>
+      <Representation id="0" mimeType="video/mp4" codecs="avc1.42c02a" bandwidth="4000000"
+                      width="1920" height="1080" sar="1:1">
+        <ProducerReferenceTime id="0" inband="true" type="captured"
+                               wallClockTime="2026-10-09T14:07:38.089Z" presentationTime="0">
+          <UTCTiming schemeIdUri="urn:mpeg:dash:utc:http-xsdate:2014" value="/api/utc"/>
+        </ProducerReferenceTime>
+        <Resync dT="1000000" type="1"/>
+        <SegmentTemplate timescale="1000000" duration="2000000"
+                         availabilityTimeOffset="1.900" availabilityTimeComplete="false"
+                         initialization="init-stream$RepresentationID$.m4s"
+                         media="chunk-stream$RepresentationID$-$Number%05d$.m4s" startNumber="1">
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="1" contentType="audio" startWithSAP="1" segmentAlignment="true"
+                   bitstreamSwitching="true">
+      <Resync dT="100000" type="0"/>
+      <Representation id="1" mimeType="audio/mp4" codecs="mp4a.40.2" bandwidth="130858"
+                      audioSamplingRate="48000">
+        <AudioChannelConfiguration
+            schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
+        <Resync dT="21333" type="1"/>
+        <SegmentTemplate timescale="1000000" duration="2000000"
+                         availabilityTimeOffset="1.900" availabilityTimeComplete="false"
+                         initialization="init-stream$RepresentationID$.m4s"
+                         media="chunk-stream$RepresentationID$-$Number%05d$.m4s" startNumber="1">
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+  <UTCTiming schemeIdUri="urn:mpeg:dash:utc:http-xsdate:2014" value="/api/utc"/>
+</MPD>
+```
+
+Lo escribe FFmpeg (`-f dash`). El testbed interviene en dos puntos, que se señalan donde tocan: el
+origen reescribe `availabilityStartTime`, y el `bandwidth` del vídeo se le declara a FFmpeg a mano.
+
+### A.2. Los formatos que aparecen
+
+Antes de los campos, las cuatro notaciones que se repiten:
+
+| Notación | Ejemplo | Cómo se lee |
+| :--- | :--- | :--- |
+| Duración (`xs:duration`) | `PT2.0S`, `PT500S`, `PT1H30M` | `P` de periodo, `T` de tiempo, y luego cantidades con su unidad: `H` horas, `M` minutos, `S` segundos. `PT2.0S` son 2 segundos. |
+| Fecha y hora (`xs:dateTime`) | `2026-10-09T14:07:37.116Z` | ISO 8601. La `Z` final indica UTC. Siempre es hora de reloj real, no tiempo del vídeo. |
+| Tiempo en unidades de `timescale` | `duration="2000000"` con `timescale="1000000"` | Un entero que se divide por la escala para obtener segundos: 2 000 000 / 1 000 000 = 2 s. Evita decimales. |
+| Identificador de esquema (URN) | `urn:mpeg:dash:utc:http-xsdate:2014` | Un nombre normalizado que dice cómo interpretar el `value` que lo acompaña. |
+
+Hay dos relojes distintos en todo el manifiesto, y conviene no mezclarlos:
+
+- **Tiempo de reloj** (*wall clock*): la hora real, en UTC.
+- **Tiempo de medios**: la posición dentro del vídeo, que empieza en 0 al inicio de la emisión.
+
+El manifiesto existe, en buena parte, para relacionar uno con otro.
+
+### A.3. El elemento raíz, `MPD`
+
+Describe la emisión en su conjunto.
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `xmlns`, `xmlns:xsi`, `xmlns:xlink`, `xsi:schemaLocation` | — | Declaraciones XML: qué vocabulario se usa y dónde está su esquema. No afectan a la reproducción. |
+| `profiles` | `urn:mpeg:dash:profile:isoff-live:2011` | El subconjunto de DASH que cumple el manifiesto. Este es el perfil "ISO BMFF live": segmentos MP4 fragmentado direccionados por plantilla. Le dice al reproductor qué puede esperar. |
+| `type` | `dynamic` | `dynamic` es un directo: el contenido crece y la disponibilidad depende de la hora. `static` es vídeo bajo demanda: todo existe ya. |
+| `availabilityStartTime` | `2026-10-09T14:07:37.116Z` | El ancla de todo: la hora de reloj que corresponde al tiempo de medios 0. |
+| `publishTime` | `2026-10-09T17:13:13.056Z` | Cuándo se generó esta versión del manifiesto. |
+| `minimumUpdatePeriod` | `PT500S` | Cada cuánto, como mínimo, puede cambiar el manifiesto. El reproductor no lo vuelve a pedir antes. |
+| `timeShiftBufferDepth` | `PT30.0S` | Cuánto pasado se conserva en el servidor. |
+| `maxSegmentDuration` | `PT2.0S` | Duración máxima de un segmento en toda la emisión. |
+| `minBufferTime` | `PT1.0S` | Parámetro del modelo de búfer que define qué significa `bandwidth`. |
+
+**`type`.** Con `dynamic`, el reproductor no puede pedir cualquier segmento: solo los que la hora
+actual hace disponibles. Con `static` no hay reloj que consultar.
+
+**`availabilityStartTime` (AST).** Si el AST es las 14:07:37,116, el frame con tiempo de medios 10 s
+corresponde a las 14:07:47,116. Todos los cálculos de A.9 parten de aquí. Un AST adelantado hace que
+el reproductor pida segmentos que aún no existen (errores 404); uno atrasado añade latencia sin que
+el reproductor lo sepa.
+
+> **Intervención del testbed.** FFmpeg escribe como AST la hora en que arrancó, que no coincide con
+> la hora real en que empiezan a existir los segmentos. El origen (`origin.py`) mide a qué hora se
+> abre cada segmento, calcula el AST que le corresponde y lo sustituye en el manifiesto antes de
+> servirlo. Mientras no lo tiene calibrado, no publica el manifiesto. El desfase del último segmento
+> respecto a ese calendario es la métrica `dash_availability_drift_ms`.
+
+**`publishTime`.** Sirve para distinguir versiones del manifiesto. En el ejemplo, el manifiesto se
+generó 3 h 5 min después de empezar la emisión.
+
+**`minimumUpdatePeriod`.** En un manifiesto con lista explícita de segmentos hay que releerlo
+constantemente para descubrir los nuevos. Aquí las direcciones se calculan con una fórmula (A.9), así
+que el manifiesto no cambia y basta un valor alto: 500 s.
+
+**`timeShiftBufferDepth`.** Define la ventana en la que se puede retroceder. Con 30 s, a las
+17:13:13 se puede pedir contenido desde las 17:12:43. FFmpeg recibe la ventana con
+`-window_size` y va pidiendo al origen que borre los segmentos que salen de ella.
+
+**`minBufferTime` y `bandwidth`.** Van juntos. La definición formal es: si el cliente descarga por
+un canal de velocidad constante igual al `bandwidth` de una Representation, y espera `minBufferTime`
+antes de empezar a reproducir, no se quedará sin datos. Es decir, `bandwidth` no es el bitrate medio,
+sino un caudal que garantiza continuidad dado ese colchón. En la práctica los reproductores usan
+`bandwidth` como bitrate de la calidad y gestionan su búfer con ajustes propios.
+
+Atributos que este manifiesto no lleva y conviene conocer:
+
+| Atributo | Para qué sirve |
+| :--- | :--- |
+| `suggestedPresentationDelay` | Distancia al directo que el servicio recomienda. Sin él, decide el reproductor. |
+| `mediaPresentationDuration` | Duración total. Solo tiene sentido en `static`. |
+| `availabilityEndTime` | Hora a partir de la cual el contenido deja de estar disponible. |
+
+### A.4. `ProgramInformation` y `ServiceDescription`
+
+**`ProgramInformation`** lleva metadatos para humanos: título, fuente, derechos. Aquí está vacío.
+Con contenido sería así:
+
+```xml
+<ProgramInformation>
+  <Title>Big Buck Bunny en directo</Title>
+  <Source>Blender Foundation</Source>
+</ProgramInformation>
+```
+
+**`ServiceDescription`** es donde el servicio le dice al reproductor cómo quiere que se comporte en
+baja latencia. Aquí está vacío, con solo su `id`. Es importante saber qué podría llevar, porque es el
+mecanismo estándar para fijar la latencia desde el servidor:
+
+```xml
+<ServiceDescription id="0">
+  <Latency target="3000" min="2000" max="6000"/>
+  <PlaybackRate min="0.96" max="1.04"/>
+</ServiceDescription>
+```
+
+| Elemento | Significado |
+| :--- | :--- |
+| `Latency@target` | Latencia objetivo respecto al directo, en milisegundos. |
+| `Latency@min`, `@max` | Margen aceptable. Fuera de él, el reproductor debe corregir. |
+| `PlaybackRate@min`, `@max` | Cuánto puede acelerar o frenar la reproducción para corregir. `1.04` es un 4 % más rápido. |
+
+Como el del testbed está vacío, **el manifiesto no impone ninguna latencia**: la fija el slider del
+panel, que escribe el ajuste `liveDelay` de `dash.js`. Es una diferencia con MoQ, donde el publicador
+sí condiciona el búfer del reproductor a través del catálogo.
+
+### A.5. `Period`
+
+Un tramo continuo de contenido. Una emisión puede tener varios, por ejemplo programa, publicidad y
+programa; cada uno con sus propias pistas y calidades.
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `id` | `0` | Identificador. |
+| `start` | `PT0.0S` | Cuándo empieza el periodo, contado desde el AST. |
+
+Con `start="PT0.0S"` el periodo empieza justo en el AST. Si hubiera un segundo periodo con
+`start="PT600S"`, empezaría 10 minutos después, y su tiempo de medios volvería a contar desde su
+propio origen.
+
+### A.6. `AdaptationSet`
+
+Un componente del contenido: aquí hay dos, el vídeo y el audio. Dentro de un AdaptationSet, todas
+las Representations son **el mismo contenido en versiones intercambiables**. El reproductor elige una
+de cada AdaptationSet y puede cambiar entre las de uno mismo.
+
+| Atributo | Vídeo | Audio | Significado |
+| :--- | :--- | :--- | :--- |
+| `id` | `0` | `1` | Identificador. |
+| `contentType` | `video` | `audio` | Qué tipo de media contiene. |
+| `startWithSAP` | `1` | `1` | Cada segmento empieza por un punto de acceso del tipo indicado. |
+| `segmentAlignment` | `true` | `true` | Los segmentos de las distintas calidades cubren los mismos intervalos. |
+| `bitstreamSwitching` | `true` | `true` | Se puede cambiar de calidad sin reiniciar el decodificador. |
+| `frameRate` | `60/1` | — | Frames por segundo, como fracción. |
+| `maxWidth`, `maxHeight` | `1920`, `1080` | — | La resolución mayor de entre sus Representations. |
+| `par` | `16:9` | — | Relación de aspecto de la imagen. |
+
+**`startWithSAP`.** Un SAP (*Stream Access Point*) es un punto por el que se puede empezar a
+decodificar. El tipo 1 es el más estricto: un keyframe a partir del cual todo lo que sigue se
+decodifica y se muestra en orden, sin depender de nada anterior. Es lo que garantiza que el
+reproductor puede entrar por cualquier segmento. Por eso el segmento tiene que ser múltiplo del GOP:
+con GOP de 1 s y segmento de 2 s, cada segmento empieza por keyframe.
+
+**`segmentAlignment`.** Si el segmento 5568 de 1080p cubre de 11134 a 11136 s, el de 720p cubre
+exactamente lo mismo. Así el reproductor puede reproducir el 5568 en una calidad y el 5569 en otra
+sin huecos ni solapes. El testbed lo consigue codificando todas las calidades con el mismo GOP y sin
+cortes de escena.
+
+**`frameRate="60/1"`.** Se da como fracción para expresar tasas no enteras: 29,97 fps se escribe
+`30000/1001`.
+
+**`par`** (*picture aspect ratio*) es la forma de la imagen final. No hay que confundirlo con `sar`
+de la Representation (A.7).
+
+**Con varias calidades**, el AdaptationSet de vídeo contiene una Representation por cada una, todas
+dentro del mismo conjunto. Esto lo fija la opción `-adaptation_sets "id=0,streams=v id=1,streams=a"`
+de FFmpeg: sin ella, cada calidad quedaría en un AdaptationSet distinto y `dash.js` no conmutaría
+entre ellas.
+
+#### El elemento `Resync`
+
+Aparece dos veces en cada componente, y es específico de la baja latencia. Describe los **puntos de
+resincronización dentro de un segmento**: lugares por los que un reproductor puede engancharse sin
+esperar al segmento siguiente.
+
+| Dónde | Valor | Significado |
+| :--- | :--- | :--- |
+| AdaptationSet (vídeo y audio) | `dT="100000" type="0"` | Hay un punto de resincronización cada 100 ms como máximo. |
+| Representation de vídeo | `dT="1000000" type="1"` | Hay un punto de acceso de tipo 1 cada 1 s como máximo. |
+| Representation de audio | `dT="21333" type="1"` | Hay un punto de acceso de tipo 1 cada 21,333 ms como máximo. |
+
+- **`dT`** es la distancia máxima entre puntos, en unidades de `timescale` (aquí, microsegundos).
+- **`type`** es el tipo de SAP que se garantiza en esos puntos. `0` significa que no se garantiza
+  ninguno: es solo un límite de fragmento, por el que se puede empezar a *leer* pero no
+  necesariamente a *decodificar*.
+
+Los tres valores se corresponden con la configuración:
+
+- 100 ms es la duración de fragmento: cada `moof` + `mdat` es un punto de resincronización.
+- 1 s es el GOP: cada keyframe es un punto por el que empezar a decodificar.
+- 21,333 ms es un frame de audio AAC: 1024 muestras a 48 000 Hz. Todos los frames de audio son
+  independientes, así que cada uno es un punto de acceso.
+
+Leídos juntos dicen: "puedes engancharte a mitad de segmento cada 100 ms, pero para empezar a mostrar
+vídeo tendrás que esperar hasta 1 s a que llegue un keyframe".
+
+### A.7. `Representation`
+
+Una versión concreta: lo que en MoQ se llama rendition.
+
+**Vídeo**
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `id` | `0` | Identificador. Se usa para construir las direcciones (`$RepresentationID$`). |
+| `mimeType` | `video/mp4` | Formato del contenedor. |
+| `codecs` | `avc1.42c02a` | Códec y sus parámetros, en una cadena normalizada. |
+| `bandwidth` | `4000000` | Caudal necesario, en bits por segundo (ver A.3). |
+| `width`, `height` | `1920`, `1080` | Resolución en píxeles. |
+| `sar` | `1:1` | Relación de aspecto del píxel. |
+
+**`codecs="avc1.42c02a"`.** Se descompone así:
+
+| Parte | Valor | Significado |
+| :--- | :--- | :--- |
+| `avc1` | — | H.264, con los parámetros del decodificador (SPS y PPS) en el segmento de inicialización. |
+| `42` | 66 en decimal | Perfil *Baseline*. |
+| `c0` | — | Restricciones adicionales: con estos bits, *Constrained Baseline*. |
+| `2a` | 42 en decimal | Nivel 4.2, el que permite 1080p a 60 fps. |
+
+El reproductor usa esta cadena para preguntar al navegador si puede decodificarlo antes de descargar
+nada. El perfil *Baseline* es consecuencia de codificar con `-preset ultrafast`: sin B-frames ni
+CABAC.
+
+Compárese con el catálogo de MoQ, que para el mismo vídeo dice `avc3.42c02a`. Los mismos bytes, pero
+`avc3` indica que los parámetros van dentro del flujo, repetidos en cada keyframe, y `avc1` que van
+aparte, en el segmento de inicialización.
+
+**`bandwidth="4000000"`.**
+
+> **Intervención del testbed.** Como el empaquetador copia el vídeo sin recodificar (`-c copy`),
+> FFmpeg no conoce su bitrate. El testbed se lo declara (`-b:v:0 4000k`) para que el manifiesto lo
+> lleve. Es el valor nominal de la escalera, no una medida. El ABR de `dash.js` lo usa para decidir
+> si una calidad cabe.
+
+Aquí hay otra diferencia con MoQ: para esta misma calidad, el catálogo de MoQ declara unos
+7 Mbit/s, porque allí el valor lo mide el publicador.
+
+**`sar`** (*sample aspect ratio*) es la forma de cada píxel. `1:1` son píxeles cuadrados. Con vídeo
+anamórfico, por ejemplo 1440×1080 mostrado como 16:9, sería `4:3`.
+
+**Audio**
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `codecs` | `mp4a.40.2` | AAC-LC: `mp4a` es audio MPEG-4, `40` el tipo de objeto MPEG-4 Audio y `2` el perfil *Low Complexity*. |
+| `bandwidth` | `130858` | Aquí sí lo conoce FFmpeg, porque lo lee del flujo: unos 128 kbit/s más cabeceras. |
+| `audioSamplingRate` | `48000` | Muestras por segundo. |
+
+**`AudioChannelConfiguration`** indica la disposición de canales. Con el esquema
+`...audio_channel_configuration:2011`, el `value` es directamente el número de canales: `2` es
+estéreo.
+
+### A.8. `ProducerReferenceTime`
+
+Relaciona un instante del vídeo con la hora de reloj a la que se produjo. Es lo que permite a un
+reproductor calcular su latencia real de extremo a extremo.
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `id` | `0` | Identificador. |
+| `type` | `captured` | A qué momento se refiere la hora: `captured` es la captura; `encoder` sería la salida del codificador. |
+| `wallClockTime` | `2026-10-09T14:07:38.089Z` | La hora de reloj. |
+| `presentationTime` | `0` | El tiempo de medios al que corresponde, en unidades de `timescale`. |
+| `inband` | `true` | La misma información va también dentro de los segmentos, en cajas `prft`. |
+
+Se lee: "el frame con tiempo de medios 0 se capturó a las 14:07:38,089". Con eso, la latencia sería:
+
+```
+latencia = ahora − (wallClockTime + tiempo de medios que se está mostrando)
+```
+
+El `UTCTiming` anidado indica con qué reloj se tomó esa hora, para que el reproductor use el mismo.
+
+> **Observación.** En este manifiesto, `wallClockTime` (14:07:38,089) y `availabilityStartTime`
+> (14:07:37,116) difieren en 0,973 s, cuando los dos se refieren al tiempo de medios 0. El primero lo
+> escribe FFmpeg con su propio reloj y el origen no lo corrige; el segundo es el que el origen
+> recalibra. La latencia que declaró `dash.js` en las pruebas (3,002 s con objetivo de 3 s, frente a
+> 3,119 s medidos por timecode) es coherente con que se guíe por el AST. No he comprobado en su
+> código qué uso hace de este elemento.
+
+### A.9. `SegmentTemplate`: cómo se calculan las direcciones
+
+Es la pieza central. En vez de listar los segmentos, da una **fórmula** para construir sus
+direcciones y saber cuándo existen.
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `timescale` | `1000000` | Unidades por segundo para los tiempos de este elemento. |
+| `duration` | `2000000` | Duración de cada segmento: 2 s. |
+| `startNumber` | `1` | Número del primer segmento. |
+| `initialization` | `init-stream$RepresentationID$.m4s` | Plantilla del segmento de inicialización. |
+| `media` | `chunk-stream$RepresentationID$-$Number%05d$.m4s` | Plantilla de los segmentos de media. |
+| `availabilityTimeOffset` | `1.900` | Cuántos segundos antes de estar completo se puede pedir un segmento. |
+| `availabilityTimeComplete` | `false` | Si lo que se sirve en ese momento está completo o no. |
+
+**Las plantillas.** Los identificadores entre `$` se sustituyen:
+
+| Identificador | Se sustituye por |
+| :--- | :--- |
+| `$RepresentationID$` | El `id` de la Representation. |
+| `$Number$` | El número de segmento. `%05d` lo rellena con ceros hasta 5 cifras. |
+| `$Bandwidth$` | El `bandwidth` de la Representation. No se usa aquí. |
+| `$Time$` | El tiempo de inicio del segmento. Se usa con listas de segmentos, no aquí. |
+
+Para la Representation `0`, las direcciones quedan `init-stream0.m4s` y `chunk-stream0-00042.m4s`.
+Son relativas a la del manifiesto: `/media/dash/chunk-stream0-00042.m4s`.
+
+**Qué segmento toca.** El número del segmento que se está produciendo en un instante dado es:
+
+```
+número = startNumber + parte entera de ( (ahora − AST − Period@start) / duración )
+```
+
+Ejemplo, con el manifiesto de A.1, a las 17:13:13,056:
+
+```
+ahora − AST = 17:13:13,056 − 14:07:37,116 = 11 135,94 s
+11 135,94 / 2 = 5567,97  →  parte entera: 5567
+número = 1 + 5567 = 5568
+
+dirección: /media/dash/chunk-stream0-05568.m4s
+```
+
+Ese segmento cubre el tiempo de medios de 11 134 a 11 136 s. El reproductor no ha descargado ninguna
+lista: lo ha calculado con el reloj.
+
+**Cuándo se puede pedir.** En DASH clásico, un segmento está disponible cuando termina:
+
+```
+disponible desde = AST + Period@start + (número − startNumber + 1) × duración
+```
+
+Para el 5568: 14:07:37,116 + 5568 × 2 s = **17:13:13,116**. Es decir, 2 s después de que empezara a
+producirse. Ese retraso es la razón de la latencia alta de DASH clásico.
+
+**`availabilityTimeOffset`** adelanta ese momento:
+
+```
+disponible desde = (lo anterior) − availabilityTimeOffset
+                 = 17:13:13,116 − 1,9 s = 17:13:11,216
+```
+
+El segmento empezó a producirse a las 17:13:11,116 y se puede pedir desde las 17:13:11,216: solo
+100 ms después, que es lo que tarda en existir su primer fragmento. El valor 1,9 sale de restar la
+duración de fragmento a la de segmento (2 − 0,1). Lo calcula FFmpeg.
+
+| Fragmento | Segmento | `availabilityTimeOffset` |
+| :--- | :--- | :--- |
+| 100 ms | 2 s | 1,900 |
+| 200 ms | 2 s | 1,800 |
+| 500 ms | 2 s | 1,500 |
+| 100 ms | 4 s | 3,900 |
+
+**`availabilityTimeComplete="false"`** es el complemento necesario: avisa de que, en ese momento
+adelantado, el segmento **no está entero**. El reproductor debe pedirlo y leer la respuesta conforme
+llega, en vez de esperar a que termine. `dash.js` activa su modo de baja latencia al ver este valor.
+
+**Línea de tiempo del segmento 5568:**
+
+```
+17:13:11,116  empieza a producirse
+17:13:11,216  primer fragmento completo → ya se puede pedir (gracias a availabilityTimeOffset)
+17:13:11,316  segundo fragmento, que el servidor envía por la petición ya abierta
+     ...      (un fragmento cada 100 ms)
+17:13:13,116  último fragmento: el segmento está completo y la respuesta HTTP termina
+17:13:13,216  ya se puede pedir el 5569
+```
+
+**La alternativa: `SegmentTimeline`.** En vez de una duración fija, se puede listar cada segmento
+con su inicio y duración exactos:
+
+```xml
+<SegmentTemplate timescale="1000000" media="chunk-$Time$.m4s">
+  <SegmentTimeline>
+    <S t="11134000000" d="2000000" r="2"/>
+  </SegmentTimeline>
+</SegmentTemplate>
+```
+
+Es más preciso, porque tolera segmentos de duración irregular, pero obliga a releer el manifiesto
+para conocer cada segmento nuevo y no permite anunciar disponibilidad adelantada. Por eso el testbed
+lo desactiva (`-use_timeline 0`).
+
+### A.10. `UTCTiming`
+
+Todo lo anterior depende de que el "ahora" del reproductor sea el mismo que el del servidor. Con el
+reloj del ordenador 2 s adelantado, el reproductor pediría segmentos que no existen. `UTCTiming` le
+dice de dónde sacar la hora buena.
+
+| Atributo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `schemeIdUri` | `urn:mpeg:dash:utc:http-xsdate:2014` | El método. |
+| `value` | `/api/utc` | Depende del método; aquí, la dirección a consultar. |
+
+Con `http-xsdate`, el reproductor hace una petición GET y recibe la hora como texto:
+
+```
+GET /api/utc
+→ 2026-10-13T09:48:38.776Z
+```
+
+`dash.js` compara esa hora con la de su reloj, calcula la diferencia y la aplica a todos sus
+cálculos. La dirección es relativa al manifiesto, así que funciona con cualquier nombre de host y
+tanto con HTTP como con HTTPS. La sirve el propio orquestador, con el mismo reloj que usa para
+calibrar el AST.
+
+Otros métodos que define el estándar:
+
+| Esquema | Cómo obtiene la hora |
+| :--- | :--- |
+| `...:http-xsdate:2014` | Cuerpo de una respuesta HTTP, en formato `xs:dateTime`. El que se usa aquí. |
+| `...:http-iso:2014` | Igual, en formato ISO 8601. |
+| `...:http-head:2014` | Cabecera `Date` de una respuesta HTTP. Solo tiene precisión de segundos. |
+| `...:http-ntp:2014`, `...:ntp:2014` | Protocolo NTP. |
+| `...:direct:2014` | La hora va escrita en el propio `value`. |
+
+Aparece dos veces en el manifiesto: una en la raíz, que es la que rige la reproducción, y otra dentro
+de `ProducerReferenceTime` (A.8).
+
+La precisión de este método está limitada por lo que tarde la petición. Es una de las razones por las
+que el testbed mide la latencia con un timecode quemado en la imagen y su propia sincronización de
+reloj, y no con la que declara el reproductor.
+
+### A.11. Los ficheros a los que apunta
+
+El manifiesto no contiene media; solo dice cómo encontrarla. Para cada Representation hay:
+
+| Fichero | Contenido | Cuándo se pide |
+| :--- | :--- | :--- |
+| `init-stream0.m4s` | Cajas `ftyp` y `moov`: tipo de fichero y configuración del decodificador (resolución, SPS y PPS). Sin frames. | Una vez, al empezar y al cambiar de calidad. |
+| `chunk-stream0-NNNNN.m4s` | Una sucesión de fragmentos, cada uno con su `moof` (índice de los frames que siguen y su tiempo) y su `mdat` (los frames). | Uno cada 2 s por componente. |
+
+Con una calidad, el reproductor mantiene dos descargas en curso: el segmento de vídeo
+(`chunk-stream0-…`) y el de audio (`chunk-stream1-…`).
+
+### A.12. Resumen: de qué depende cada valor
+
+| Campo | Lo fija | Mando del panel |
+| :--- | :--- | :--- |
+| `availabilityStartTime` | El origen, midiendo | — |
+| `SegmentTemplate@duration`, `maxSegmentDuration` | `-seg_duration` | Duración de segmento |
+| `availabilityTimeOffset`, `Resync@dT` (tipo 0) | `-seg_duration` y `-frag_duration` | Duración de segmento y de fragmento |
+| `Resync@dT` (tipo 1, vídeo) | El GOP de la fuente | GOP |
+| `Representation` (cuántas, `width`, `height`, `bandwidth`) | La escalera | Escalera de calidades |
+| `frameRate` | La fuente | — |
+| `timeShiftBufferDepth` | `-window_size`, calculado para 30 s | — |
+| `UTCTiming@value` | `-utc_timing_url` | — |
+| `ServiceDescription` | Nadie: vacío | — (la latencia la fija el slider en el reproductor) |
