@@ -9,6 +9,10 @@ está leído del código fuente de las librerías instaladas, de la configuraci�
 registros del servidor desplegado (9 de octubre de 2026). Cuando algo es una deducción y no una
 comprobación directa, se dice.
 
+> **Versiones desplegadas desde el 13 de octubre de 2026:** relay 0.17.3 y publicador 0.14.3. Lo que
+> este documento describe se observó con las de la tabla (0.17.2 y 0.14.2) salvo que se indique otra
+> cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
+
 | Componente                                                | Versión comprobada    |
 | :-------------------------------------------------------- | :-------------------- |
 | Relay MoQ (`moqdev/moq-relay`)                            | 0.17.2                |
