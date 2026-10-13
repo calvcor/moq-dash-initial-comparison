@@ -214,7 +214,7 @@ El manifiesto completo, con todos sus campos explicados y ejemplos de cálculo, 
    hasta el navegador.
 4. **Reproducción.** `dash.js` descarga con `fetch` leyendo el cuerpo a trozos, y va metiendo cada
    fragmento en el `SourceBuffer` de **MSE** (*Media Source Extensions*). A partir de ahí decodifica
-   y pinta el elemento `<video>` del navegador.
+   y pinta el elemento `<video>` del navegador. El reproductor se explica en 3.8.
 
 En esta rama se hace una petición HTTP por segmento y por componente: una de vídeo y una de audio
 cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
@@ -267,6 +267,104 @@ individuales, que son menos fiables que una medida directa.
 - **Red**: TCP. Una pérdida detiene todo lo que viene detrás hasta la retransmisión.
 - **Búfer**: `liveDelay`. Con mucha diferencia, la partida mayor. En las medidas del testbed, de
   3,06 s totales unos 2,8 s eran búfer.
+
+### 3.8. El reproductor: `dash.js` por dentro
+
+El reproductor de esta rama es **`dash.js`** (versión 5.2.1), la implementación de referencia del
+DASH Industry Forum. Es una librería de JavaScript: todo lo que hace ocurre en la página, no en el
+navegador.
+
+**Qué pone el navegador y qué pone la librería.** Un navegador no sabe reproducir DASH. Sabe
+reproducir un MP4 que se le entregue, y ofrece una API para entregárselo a trozos desde JavaScript:
+**MSE** (*Media Source Extensions*). El reparto de papeles es este:
+
+| Quién | Qué hace |
+| :--- | :--- |
+| `dash.js` | Descarga y entiende el manifiesto, calcula qué segmento toca, lo descarga, elige la calidad, decide a qué distancia del directo reproducir y corrige la velocidad. |
+| MSE (`MediaSource`, `SourceBuffer`) | Recibe los trozos de MP4 que le pasa `dash.js` y los pone a disposición del `<video>`. |
+| Elemento `<video>` | Decodifica, sincroniza vídeo y audio y pinta. Lo hace el navegador, fuera del alcance de JavaScript. |
+
+```
+manifest.mpd ─▶ dash.js ─▶ fetch (segmento a goteo) ─▶ SourceBuffer ─▶ <video> ─▶ pantalla
+                  │                                     (MSE)          (decodifica y pinta)
+                  └─ decide: qué pedir, qué calidad, a qué velocidad reproducir
+```
+
+Esto marca una diferencia importante con MoQ: **`dash.js` no ve los frames**. Entrega bytes al
+navegador y a partir de ahí solo puede actuar sobre el `<video>` con los mandos que este ofrece:
+la posición (`currentTime`) y la velocidad (`playbackRate`). No puede decidir cuándo se pinta un
+frame concreto ni saltarse uno. Por eso su forma de corregir la latencia es acelerar, frenar o saltar.
+
+**El ciclo de reproducción:**
+
+1. **Manifiesto.** Lo descarga y lo interpreta (Anexo A). Sincroniza su reloj con el servidor
+   mediante `UTCTiming`.
+2. **Inicialización.** Crea un `MediaSource`, lo conecta al `<video>` y abre un `SourceBuffer` para
+   el vídeo y otro para el audio. Descarga el segmento de inicialización de cada uno.
+3. **Planificación.** Calcula con el reloj qué segmento está en curso y lo pide.
+4. **Descarga a goteo.** Usa `fetch` y lee el cuerpo de la respuesta según llega, sin esperar al
+   final. Cada fragmento CMAF completo (`moof` + `mdat`) que reconoce lo pasa al `SourceBuffer`.
+5. **Reproducción.** El `<video>` avanza. `dash.js` vigila la latencia y el nivel de búfer y ajusta
+   la velocidad.
+6. **Siguiente segmento.** Cuando la respuesta termina, pide el siguiente, de la misma calidad o de
+   otra si el ABR lo decide.
+
+**El modo de baja latencia** no tiene interruptor en esta versión: `dash.js` lo activa por su cuenta
+cuando el manifiesto anuncia `availabilityTimeComplete="false"`. Es lo que le hace leer la respuesta a
+goteo en el paso 4, en vez de esperar al segmento completo.
+
+**Componentes internos**, para quien lea su código o sus registros:
+
+| Componente | Función |
+| :--- | :--- |
+| `ManifestLoader`, `DashAdapter` | Descargar e interpretar el MPD. |
+| `TimeSyncController` | Sincronizar el reloj con `UTCTiming`. |
+| `ScheduleController` | Decidir cuándo pedir el siguiente segmento. |
+| `FragmentLoader` | Descargar; con baja latencia usa `fetch` con lectura progresiva. |
+| `BufferController` | Alimentar el `SourceBuffer` y vigilar su nivel. |
+| `AbrController` y sus reglas | Elegir la calidad (3.6). |
+| `PlaybackController` | Controlar el `<video>` y calcular la latencia. |
+| `CatchupController` | Corregir la latencia con la velocidad o con un salto (3.5). |
+
+**Configuración.** `dash.js` se configura con un árbol de ajustes (`updateSettings`). Los que toca el
+testbed:
+
+| Ajuste | Por defecto en `dash.js` | Aquí | Efecto |
+| :--- | :--- | :--- | :--- |
+| `streaming.delay.liveDelay` | Sin fijar; lo deduce del manifiesto | Slider, 0,05 a 6 s (0,3 s al abrir) | Distancia al directo. |
+| `streaming.liveCatchup.enabled` | Automático | `true` | Activa la corrección de latencia. |
+| `streaming.liveCatchup.mode` | `liveCatchupModeDefault` | `liveCatchupModeLoLp` | Algoritmo de corrección. LoL+ mira la latencia y también el búfer. |
+| `streaming.liveCatchup.maxDrift` | 12 s | Slider, 0 a 10 s (1,5 s al abrir) | Desvío a partir del cual salta al directo en vez de corregir con la velocidad. |
+| `streaming.retryAttempts` | Menos | 15 para manifiesto, inicialización y segmentos | Reintentos ante un fallo de descarga. |
+| `streaming.retryIntervals` | — | 1000 ms | Espera entre reintentos. |
+| `streaming.abr.autoSwitchBitrate.video` | `true` | `true`, o `false` al fijar una calidad | Activa o desactiva el ABR. |
+
+Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
+
+| Ajuste | Valor | Efecto |
+| :--- | :--- | :--- |
+| `streaming.liveCatchup.playbackRate` | −0,5 a +0,5 | Cuánto puede frenar o acelerar: entre 0,5× y 1,5×. |
+| `streaming.liveCatchup.playbackBufferMin` | 0,5 s | En modo LoL+, por debajo de este búfer la librería frena la reproducción. |
+| `streaming.buffer.stallThreshold` | 0,3 s | Por debajo de este búfer se declara una parada. |
+| `streaming.abr.rules` | Ver 3.6 | Qué reglas de ABR están activas. |
+| `streaming.utcSynchronization.enabled` | `true` | Sincronización de reloj con el servidor. |
+
+Dos de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo
+`liveCatchupModeLoLp` y el `maxDrift` de 1,5 s.
+
+**Lo que el testbed añade alrededor**, sin tocar la librería:
+
+- **Espera al manifiesto.** Antes de crear el reproductor comprueba que el manifiesto existe. El
+  origen no lo publica hasta calibrar la hora de inicio, unos segundos después de cada arranque.
+- **Silenciado.** El `<video>` está en silencio para que el navegador permita la reproducción
+  automática. `dash.js` descarga el audio igualmente.
+- **Vigilancia.** Si la imagen lleva 10 s sin cambiar, se destruye el reproductor y se crea otro. Se
+  cuenta como reinicio en las métricas (`dash_player_restarts`).
+- **Calidad fija.** El selector llama a `setRepresentationForTypeById` y desactiva el ABR.
+- **Medida.** El timecode se lee del `<video>`, y los bytes descargados, de los eventos de la
+  librería y de la API de tiempos de recursos del navegador.
+
+El reproductor queda accesible en la consola del navegador como `window.dashPlayer`.
 
 ---
 
@@ -606,6 +704,29 @@ ráfagas.
 
 ### 4.11. El reproductor por dentro
 
+El reproductor de esta rama es **`@moq/watch`** (versión 0.6.2), la librería de JavaScript del
+proyecto `moq.dev`. Se apoya en dos API del navegador:
+
+| Quién | Qué hace |
+| :--- | :--- |
+| **WebTransport** | Da acceso a los streams QUIC de la conexión con el relay. |
+| `@moq/watch` | Habla el protocolo MoQ, lee el catálogo, elige la calidad, ordena los frames, decide cuándo se muestra cada uno y lo dibuja. |
+| **WebCodecs** (`VideoDecoder`) | Decodifica cada frame comprimido y devuelve la imagen. Usa el decodificador del sistema, normalmente por hardware. |
+| Elemento **`<canvas>`** | La superficie donde la librería dibuja cada imagen. |
+
+No interviene ningún elemento `<video>` ni MSE. Es la diferencia práctica con DASH: aquí **cada frame
+pasa por código de la página**. La librería recibe el frame comprimido, lo manda decodificar, recibe
+la imagen y decide en qué momento exacto dibujarla. Por eso puede hacer cosas que `dash.js` no:
+saltarse un grupo entero, mostrar un frame en cuanto llega, o cambiar de calidad sin corte
+solapando dos pistas.
+
+El precio es que todo ese trabajo ocurre en el hilo principal de la página. Si la página está
+ocupada, el reproductor se retrasa, cosa que no le pasa a un `<video>`, que el navegador pinta por su
+cuenta. Fue lo que ocurrió con la primera versión del medidor de latencia (ver D.3).
+
+El testbed usa la interfaz de programación (`Watch.Player`) sobre un `<canvas>` propio, no el
+componente web `<moq-watch>` que la librería también ofrece. Son lo mismo por dentro.
+
 La cadena de `@moq/watch`, con los nombres que tiene en el código:
 
 ```
@@ -683,6 +804,19 @@ librería por su cuenta.
 **Visibilidad.** Por defecto la librería deja de descargar el vídeo cuando el canvas sale de la
 pantalla o la pestaña pasa a segundo plano (`visible: "20%"`). El testbed lo fija en `"always"` para
 que la medida no se interrumpa al hacer scroll.
+
+**Lo que el testbed añade alrededor**, sin tocar la librería:
+
+- **Huella del certificado.** Antes de conectar descarga `/certificate.sha256` y se la pasa a
+  WebTransport (ver 4.5).
+- **Silenciado.** Con el reproductor en silencio, `@moq/watch` no descarga la pista de audio. Es una
+  diferencia con DASH, que la descarga siempre.
+- **Vigilancia.** 10 s sin imagen nueva y se recrea el reproductor (`moq_player_restarts`).
+- **Calidad fija.** El selector pasa el nombre de la pista en `target`; en automático no pasa nada.
+- **Medida.** El timecode se lee del frame que la librería acaba de dibujar, y los tiempos, de las
+  señales que expone.
+
+El reproductor queda accesible en la consola del navegador como `window.moqPlayer`.
 
 ### 4.12. Opciones y configuración
 
@@ -882,7 +1016,7 @@ WebRTC no tiene adaptación de calidad**, las otras dos sí.
    Sin audio: el AAC de la fuente no es un códec admitido por WebRTC en navegadores.
 2. **Servidor.** MediaMTX reparte el H.264 en paquetes RTP y los envía a cada navegador conectado.
 3. **Navegador.** `RTCPeerConnection` recibe, reordena, decodifica y pinta en un `<video>`. Todo lo
-   hace el navegador; la aplicación solo lee estadísticas con `getStats()`.
+   hace el navegador; la aplicación solo lee estadísticas con `getStats()`. Se explica en 5.9.
 
 Que la fuente no use B-frames (`zerolatency`) importa aquí: WebRTC en navegadores no los admite bien.
 
@@ -894,6 +1028,113 @@ Que la fuente no use B-frames (`zerolatency`) importa aquí: WebRTC en navegador
 
 En las medidas del testbed, entre 145 y 185 ms en total. Es la rama con menos latencia y también la
 que menos margen tiene.
+
+### 5.9. El reproductor: `RTCPeerConnection` por dentro
+
+En esta rama **no hay librería de reproducción**. El reproductor es el propio navegador, a través de
+la API estándar `RTCPeerConnection`. La página se limita a establecer la sesión y a conectar el
+resultado a un elemento `<video>`; son unas cuarenta líneas de código.
+
+Es la diferencia de fondo con las otras dos ramas:
+
+| Rama | Dónde está la lógica de reproducción | Qué control tiene la página |
+| :--- | :--- | :--- |
+| DASH | En JavaScript (`dash.js`), hasta entregar los bytes | Mucho: qué pedir, calidad, velocidad. |
+| MoQ | En JavaScript (`@moq/watch`), hasta el pintado de cada frame | Total: cada frame pasa por código de la página. |
+| WebRTC | En el navegador, entera | Casi ninguno: una sugerencia de búfer y estadísticas de lectura. |
+
+**Lo que hace el navegador por su cuenta**, sin que la página intervenga:
+
+```
+UDP ─▶ ICE ─▶ DTLS/SRTP ─▶ RTP ─▶ búfer de jitter ─▶ decodificador ─▶ <video> ─▶ pantalla
+              (descifra)    │      (reordena, espera     (H.264)
+                            │       retransmisiones)
+                            └─▶ RTCP hacia el servidor: NACK, PLI, informes de recepción
+```
+
+Recibe los paquetes, los descifra, reconstruye cada frame a partir de sus trozos, pide las
+retransmisiones que falten, decide cuánto retener cada frame, lo decodifica y lo pinta.
+
+**Lo que hace la página**, paso a paso:
+
+1. **Crea la conexión**, sin servidores STUN ni TURN: `new RTCPeerConnection()`.
+2. **Declara qué quiere recibir**: un único flujo de vídeo, solo de recepción
+   (`addTransceiver('video', { direction: 'recvonly' })`).
+3. **Genera la oferta SDP** y espera a que el navegador reúna sus candidatos ICE, hasta 2 s.
+4. **La envía por WHEP**: un `POST` a `/rtc/live/whep` con la oferta en el cuerpo
+   (`Content-Type: application/sdp`).
+5. **Aplica la respuesta SDP** que devuelve MediaMTX.
+6. **Conecta el vídeo**: cuando el navegador avisa de que llega la pista, la asigna al `<video>`
+   (`video.srcObject`).
+
+A partir del paso 5, navegador y MediaMTX completan solos ICE y DTLS y empieza a llegar el vídeo.
+
+**WHEP, en concreto.** Es un protocolo mínimo: toda la señalización es una petición y su respuesta.
+
+```
+POST /rtc/live/whep
+Content-Type: application/sdp
+
+v=0
+o=- 4611731400430051336 2 IN IP4 127.0.0.1
+...                                  ← la oferta: "quiero recibir vídeo, admito estos códecs,
+                                        estos son mis candidatos y mi huella DTLS"
+
+201 Created
+Content-Type: application/sdp
+
+v=0
+...                                  ← la respuesta: "te envío H.264, este es mi candidato
+                                        (la dirección del servidor, puerto UDP 8189) y mi huella"
+```
+
+El testbed usa la variante **sin *trickle***: en vez de ir enviando los candidatos ICE según
+aparecen, espera a tenerlos todos y los manda dentro de la oferta. Es más simple y cuesta como mucho
+esos 2 s al conectar. Al cerrar, la página cierra la conexión sin avisar a MediaMTX por HTTP; el
+servidor la da por terminada cuando deja de recibir tráfico.
+
+**Lo que se negocia.** En la respuesta de MediaMTX capturada en una prueba, el vídeo H.264 se
+acordó con estos mecanismos de realimentación:
+
+| Mecanismo | Qué permite |
+| :--- | :--- |
+| `nack` | Que el navegador pida la retransmisión de paquetes concretos. |
+| `nack pli` | Que pida un keyframe nuevo. |
+| `transport-cc` | Que informe de los tiempos de llegada, para estimar el ancho de banda. |
+
+No se negoció la extensión de retardo de reproducción, con la que un servidor puede imponer un búfer
+mínimo o máximo al receptor. El búfer queda entero a criterio del navegador.
+
+**Los mandos disponibles.** Solo hay uno con efecto sobre la reproducción:
+
+| Mando | Por defecto | Aquí | Efecto |
+| :--- | :--- | :--- | :--- |
+| `RTCRtpReceiver.jitterBufferTarget` | Sin fijar | Slider: automático o de 50 a 2000 ms | Sugiere al navegador un tamaño de búfer de jitter. Es una pista, no una orden. |
+
+No hay selector de calidad ni ABR en la página: MediaMTX envía un único flujo.
+
+**Lo que la página puede leer.** `getStats()` devuelve las estadísticas internas del navegador. El
+testbed las consulta cada 500 ms y usa estas:
+
+| Estadística | Para qué |
+| :--- | :--- |
+| `bytesReceived` (del flujo de vídeo) | Bitrate de vídeo recibido. |
+| `bytesReceived` (del transporte) | Descarga total, con RTCP y retransmisiones. |
+| `jitterBufferDelay`, `jitterBufferEmittedCount` | Tiempo medio de cada frame en el búfer de jitter. |
+| `frameHeight` | Resolución recibida. |
+| `packetsLost` | Paquetes perdidos. |
+
+Otras que el navegador ofrece y son útiles para diagnosticar: `nackCount` y `pliCount` (cuántas
+retransmisiones y keyframes ha pedido), `jitter`, `totalDecodeTime` y `framesDecoded`.
+
+**Lo que el testbed añade alrededor:**
+
+- **Reintento.** Si la negociación falla, lo habitual justo tras un arranque porque MediaMTX aún no
+  tiene la emisión, se repite cada 1,5 s.
+- **Vigilancia.** Como en las otras ramas: 10 s sin imagen nueva y se recrea la conexión
+  (`rtc_player_restarts`).
+- **Medida.** El timecode se lee del `<video>`. La hora de llegada de cada frame la da el navegador
+  con cada frame presentado (ver D.5 y la reserva de D.8).
 
 ---
 
