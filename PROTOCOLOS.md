@@ -32,6 +32,7 @@ comprobación directa, se dice.
 7. [Qué controla cada mando del panel](#7-qué-controla-cada-mando-del-panel)
 8. [Glosario](#8-glosario)
 9. [Anexo A. El manifiesto MPD, campo a campo](#anexo-a-el-manifiesto-mpd-campo-a-campo)
+10. [Anexo B. El catálogo de MoQ, campo a campo](#anexo-b-el-catálogo-de-moq-campo-a-campo)
 
 ---
 
@@ -412,8 +413,8 @@ Cerrar el stream de una suscripción es darse de baja. No hay un mensaje aparte 
 
 ### 4.6. El catálogo
 
-Es una pista más (`catalog.json`), que se actualiza cuando cambia algo. El catálogo real que publica
-ahora el testbed:
+Es una pista más (`catalog.json`), a la que el reproductor se suscribe y que se actualiza cuando
+cambia algo. Su parte esencial, para una calidad:
 
 ```json
 {
@@ -423,10 +424,7 @@ ahora el testbed:
   "audio": { "renditions": {
     "1.aac":  { "codec": "mp4a.40.2", "sampleRate": 48000, "numberOfChannels": 2,
                 "bitrate": 165007, "description": "1190",
-                "container": { "kind": "legacy" }, "jitter": 43 } } },
-  "archive": { "track": "timeline.z", "timescale": 1000 },
-  "clock":   { "wall": 213718046806804, "timescale": 1000000 },
-  "mpegts":  { "tracks": { "0.avc3": { "pid": 256 }, "1.aac": { "pid": 257 } }, "...": "..." }
+                "container": { "kind": "legacy" }, "jitter": 43 } } }
 }
 ```
 
@@ -434,29 +432,20 @@ Una **rendition** es una versión de un mismo contenido: cada calidad de vídeo 
 clave en el mapa es el nombre de la pista a la que hay que suscribirse. Con varias calidades en la
 escalera aparecen `0.avc3`, `1.avc3`, etc.
 
-Los campos de cada rendition de vídeo (son los de `VideoDecoderConfig` de WebCodecs, más algunos
-propios):
+Los campos que condicionan el comportamiento del reproductor son cuatro:
 
-| Campo | Significado |
+| Campo | Efecto |
 | :--- | :--- |
-| `codec` | Cadena de códec. `avc3` indica que la configuración (SPS/PPS) va **dentro del flujo**, repetida antes de cada keyframe, y no en el catálogo. |
-| `description` | Configuración del decodificador fuera de banda, cuando el códec la necesita (el AAC la lleva). |
-| `codedWidth` / `codedHeight` | Resolución. |
-| `bitrate` | Bitrate en bits por segundo. Es el dato que usa la adaptación de calidad. |
-| `framerate` | Frames por segundo. |
-| `container` | Cómo va empaquetado cada frame: `legacy`, `cmaf` o `loc` (ver 4.7). |
-| `jitter` | Retraso máximo, medido en el publicador, entre que un frame está listo y se envía. El búfer del reproductor debe ser mayor. Si falta, se asume un intervalo de frame. |
-| `delay` | Cuánto llega esta rendition por detrás de la más temprana del broadcast. |
-| `stalled` | El publicador recomienda evitar temporalmente esta rendition. |
+| `bitrate` | Es el dato con el que la adaptación automática decide si una calidad cabe. |
+| `stalled` | El publicador recomienda evitar temporalmente esa calidad; la adaptación automática la descarta. |
+| `jitter` | Irregularidad con la que el publicador envía los frames. El reproductor la suma a su búfer. |
+| `delay` | Retraso de una calidad respecto a la más temprana. También se suma al búfer. |
 
-Las demás secciones (`archive`, `clock`, `mpegts`) son extras que añade el importador y que el
-reproductor de vídeo no necesita.
+El resto describe cómo configurar el decodificador (`codec`, `description`, resolución) y cómo va
+empaquetado cada frame (`container`, que se explica a continuación).
 
-> **Observación a tener en cuenta.** El catálogo declara 7,57 Mbit/s para una calidad configurada a
-> 4000 kbit/s con tope de 4800. Ese valor lo calcula el propio importador, no sale de la
-> configuración del testbed, y es el que usa la adaptación automática de calidad (4.10). No he
-> comprobado cómo lo mide ni si se actualiza con el tiempo. Con una sola calidad no tiene efecto; con
-> varias, condiciona cuándo el reproductor considera que una calidad "cabe".
+El catálogo completo, con todas sus secciones y campos explicados y con ejemplos, está en el
+[Anexo B](#anexo-b-el-catálogo-de-moq-campo-a-campo).
 
 ### 4.7. El contenedor
 
@@ -594,6 +583,20 @@ Dos consecuencias medibles. La primera: durante el cambio se descargan dos calid
 cuando la red va peor. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
 coincidir durante un rato, o indefinidamente si la nueva nunca llega a alcanzar a la anterior. Por
 eso el testbed registra las dos por separado (`moq_selected_height` y `moq_height`).
+
+**Lo observado en el testbed con tres calidades.** El reproductor cambia de calidad varias veces por
+segundo sin que la red tenga nada que ver: la estimación del relay estuvo entre 0,35 y 3,7 Gbit/s.
+La causa es el paso 2. El publicador marca la calidad alta como `stalled` durante 10 a 45 ms, el
+reproductor salta a la siguiente, la marca se retira y vuelve. En 30 s, con el servidor en 8 núcleos
+y sin saturar, se contaron 66 marcas y 128 cambios de selección.
+
+El publicador marca la calidad porque la fuente le entrega los frames a ráfagas. Entran al
+codificador cada 16,7 ms con regularidad, pero salen con huecos de más de 50 ms alrededor de una vez
+por segundo, y 50 ms es justo el umbral del detector a 60 fps (ver B.9). Es un defecto de la fuente
+del testbed, anterior al reparto entre ramas: llega igual a las tres, pero solo MoQ tiene un
+mecanismo que reacciona a él. Mientras no se corrija, los cambios de calidad de MoQ con varias
+calidades no miden adaptación a la red. No está localizado en qué punto de la fuente se forman las
+ráfagas.
 
 ### 4.11. El reproductor por dentro
 
@@ -1557,3 +1560,578 @@ Con una calidad, el reproductor mantiene dos descargas en curso: el segmento de 
 | `timeShiftBufferDepth` | `-window_size`, calculado para 30 s | — |
 | `UTCTiming@value` | `-utc_timing_url` | — |
 | `ServiceDescription` | Nadie: vacío | — (la latencia la fija el slider en el reproductor) |
+
+---
+
+## Anexo B. El catálogo de MoQ, campo a campo
+
+Este anexo hace con el catálogo de MoQ lo mismo que el Anexo A con el manifiesto de DASH: recorrerlo
+entero, sección por sección y campo por campo.
+
+El catálogo cumple el mismo papel que el MPD: decirle al reproductor qué hay y cómo decodificarlo.
+Pero es más pequeño, porque le falta casi todo lo que en el MPD se dedica a **localizar** la media.
+En MoQ no hay direcciones que calcular ni horas de disponibilidad: basta el nombre de la pista para
+suscribirse, y el relay envía lo que vaya llegando.
+
+**Fuentes.** El catálogo de ejemplo se capturó del servidor el 9 de octubre de 2026, con una sola
+calidad. Las definiciones de los campos salen del esquema de la librería instalada (`@moq/hang`
+0.5.2), que es lo que el reproductor entiende. Para lo que esa versión no documenta he consultado el
+código del publicador en su rama de desarrollo, que es posterior a la versión instalada (moq-cli
+0.14.2); donde me apoyo en ella, lo digo.
+
+### B.1. Qué es y cómo viaja
+
+El catálogo no es un fichero que se descarga: **es una pista más del broadcast**, llamada
+`catalog.json`. El reproductor se suscribe a ella igual que al vídeo, y recibe una versión nueva cada
+vez que algo cambia.
+
+| Aspecto | Valor |
+| :--- | :--- |
+| Nombre de la pista | `catalog.json` |
+| Prioridad de la suscripción | 100, la más alta: pasa por delante del audio (80) y del vídeo (60) |
+| *Max age* de la suscripción | 0: solo interesa la versión más reciente |
+| Formato | JSON en texto |
+| Variante comprimida | `catalog.json.z`, con DEFLATE. Opcional; el reproductor solo la usa si se le pide |
+
+El formato del catálogo se deduce del nombre del broadcast, como la extensión de un fichero:
+`live.hang` indica catálogo hang; `live.msf` indicaría el formato MSF del IETF.
+
+**Actualizaciones.** La pista funciona en modo *snapshot*: cada grupo empieza con el catálogo
+completo, y los frames siguientes del mismo grupo son **parches** que solo llevan lo que cambia, en
+formato JSON Merge Patch (RFC 7396). Quien se suscribe recibe el grupo más reciente y con eso tiene
+el estado completo.
+
+Por ejemplo, para marcar una calidad como atascada no hace falta reenviar todo. Bastaría un parche
+como este (ilustrativo; no lo he capturado del cable):
+
+```json
+{ "video": { "renditions": { "0.avc3": { "stalled": true } } } }
+```
+
+Y para retirar la marca, el mismo campo con valor `null`, que en ese formato significa "borrar":
+
+```json
+{ "video": { "renditions": { "0.avc3": { "stalled": null } } } }
+```
+
+Esta es la razón de que las calidades se guarden en un **mapa** con el nombre de la pista como clave,
+y no en una lista: un parche puede dirigirse a una entrada de un mapa por su clave, pero no a un
+elemento de una lista.
+
+Las actualizaciones pueden ser muy frecuentes. Con la fuente irregular del testbed y tres calidades
+se observaron 334 en 30 s, casi todas para poner y quitar esa marca.
+
+### B.2. El catálogo completo
+
+```json
+{
+  "video": {
+    "renditions": {
+      "0.avc3": {
+        "codec": "avc3.42c02a",
+        "codedWidth": 1920,
+        "codedHeight": 1080,
+        "bitrate": 7573296,
+        "framerate": 60.0,
+        "container": { "kind": "legacy" }
+      }
+    }
+  },
+  "audio": {
+    "renditions": {
+      "1.aac": {
+        "codec": "mp4a.40.2",
+        "sampleRate": 48000,
+        "numberOfChannels": 2,
+        "bitrate": 165007,
+        "description": "1190",
+        "container": { "kind": "legacy" },
+        "jitter": 43
+      }
+    }
+  },
+  "archive": { "track": "timeline.z", "timescale": 1000 },
+  "clock": { "wall": 213718046806804, "timescale": 1000000 },
+  "mpegts": {
+    "tracks": { "0.avc3": { "pid": 256 }, "1.aac": { "pid": 257 } },
+    "program": { "transportStreamId": 1, "programNumber": 1, "pmtPid": 4096 },
+    "si": { "17": { "66": { "track": "0x0011-0x42.si", "interval": 2000 } } }
+  }
+}
+```
+
+Lo escribe entero el publicador (`moq import ts`), deduciéndolo del flujo MPEG-TS que recibe. El
+testbed no interviene en ningún campo: a diferencia del manifiesto de DASH, aquí no hay nada
+reescrito ni declarado a mano.
+
+### B.3. La raíz: las secciones
+
+El catálogo es un objeto con una sección por tipo de contenido. Una sección sin pistas se omite.
+
+| Sección | Contenido | En este catálogo |
+| :--- | :--- | :--- |
+| `video` | Calidades de vídeo | Sí |
+| `audio` | Versiones de audio | Sí |
+| `text` | Subtítulos | No |
+| `json` | Pistas de datos de aplicación en JSON | No |
+| `binary` | Pistas de datos de aplicación en binario | No |
+| `archive` | Índice de segmentos de la emisión y, si existe, su grabación | Sí |
+| `clock` | Relación entre el tiempo de medios y la hora de reloj | Sí |
+| `mpegts` | Extensión del importador: datos para reconstruir el MPEG-TS original | Sí |
+
+La raíz es **abierta**: una sección que el reproductor no conoce se ignora sin invalidar el resto. Es
+lo que ocurre con `mpegts`, que no pertenece al esquema base. Una aplicación puede añadir las suyas.
+
+Hay un límite: como máximo 64 renditions entre vídeo, audio y texto en un mismo catálogo.
+
+### B.4. La sección `video`
+
+```json
+"video": {
+  "renditions": { "0.avc3": { ... }, "1.avc3": { ... } },
+  "display": { "width": 1920, "height": 1080 },
+  "rotation": 0,
+  "flip": false
+}
+```
+
+| Campo | En este catálogo | Significado |
+| :--- | :--- | :--- |
+| `renditions` | Una entrada | Mapa de nombre de pista a configuración. Todas son el mismo contenido en versiones intercambiables. |
+| `display` | Ausente | Tamaño al que debe mostrarse el vídeo, en píxeles. Si falta, el reproductor usa el del frame. |
+| `rotation` | Ausente (0) | Giro en grados, para vídeo grabado con el móvil en vertical, por ejemplo. |
+| `flip` | Ausente (`false`) | Espejo horizontal, típico de una cámara frontal. |
+
+`display`, `rotation` y `flip` valen para todas las calidades a la vez. Están separados de la
+configuración de cada rendition porque cambiarlos no obliga a reiniciar el decodificador.
+
+**La clave del mapa es el nombre de la pista.** Para ver la calidad `0.avc3`, el reproductor se
+suscribe a la pista `0.avc3` del broadcast `live.hang`. No hay plantilla ni cálculo: es el
+equivalente directo, y mucho más simple, de `SegmentTemplate` en DASH.
+
+El nombre lo elige el publicador. Aquí sigue el patrón *índice.códec*: `0.avc3` es la primera pista
+elemental del MPEG-TS, en H.264. El reproductor no interpreta el nombre; solo lo usa para
+suscribirse.
+
+### B.5. Los campos de una rendition de vídeo
+
+Reproducen los de `VideoDecoderConfig`, la estructura con la que el navegador configura un
+decodificador de WebCodecs, más unos pocos propios de hang. La idea es que el reproductor pueda
+pasárselos al decodificador casi tal cual.
+
+| Campo | Valor aquí | Obligatorio | Significado |
+| :--- | :--- | :--- | :--- |
+| `codec` | `avc3.42c02a` | Sí | Códec y sus parámetros. |
+| `container` | `{"kind":"legacy"}` | No (por defecto `legacy`) | Cómo va empaquetado cada frame. |
+| `description` | Ausente | No | Configuración del decodificador, en hexadecimal. |
+| `codedWidth`, `codedHeight` | `1920`, `1080` | No | Resolución codificada, en píxeles. |
+| `displayAspectWidth`, `displayAspectHeight` | Ausentes | No | Relación de aspecto de presentación. |
+| `framerate` | `60.0` | No | Frames por segundo. |
+| `bitrate` | `7573296` | No | Bitrate, en bits por segundo. |
+| `optimizeForLatency` | Ausente (`true`) | No | Pide al decodificador que priorice la latencia. |
+| `jitter` | Ausente | No | Irregularidad con la que el publicador envía los frames, en ms. |
+| `delay` | Ausente | No | Retraso de esta rendition respecto a la más temprana, en ms. |
+| `stalled` | Ausente | No | El publicador recomienda evitarla por ahora. |
+| `label` | Ausente | No | Nombre legible para un selector de calidad. |
+| `broadcast` | Ausente | No | La pista está en otro broadcast. |
+
+**`codec`.** La misma notación que en DASH (ver A.7): `42` es el perfil *Baseline*, `c0` sus
+restricciones y `2a` el nivel 4.2. La diferencia está en el prefijo:
+
+| Prefijo | Dónde van los parámetros del decodificador (SPS y PPS) |
+| :--- | :--- |
+| `avc1` | Fuera del flujo. En DASH, en el segmento de inicialización; en MoQ, en `description`. |
+| `avc3` | Dentro del flujo, repetidos antes de cada keyframe. |
+
+Aquí es `avc3`, y por eso no hay `description`: el reproductor los obtiene del primer keyframe que
+reciba. Encaja con el modelo de grupos, donde cada grupo debe poder decodificarse por sí solo. La
+fuente los repite gracias a la opción `repeat-headers=1` de x264.
+
+**`description`.** Cuando existe, es una cadena hexadecimal con la configuración que el códec
+necesita antes del primer frame. Permite preparar el decodificador solo con el catálogo. El ejemplo
+de este catálogo está en el audio (B.6).
+
+**`codedWidth` y `codedHeight`.** El reproductor las usa para ordenar las calidades por resolución
+y para aplicar límites del tipo "no más de 720 de alto". Con `avc3` la resolución real también va en
+el flujo, así que estos valores son informativos.
+
+**`displayAspectWidth` y `displayAspectHeight`.** Sirven para vídeo con píxeles no cuadrados. Un
+vídeo de 1440×1080 que deba verse en 16:9 llevaría `16` y `9`. Si faltan, los píxeles son cuadrados.
+Es el equivalente a `sar` en el MPD.
+
+**`framerate`.** Tiene dos usos en el reproductor. Uno es informativo. El otro afecta a la latencia:
+si la rendition no declara `jitter`, el reproductor asume un intervalo de frame (1000 / 60 = 17 ms)
+como irregularidad mínima.
+
+**`bitrate`.** Es el campo que usa la adaptación automática: el reproductor elige la calidad de
+mayor `bitrate` que quepa en el 80 % del ancho de banda estimado (ver 4.10).
+
+> **Observación.** Para la calidad configurada a 4000 kbit/s, el catálogo declara 7,57 Mbit/s. En
+> otras emisiones he visto 6,70 y 6,95 Mbit/s para la misma configuración. El código del publicador
+> (rama de desarrollo) documenta este campo como el bitrate **máximo** de la pista, no el medio, lo
+> que explica que salga por encima del nominal: los keyframes producen picos. No he comprobado sobre
+> qué ventana lo calcula.
+>
+> La consecuencia es una asimetría con DASH. Para el mismo vídeo, el MPD declara 4 Mbit/s (el valor
+> nominal, puesto a mano) y el catálogo unos 7 Mbit/s (un máximo medido). Con el mismo ancho de banda
+> disponible, los dos reproductores no ven la misma escalera.
+
+**`optimizeForLatency`.** Se pasa tal cual al decodificador. Con `true`, que es lo que se asume si
+falta, el decodificador entrega cada frame en cuanto puede en lugar de acumular varios.
+
+**`label`.** Texto para mostrar al usuario, como "1080p" o "Alta". Si falta, un selector tiene que
+componerlo a partir de la resolución.
+
+**`broadcast`.** Permite que el catálogo de un broadcast apunte a pistas publicadas en otro, con una
+ruta relativa. Sirve para repartir las calidades entre publicadores distintos:
+
+```json
+"720p": { "codec": "avc3.42c01f", "broadcast": "../transcodificado" }
+```
+
+Leído desde `live.hang`, esa pista se buscaría en el broadcast `transcodificado`. Una referencia que
+intente salir por encima de la raíz invalida el catálogo.
+
+`jitter`, `delay` y `stalled` se tratan aparte, en B.8 y B.9, porque son los que condicionan el
+comportamiento del reproductor.
+
+### B.6. La sección `audio` y sus renditions
+
+Tiene la misma forma que la de vídeo: un mapa `renditions` con una entrada por versión. Los campos
+reproducen los de `AudioDecoderConfig` de WebCodecs.
+
+| Campo | Valor aquí | Obligatorio | Significado |
+| :--- | :--- | :--- | :--- |
+| `codec` | `mp4a.40.2` | Sí | AAC-LC (ver A.7). |
+| `sampleRate` | `48000` | Sí | Muestras por segundo. |
+| `numberOfChannels` | `2` | Sí | Número de canales: estéreo. |
+| `bitrate` | `165007` | No | Bitrate, en bits por segundo. |
+| `description` | `1190` | No | Configuración del decodificador, en hexadecimal. |
+| `container` | `{"kind":"legacy"}` | No | Igual que en vídeo. |
+| `jitter` | `43` | No | Igual que en vídeo (B.8). |
+| `delay`, `label`, `broadcast` | Ausentes | No | Igual que en vídeo. |
+
+**`description: "1190"`.** Son dos bytes, `0x11` y `0x90`, que forman la configuración estándar de
+AAC (*AudioSpecificConfig*). En binario:
+
+```
+0x11 0x90  =  00010 0011 0010 000
+              │     │    │    └─ relleno
+              │     │    └────── 2  → 2 canales
+              │     └─────────── 3  → 48 000 Hz (índice 3 de la tabla de frecuencias)
+              └───────────────── 2  → AAC-LC
+```
+
+Repite lo que ya dicen `codec`, `sampleRate` y `numberOfChannels`, pero en el formato que el
+decodificador exige. A diferencia del H.264 en `avc3`, el AAC no lleva esta información dentro de
+cada frame, así que tiene que ir aquí.
+
+**`bitrate: 165007`.** La fuente codifica el audio a 128 kbit/s. Como en el vídeo, el valor del
+catálogo es mayor que el nominal.
+
+El audio no tiene `stalled`: ese campo solo existe para vídeo.
+
+### B.7. El campo `container`
+
+Dice cómo interpretar los bytes de cada frame de MoQ. Hay tres valores conocidos:
+
+**`legacy`**, el que usa el testbed:
+
+```json
+"container": { "kind": "legacy" }
+```
+
+Cada frame es una marca de tiempo en microsegundos seguida del frame codificado tal cual, sin más
+envoltorio. Es el valor por defecto: si el campo falta, se asume este.
+
+**`cmaf`:**
+
+```json
+"container": { "kind": "cmaf", "init": "AAAAHGZ0eXBpc281AAAC..." }
+```
+
+Cada frame de MoQ es un fragmento CMAF completo (`moof` + `mdat`), como los de DASH. El segmento de
+inicialización, que en DASH es un fichero aparte, va aquí dentro, codificado en base64. Permite
+reutilizar media ya empaquetada para DASH o HLS.
+
+**`loc`:**
+
+```json
+"container": { "kind": "loc" }
+```
+
+*Low Overhead Container*, el formato del borrador del IETF: un pequeño bloque de propiedades y el
+frame codificado.
+
+Un `kind` desconocido no invalida el catálogo: esa rendition se ignora y las demás siguen
+disponibles.
+
+### B.8. `jitter` y `delay`: lo que el publicador le dice al búfer
+
+Son los dos campos con efecto directo sobre la latencia, y no tienen equivalente en el MPD de este
+testbed.
+
+**`jitter`** es el retraso máximo, en milisegundos, entre que un frame está listo y el publicador lo
+envía. Lo mide el publicador sobre sí mismo, no sobre la red. Ejemplos de lo que valdría:
+
+| Cómo envía el publicador | `jitter` |
+| :--- | :--- |
+| Cada frame en cuanto sale, a 60 fps | Un intervalo de frame: 17 ms |
+| Hasta 3 B-frames seguidos, que obligan a reordenar | 3 intervalos: 50 ms |
+| Acumula segmentos de 2 s antes de enviar | 2000 ms |
+
+Dos propiedades importantes:
+
+- **Solo crece** a lo largo de una emisión. Si en algún momento el publicador se retrasó 65 ms, el
+  valor queda en 65 hasta que se reinicie.
+- **Un 0 se trata como ausente.**
+
+**`delay`** es cuánto llega esta rendition por detrás de la más temprana del mismo broadcast. La más
+temprana no lo lleva. Sirve cuando una calidad se genera a partir de otra: si el 720p sale de
+transcodificar el 1080p y eso tarda 80 ms, el 720p declararía `"delay": 80`.
+
+**Qué hace el reproductor con ellos.** Para cada rendition activa calcula `delay + jitter`, usando un
+intervalo de frame si no hay `jitter`. Toma el mayor de todas las pistas, y se lo suma al búfer que
+tenga configurado. En este catálogo:
+
+```
+vídeo  0.avc3 : sin jitter → 1000 / 60 = 17 ms
+audio  1.aac  : jitter 43               = 43 ms
+                                 mayor  = 43 ms  → se suma al slider o al valor automático
+```
+
+Con el reproductor en automático y 20 ms de búfer de red, el retardo efectivo sale de 63 ms. Tres
+cosas que conviene saber:
+
+- **Manda el audio, aunque esté silenciado.** El reproductor cuenta su `jitter` aunque no descargue
+  la pista. Con solo vídeo serían 17 ms.
+- **El valor cambia entre emisiones y dentro de una.** He visto 43, 46 y 65 ms para el audio en
+  momentos distintos, este último con el servidor saturado.
+- **Es un suelo.** El slider no puede bajar de él.
+
+Por qué el audio declara 43 ms: un frame AAC dura 1024 / 48 000 = 21,3 ms, así que 43 son dos frames.
+Es coherente con que el publicador haya observado el audio llegar de dos en dos, pero no he
+comprobado que esa sea la causa.
+
+### B.9. `stalled`: el aviso de que una calidad no va bien
+
+Es un indicador que el publicador pone a `true` en una rendition de vídeo cuando no consigue
+entregarla al ritmo debido. Solo se escribe cuando es `true`; ausente significa que va bien.
+
+**Cuándo se activa**, según el detector de la versión instalada. Tiene que haber alguien suscrito a
+esa calidad, y cumplirse una de dos condiciones:
+
+- lo último recibido de la fuente va más de 3 intervalos de frame por delante de lo entregado al
+  transporte, o
+- la fuente lleva más de 3 intervalos sin entregar un frame de esa calidad.
+
+**Cuándo se retira:** tras 3 frames seguidos entregados a tiempo.
+
+| Tasa de frames | Intervalo | Umbral para activarse |
+| :--- | :--- | :--- |
+| 60 fps | 16,7 ms | 50 ms |
+| 30 fps | 33,3 ms | 100 ms |
+| Sin `framerate` declarado | 33 ms (se asume) | 99 ms |
+
+**Qué hace el reproductor.** En modo automático, descarta las renditions marcadas y elige entre las
+demás. Si están todas marcadas, se queda con la de menor bitrate. Una calidad fijada a mano se
+mantiene aunque esté marcada: el indicador orienta la adaptación automática, no anula una elección
+explícita.
+
+Es un mecanismo sin equivalente en DASH: **el publicador puede sacar una calidad de la selección de
+todos los reproductores a la vez**, sin que ninguno haya medido nada. En el testbed es la causa de
+los cambios continuos de calidad observados en MoQ (ver el final de 4.10).
+
+> **Este campo está cambiando.** En la rama de desarrollo del proyecto, `stalled` ya no se escribe y
+> se ignora al leer; lo sustituye un campo `enabled` con otro significado: si es `false`, no llegan
+> frames y el reproductor no debe seleccionar esa calidad. La versión instalada aquí, que es la
+> última publicada, sigue usando `stalled`.
+
+### B.10. La sección `clock`
+
+Relaciona el tiempo de medios con la hora de reloj. Es el equivalente a `availabilityStartTime` y
+`ProducerReferenceTime` del MPD, en un solo sitio y para todo el broadcast.
+
+| Campo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `wall` | `213718046806804` | Hora de reloj del tiempo de medios 0, contada desde la época de MoQ. |
+| `timescale` | `1000000` | Unidades por segundo de `wall`. Por defecto, microsegundos. |
+
+La **época de MoQ** es el 1 de enero de 2020 a las 00:00:00 UTC, no la de Unix (1970). El cálculo:
+
+```
+213 718 046 806 804 µs  =  213 718 046,806804 s  ≈  2473,6 días desde el 1-1-2020
+
+→ 9 de octubre de 2026, 14:07:26,806804 UTC
+```
+
+Para saber a qué hora corresponde cualquier frame, se suma su marca de tiempo:
+
+```
+frame con marca de tiempo 10 s  →  14:07:26,807 + 10 s  =  14:07:36,807
+```
+
+El publicador fija este valor una vez y no lo cambia durante la emisión, ni siquiera si se ajusta el
+reloj del sistema.
+
+El reproductor de vídeo **no lo usa para decidir cuándo pintar**: se guía por las horas de llegada de
+los frames (ver 4.11). Aquí está la diferencia de fondo con DASH. Allí, sin la relación entre reloj y
+medios el reproductor no sabe ni qué segmento pedir. En MoQ es un dato opcional, útil para alinear
+varias emisiones entre sí o con datos externos, pero prescindible para reproducir.
+
+### B.11. La sección `archive`
+
+Anuncia el índice de segmentos de la emisión: una pista auxiliar con la que se puede localizar
+contenido ya pasado para pedirlo con FETCH.
+
+| Campo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `track` | `timeline.z` | Nombre de la pista que lleva el índice. |
+| `timescale` | `1000` | Unidades por segundo de sus marcas de tiempo: milisegundos. |
+| `durationMax` | Ausente | Cota superior de la duración de un segmento. |
+| `replay` | Ausente | Broadcast desde el que se sirve la grabación, si es otro. |
+| `store` | Ausente | Dirección del almacén de objetos donde vive la grabación. |
+| `version` | Ausente | Versión del formato de grabación. Solo aparece si hay almacén. |
+
+Aquí solo están los dos primeros, lo que corresponde a un publicador en directo sin grabación
+duradera: hay índice de lo reciente, pero nada almacenado. El sufijo `.z` del nombre es una
+convención para pistas comprimidas; el esquema advierte de que no debe deducirse la compresión a
+partir del nombre.
+
+El reproductor del testbed no usa esta sección: solo reproduce el directo.
+
+### B.12. La sección `mpegts`
+
+No pertenece al esquema base. La añade el importador porque la fuente es un flujo MPEG-TS, y guarda
+lo necesario para **reconstruir ese flujo** a la salida (con `moq export ts`): todo lo que no cabe en
+la descripción genérica de vídeo y audio. La describe el código del publicador en su rama de
+desarrollo, de donde salen estas definiciones.
+
+```json
+"mpegts": {
+  "tracks":  { "0.avc3": { "pid": 256 }, "1.aac": { "pid": 257 } },
+  "program": { "transportStreamId": 1, "programNumber": 1, "pmtPid": 4096 },
+  "si":      { "17": { "66": { "track": "0x0011-0x42.si", "interval": 2000 } } }
+}
+```
+
+| Campo | Valor aquí | Significado |
+| :--- | :--- | :--- |
+| `tracks` | `0.avc3` → 256, `1.aac` → 257 | El PID que tenía cada pista en el MPEG-TS original. |
+| `program.transportStreamId` | `1` | Identificador del flujo de transporte. |
+| `program.programNumber` | `1` | Número de programa dentro del flujo. |
+| `program.pmtPid` | `4096` | PID de la tabla que describe el programa (PMT). |
+| `si` | PID 17, tabla 66 | Tablas de información de servicio que se conservan tal cual. |
+
+Un **PID** es el identificador de cada flujo elemental dentro de un MPEG-TS. Los valores coinciden
+con los que produce FFmpeg en la fuente: 256 (`0x100`) para el primer vídeo y los siguientes en
+orden. Son los mismos que usa `tsgate.py` para reconocer los frames de cada calidad.
+
+En `si`, las claves son números en decimal escritos como texto: `17` es el PID `0x0011` y `66` es el
+identificador de tabla `0x42`. Corresponden a la tabla de descripción de servicio (SDT), la que lleva
+el nombre del servicio y del proveedor. Su contenido no va en el catálogo sino en una pista aparte
+(`0x0011-0x42.si`), y `interval` indica cada cuántos milisegundos debe repetirse al reconstruir el
+flujo.
+
+Nada de esta sección afecta a la reproducción en el navegador.
+
+### B.13. Las secciones que este catálogo no lleva
+
+**`text`**: subtítulos. Una rendition por idioma o variante.
+
+```json
+"text": {
+  "renditions": {
+    "subs-es": { "format": "vtt", "role": "subtitle", "lang": "es", "label": "Español" }
+  }
+}
+```
+
+| Campo | Significado |
+| :--- | :--- |
+| `format` | Formato de cada subtítulo: `vtt` (WebVTT), `ttml` o `utf8` (texto sin formato). |
+| `role` | `subtitle` (solo diálogos) o `caption` (todo el audio, para personas sordas). Por defecto, `subtitle`. |
+| `lang` | Idioma, en notación BCP 47: `es`, `en`, `es-419`. |
+| `label`, `container`, `jitter`, `delay`, `broadcast` | Como en vídeo y audio. |
+
+**`json` y `binary`**: datos de aplicación que no son media, como un marcador deportivo, la posición
+de un dron o un chat.
+
+```json
+"json": {
+  "tracks": {
+    "marcador": { "mode": "snapshot", "schema": "https://ejemplo.org/marcador.schema.json" }
+  }
+}
+```
+
+| Campo | Significado |
+| :--- | :--- |
+| `mode` | `snapshot`: cada grupo sustituye al anterior y solo importa el último valor. `stream`: un registro sin pérdidas, donde importan todos los valores en orden. Obligatorio. |
+| `compression` | `deflate` si los frames van comprimidos; ausente si no. |
+| `schema` | Identificador de la forma de los datos. Solo descriptivo. |
+| `bitrate`, `jitter`, `delay`, `broadcast` | Como en vídeo y audio. |
+
+Aquí la clave del mapa es `tracks`, no `renditions`: las entradas son pistas distintas, no versiones
+alternativas entre las que elegir.
+
+### B.14. Con varias calidades
+
+Con la escalera de tres calidades, el importador publica tres renditions de vídeo. No capturé ese
+catálogo entero, pero sí los nombres y los bitrates que vio el reproductor:
+
+| Pista | Calidad | Bitrate nominal | `bitrate` en el catálogo (dos emisiones) |
+| :--- | :--- | :--- | :--- |
+| `0.avc3` | 1080p | 4000 kbit/s | 6950 y 6648 kbit/s |
+| `1.avc3` | 720p | 2000 kbit/s | 3393 y 3259 kbit/s |
+| `2.avc3` | 360p | 700 kbit/s | 1249 y 1111 kbit/s |
+
+Ninguna de las tres declaraba `jitter` ni `delay`. El audio pasa a ser la pista siguiente en el
+orden del MPEG-TS.
+
+El orden de las calidades es el de la fuente, que las emite de mayor a menor. El reproductor no
+depende de ese orden: las ordena él por resolución o por bitrate.
+
+### B.15. Qué usa el reproductor, y comparación con el MPD
+
+**Lo que `@moq/watch` usa de este catálogo para reproducir vídeo:**
+
+| Campo | Para qué |
+| :--- | :--- |
+| Clave de `renditions` | Nombre de la pista a la que suscribirse. |
+| `codec`, `description`, `optimizeForLatency`, `displayAspect*` | Configurar el decodificador, y comprobar antes que el navegador lo admite. |
+| `container` | Elegir cómo extraer el frame y su marca de tiempo. |
+| `codedWidth`, `codedHeight` | Ordenar las calidades y aplicar límites de resolución. |
+| `bitrate` | Adaptación automática. |
+| `stalled` | Excluir calidades de la adaptación automática. |
+| `framerate`, `jitter`, `delay` | Dimensionar el búfer. |
+| `display`, `rotation`, `flip` | Pintar el canvas. |
+
+No usa `archive`, `clock` ni `mpegts`.
+
+**Los dos documentos, lado a lado:**
+
+| Función | MPD (DASH) | Catálogo (MoQ) |
+| :--- | :--- | :--- |
+| Cómo se obtiene | Petición HTTP; se relee cada cierto tiempo | Suscripción a una pista; llegan los cambios |
+| Formato | XML | JSON |
+| Agrupar versiones intercambiables | `AdaptationSet` | Sección `video` o `audio` |
+| Una versión concreta | `Representation` | Entrada de `renditions` |
+| Códec | `codecs` | `codec` |
+| Configuración del decodificador | Segmento de inicialización | `description`, o dentro del flujo |
+| Resolución | `width`, `height` | `codedWidth`, `codedHeight` |
+| Bitrate | `bandwidth` (aquí, el nominal declarado a mano) | `bitrate` (aquí, un máximo medido) |
+| Localizar la media | `SegmentTemplate`: plantilla, numeración y duración | El nombre de la pista |
+| Cuándo existe cada trozo | `availabilityStartTime`, `availabilityTimeOffset` | No hace falta: el relay empuja |
+| Reloj común | `UTCTiming`, imprescindible | No hace falta |
+| Tiempo de medios y reloj | `availabilityStartTime`, `ProducerReferenceTime` | `clock`, opcional |
+| Puntos de entrada | `startWithSAP`, `Resync` | Implícito: cada grupo empieza en uno |
+| Latencia sugerida por el servicio | `ServiceDescription` (aquí vacío) | `jitter` y `delay`, que el reproductor suma siempre |
+| Estado de una calidad en directo | No existe | `stalled` |
+| Contenido pasado | `timeShiftBufferDepth` | `archive` |
+
+La diferencia de tamaño entre los dos anexos refleja la de los modelos. En DASH el cliente tira, así
+que el manifiesto tiene que darle una forma de calcular qué pedir y cuándo, y un reloj fiable para
+hacerlo. En MoQ el servidor empuja, y al catálogo le basta con decir qué hay y cómo decodificarlo. A
+cambio, el catálogo lleva dos cosas que el MPD no tiene: el estado en vivo de cada calidad y la
+irregularidad del propio publicador.
