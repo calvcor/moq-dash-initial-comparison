@@ -2561,9 +2561,10 @@ en la transición produce como mucho un error de 1 ms.
 muy inferior a 17,5 minutos, así que solo hay una hora posible que termine en esos 20 bits.
 
 ```
-hora al leer el frame (servidor):        1 791 554 900 123 ms
-los 20 bits leídos equivalen a:                       ... 823 ms   (dentro del ciclo)
-la última hora anterior que acaba así:   1 791 554 899 823 ms  →  ese es el instante del quemado
+hora al leer el frame (servidor):   1 791 554 900 123 ms   → sus 20 bits bajos valen 938 139
+valor leído en el timecode:                                                      937 839
+diferencia dentro del ciclo:        938 139 − 937 839 = 300 ms
+instante del quemado:               1 791 554 900 123 − 300 = 1 791 554 899 823 ms
 ```
 
 ### D.2. Poner de acuerdo los dos relojes
