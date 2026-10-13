@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from . import source, trace
+from . import source, trace, versions
 from .origin import origin, router as origin_router
 from .source import VIDEO_FILE
 
@@ -336,6 +336,11 @@ async def get_time():
     """Reloj del servidor (el mismo que FFmpeg quema en el timecode) para sincronizar el navegador."""
     return {"t_ms": time.time() * 1000}
 
+@app.get("/api/versions")
+def get_versions():
+    """Versiones desplegadas de los componentes de terceros y la última publicada de cada uno."""
+    return versions.report()
+
 @app.get("/api/utc", response_class=PlainTextResponse)
 async def get_utc():
     """Hora del servidor en xs:dateTime para el elemento UTCTiming del manifiesto DASH."""
@@ -625,6 +630,7 @@ def on_startup():
     threading.Thread(target=boot, daemon=True).start()
     threading.Thread(target=supervise, daemon=True).start()
     threading.Thread(target=trace.listen, daemon=True).start()
+    versions.start()
 
 @app.on_event("shutdown")
 def on_shutdown():

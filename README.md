@@ -125,8 +125,8 @@ Las dos ramas reciben **el mismo bitstream H.264**: la fuente codifica una sola 
 | `testbed-router` | Alpine + `tc` + `iptables` + agente Python | 4433/udp | Paso obligado hacia DASH y MoQ; reenvía a nivel IP y emula la red |
 | `testbed-orchestrator` | Python 3.12 + FastAPI + FFmpeg 7.1 + `moq` CLI 0.14.2 | ninguno | Fuente maestra, empaquetadores, origen LL-DASH en memoria y API de control |
 | `testbed-nginx-dash` | `nginx:alpine` | ninguno | Reenvía `/media/dash/` al origen con `proxy_buffering off` |
-| `testbed-moq-relay` | `moqdev/moq-relay:latest` | ninguno | Relay MoQ con certificado autofirmado |
-| `testbed-mediamtx` | `bluenviron/mediamtx:latest` | ninguno | Servidor WebRTC: recibe la calidad más alta por RTSP y la sirve por WHEP |
+| `testbed-moq-relay` | `moqdev/moq-relay:0.17.2` | ninguno | Relay MoQ con certificado autofirmado |
+| `testbed-mediamtx` | `bluenviron/mediamtx:1.21.2` | ninguno | Servidor WebRTC: recibe la calidad más alta por RTSP y la sirve por WHEP |
 | `testbed-web` | React 19 + Vite + Tailwind, servido por Nginx | ninguno | Dashboard, con cabeceras COOP/COEP para `SharedArrayBuffer` |
 
 Solo se publican tres puertos: **80/tcp** para todo el HTTP, y **4433/udp** (MoQ, QUIC) y **8189/udp** (WebRTC), a los que el navegador va directo. Los dos primeros se pueden cambiar con `HTTP_PORT` y `MOQ_PORT` en un fichero `.env`. `MOQ_HOST` sirve también como dirección que WebRTC anuncia al navegador.
@@ -266,6 +266,20 @@ Cada tarjeta muestra n, media, σ, p50, p95, mínimo y máximo de la latencia gl
 
 > [!NOTE]
 > Con la pestaña en segundo plano el navegador pausa el vídeo y el muestreo. Esas filas quedan marcadas con `tab_hidden`.
+
+### 4.4b. Versiones de los componentes
+
+Las medidas dependen de la versión exacta de cada pieza de terceros: entre dos versiones seguidas del relay cambió, por ejemplo, la implementación de QUIC que lleva dentro. Por eso todas van **fijadas**, se muestran en la cabecera del dashboard y quedan en la columna `versions` del CSV.
+
+| Componente | Dónde se fija la versión |
+| :--- | :--- |
+| `moq-relay` | `docker-compose.yml`, `MOQ_RELAY_VERSION` (dos valores por defecto: la imagen y la variable que la muestra) |
+| MediaMTX | `docker-compose.yml`, `MEDIAMTX_VERSION` (igual) |
+| `moq-cli` | `server/Dockerfile`, en la URL de descarga |
+| `@moq/watch`, `dash.js` | `web/package.json` y `web/package-lock.json` |
+| FFmpeg | El paquete de Debian de la imagen del orquestador; no se consulta si hay novedades |
+
+El orquestador consulta cada 6 horas la última versión publicada de cada uno (Docker Hub, las publicaciones de GitHub y el registro de npm) y el dashboard marca en ámbar los que tienen una más nueva. **Es solo un aviso: nada se actualiza solo.** Para actualizar hay que cambiar la versión fijada y volver a desplegar (`docker compose up -d --build`); las medidas hechas con versiones distintas no son comparables entre sí.
 
 ### 4.5. Desglose de la latencia por etapas
 
@@ -443,6 +457,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |
+| `GET /api/versions` | Versiones desplegadas de los componentes de terceros y la última publicada de cada uno |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |
 | `GET /api/utc` | Reloj del servidor en ISO 8601, para el `UTCTiming` del manifiesto |
 | `PUT` / `GET` / `DELETE /media/dash/{nombre}` | Origen LL-DASH; el navegador accede por el punto de entrada, a través del router y de Nginx |

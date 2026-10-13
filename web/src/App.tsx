@@ -6,9 +6,10 @@ import { MetricsDashboard } from './components/MetricsDashboard';
 import { ControlPanel } from './components/ControlPanel';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PipelineDiagram } from './components/PipelineDiagram';
+import { VersionsPanel, versionsLabel } from './components/VersionsPanel';
 import { RateWindow } from './lib/glass';
 import { syncClock, getClockSync } from './lib/clock';
-import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile } from './types';
+import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile, VersionReport } from './types';
 import { Activity, Radio, Cpu, Network } from 'lucide-react';
 
 // Mismo origen que el dashboard: el punto de entrada (edge) reparte /api, /media/dash y el resto
@@ -18,6 +19,21 @@ const stage = (metrics: PlayerMetrics, key: string) => metrics.stages?.stages.fi
 
 export function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
+  const [versions, setVersions] = useState<VersionReport | null>(null);
+  const versionsRef = useRef<VersionReport | null>(null);
+  versionsRef.current = versions;
+
+  // Versiones desplegadas y novedades: el servidor las consulta cada varias horas, aquí basta refrescar de vez en cuando
+  useEffect(() => {
+    const load = () =>
+      fetch(`${API_BASE}/api/versions`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((report) => report && setVersions(report))
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 10 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [config, setConfig] = useState<StreamConfig>({
     gop_size: 60,
@@ -297,6 +313,7 @@ export function App() {
         rtc_down_dropped: status?.network?.stats.rtc_down?.dropped ?? null,
         rtc_up_dropped: status?.network?.stats.rtc_up?.dropped ?? null,
         tab_hidden: document.hidden,
+        versions: versionsLabel(versionsRef.current),
       });
 
       setHistory((prev) => {
@@ -454,6 +471,8 @@ export function App() {
             </div>
           </div>
         </header>
+
+        <VersionsPanel report={versions} />
 
         {/* Panel de Mandos */}
         <ControlPanel

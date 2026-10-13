@@ -76,6 +76,14 @@ export interface ServerStatus {
   source?: { state: 'ready' | 'downloading' | 'extracting' | 'error'; progress_pct: number; error: string | null };
 }
 
+// Versiones desplegadas en el servidor y última publicada de cada componente (GET /api/versions)
+export interface VersionReport {
+  installed: Record<string, string | null>;
+  latest: Record<string, string | null>;
+  checked_at_ms: number | null;
+  errors: string[];
+}
+
 // Los valores numéricos son null cuando no hay medida: nunca se rellenan con valores supuestos
 export interface PlayerMetrics {
   protocol: 'LL-DASH' | 'Media over QUIC' | 'WebRTC';
@@ -208,4 +216,5 @@ export interface SampleRow {
   rtc_down_dropped: number | null;
   rtc_up_dropped: number | null;
   tab_hidden: boolean;
+  versions: string | null; // componentes de terceros desplegados, p. ej. moq-relay=0.17.2;moq-cli=0.14.2
 }
