@@ -150,15 +150,17 @@ Un único FFmpeg lee el MP4 a ritmo real y lo emite duplicado por UDP:
 ffmpeg -re -stream_loop -1 -i <vídeo> -re -stream_loop -1 -i <vídeo> \
   -filter_complex "[0:v]setpts=N/(60*TB),drawtext=<reloj>,split=N[s0]..[sN]; \
                    [s0]scale=1920:1080,drawtext=<etiqueta de calidad>,<timecode binario>[v0]; ...; \
-                   [1:a]asetpts=N/(SR*TB)[a]" \
+                   ..." \
+  -filter_complex "[1:a:0]asetpts=N/(SR*TB)[a]" \
   -map [v0] ... -map [vN] -map [a] \
   -c:v libx264 -preset ultrafast -tune zerolatency -threads 4 -x264opts repeat-headers=1 \
   -b:v:0 <kbps>k -maxrate:v:0 <1,2 x kbps>k -bufsize:v:0 <kbps>k ... \
-  -g <gop> -keyint_min <gop> -sc_threshold 0 -r 60 -c:a aac -ac 2 -b:a 128k \
+  -g <gop> -keyint_min <gop> -sc_threshold 0 -r 60 -c:a aac -ac 2 -b:a 128k -max_interleave_delta 1 \
   -f tee "[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316"
 ```
 
 - **Dos entradas del mismo fichero**, una para vídeo y otra para audio. El MP4 intercala ambos en bloques de 0,5 s; con una sola entrada a ritmo real el audio llega a ráfagas y el multiplexor retiene el vídeo.
+- **El audio en su propio grafo de filtros y `-max_interleave_delta 1`.** Sin ellos el vídeo salía a ráfagas: en el mismo grafo, FFmpeg hace avanzar el vídeo al compás de los frames de audio del fichero (24 ms), y el multiplexor retiene cada frame de vídeo hasta tener audio posterior. Con los dos cambios la separación entre frames a la salida queda igual que sin audio (p95 de 24 ms, ningún hueco de más de 50 ms; antes, p95 de 45 ms y un hueco de más de 50 ms por segundo), y la etapa de codificación baja de unos 30 a unos 10 ms. Detalle en el Anexo C de `PROTOCOLOS.md`.
 - **`pes_payload_size=0`**: un PES por frame de audio. Por defecto MPEG-TS agrupa ~180 ms de audio y eso retrasa el vídeo aguas abajo.
 - **Escalera de calidades**: la fuente codifica en vivo de 1 a 5 calidades (por defecto 1080p@4000, 720p@2000 y 360p@700 kbps), todas a 60 fps y con el mismo GOP para que sus keyframes coincidan. Viajan como varios vídeos de un mismo MPEG-TS.
 - **Tope de tasa**: cada calidad lleva `-maxrate` al 120 % y un VBV de 1 s, para que el bitrate nominal sea una referencia fiable para la adaptación y la emulación de red.

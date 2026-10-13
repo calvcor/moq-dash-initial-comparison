@@ -271,7 +271,10 @@ def ensure_master_source(force_restart: bool = False):
             # Tope de tasa (VBV de 1 s): sin él los picos de x264 superan con mucho el bitrate nominal
             # y ni la emulación de red ni la adaptación de calidad tendrían una referencia fiable.
             rates += f"-b:v:{i} {r.bitrate_kbps}k -maxrate:v:{i} {int(r.bitrate_kbps * 1.2)}k -bufsize:v:{i} {r.bitrate_kbps}k "
-        graph += ";[1:a]asetpts=N/(SR*TB)[a]"
+        # El audio va en un grafo de filtros propio. En el mismo grafo que el vídeo, FFmpeg pide frames a
+        # las dos entradas por turnos según sus marcas de tiempo, y el vídeo avanza al compás de los frames
+        # de audio de la fuente (24 ms) en vez de al suyo (16,7 ms).
+        audio_graph = "[1:a:0]asetpts=N/(SR*TB)[a]"
 
         # pes_payload_size=0: un PES por frame de audio. Por defecto MPEG-TS agrupa ~180 ms de audio y los
         # empaquetadores retienen el vídeo ese tiempo al intercalar.
@@ -281,11 +284,16 @@ def ensure_master_source(force_restart: bool = False):
         # y ambas ramas reciben los frames a trompicones y con retardo añadido.
         master_cmd = (
             f"ffmpeg -re -stream_loop -1 -i '{VIDEO_FILE}' -re -stream_loop -1 -i '{VIDEO_FILE}' "
-            f"-filter_complex \"{graph}\" {maps}-map '[a]' "
+            f"-filter_complex \"{graph}\" -filter_complex \"{audio_graph}\" {maps}-map '[a]' "
             f"-c:v libx264 -preset ultrafast -tune zerolatency -threads 4 "
             f"-x264opts \"repeat-headers=1\" "
             f"{rates}-g {current_config.gop_size} -keyint_min {current_config.gop_size} -sc_threshold 0 "
             f"-r {current_config.fps} -c:a aac -ac 2 -b:a 128k "
+            # Sin esto el multiplexor retiene cada frame de vídeo hasta tener un paquete de audio posterior,
+            # para escribirlos en orden estricto de tiempo, y los frames salen a ráfagas: uno de cada ocho
+            # con el doble de separación y huecos de más de 50 ms cada segundo. Con 1 µs escribe cada
+            # paquete en cuanto lo tiene.
+            f"-max_interleave_delta 1 "
             f"-f tee \"[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5003?pkt_size=1316\""
         )
         logger.info(f"Iniciando Fuente Maestra Continua FFmpeg con reloj en vivo (epoch {start_epoch_sec})...")

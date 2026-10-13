@@ -690,17 +690,41 @@ eso el testbed registra las dos por separado (`moq_selected_height` y `moq_heigh
 
 **Lo observado en el testbed con tres calidades.** El reproductor cambia de calidad varias veces por
 segundo sin que la red tenga nada que ver: la estimación del relay estuvo entre 0,35 y 3,7 Gbit/s.
-La causa es el paso 2. El publicador marca la calidad alta como `stalled` durante 10 a 45 ms, el
-reproductor salta a la siguiente, la marca se retira y vuelve. En 30 s, con el servidor en 8 núcleos
-y sin saturar, se contaron 66 marcas y 128 cambios de selección.
+La causa es el paso 2. El publicador marca la calidad alta como `stalled` durante 10 a 60 ms, el
+reproductor salta a la siguiente, la marca se retira y vuelve.
 
-El publicador marca la calidad porque la fuente le entrega los frames a ráfagas. Entran al
-codificador cada 16,7 ms con regularidad, pero salen con huecos de más de 50 ms alrededor de una vez
-por segundo, y 50 ms es justo el umbral del detector a 60 fps (ver B.9). Es un defecto de la fuente
-del testbed, anterior al reparto entre ramas: llega igual a las tres, pero solo MoQ tiene un
-mecanismo que reacciona a él. Mientras no se corrija, los cambios de calidad de MoQ con varias
-calidades no miden adaptación a la red. No está localizado en qué punto de la fuente se forman las
-ráfagas.
+El publicador activa la marca cuando pasan más de 50 ms sin que entregue un frame de esa calidad
+(ver B.9). Se han identificado dos causas, y solo una era del testbed:
+
+1. **La fuente entregaba los frames a ráfagas. Corregido el 13 de octubre de 2026.** Los frames
+   entraban al codificador cada 16,7 ms, pero salían con huecos de más de 50 ms alrededor de una vez
+   por segundo. La causa era el audio, por dos mecanismos de FFmpeg que se sumaban (ver C.9). Con el
+   arreglo, la salida es tan regular como sin audio.
+2. **El publicador no lee su entrada a ritmo constante. Sin corregir: es comportamiento de
+   `moq import`.** Aun sin ningún espectador, y con la fuente ya regular, hay frames que esperan en
+   la compuerta a que el publicador los acepte: 50 ms en el percentil 95 y más de 200 ms en el peor
+   caso, cuando en las otras dos ramas esa espera no pasa de 3 ms. Mientras no lee, el publicador
+   tampoco entrega, y su propio detector lo cuenta como un atasco.
+
+Efecto del arreglo, en una comparación alternada con y sin él (sesiones de 45 s, tres calidades,
+servidor de 8 núcleos, un espectador en automático):
+
+| | Sin el arreglo (6 sesiones) | Con el arreglo (5 sesiones) |
+| :--- | :--- | :--- |
+| Veces que 1080p se marca `stalled` | 147 a 185 | 99 a 122 |
+| Cambios de selección del reproductor | 285 a 338 | 175 a 221 |
+| Latencia *glass-to-glass* de MoQ | 109 a 349 ms | 96 a 109 ms |
+| Anomalías de ingesta | 0 | 0 |
+
+El arreglo quita aproximadamente un tercio de las marcas. Las que quedan se deben a la segunda
+causa, y por tanto **los cambios de calidad de MoQ con varias calidades siguen sin medir adaptación a
+la red**. Es comportamiento real de esta versión del publicador ante su propia cadencia de lectura,
+y no se ha modificado. No se ha investigado por qué lee así.
+
+Fuera de esa comparación, en pruebas sueltas con el arreglo aplicado hubo dos sesiones en las que la
+rama MoQ se degradó mucho (latencia de varios segundos, pérdidas en su compuerta). En las once
+sesiones de la comparación no ocurrió con ninguna de las dos fuentes, así que no puedo atribuirlo
+al arreglo ni descartarlo: queda anotado como algo a vigilar.
 
 ### 4.11. El reproductor por dentro
 
@@ -2707,13 +2731,46 @@ No modifica ningún byte de la media: solo decide por dónde empezar y observa.
 - **Un único canal para todo.** Vídeo, audio y tablas se serializan en una sola sucesión de
   paquetes, así que el multiplexor tiene que decidir en qué orden los escribe.
 
-Este último punto está relacionado con una de las opciones de la fuente. Por defecto, el multiplexor
-de MPEG-TS de FFmpeg **agrupa varios frames de audio en un mismo PES**, unos 180 ms, para ahorrar
-cabeceras. El vídeo intercalado con ese audio se retenía ese tiempo. La opción
-`pes_payload_size=0` lo desactiva: un PES por cada frame de audio.
+Ese último punto es el origen de dos problemas de la fuente, ambos causados por el audio y ambos
+ya corregidos. Se manifestaban igual: el vídeo, que entra al codificador cada 16,7 ms, salía a
+ráfagas.
 
-También es el primer sitio donde buscar el origen de las ráfagas observadas a la salida de la fuente
-(final de 4.10). Es una sospecha, no un resultado: no he comprobado en qué punto se forman.
+**1. El agrupado de audio en un PES.** Por defecto, el multiplexor de MPEG-TS de FFmpeg agrupa
+varios frames de audio en un mismo PES, unos 180 ms, para ahorrar cabeceras. El vídeo intercalado con
+ese audio se retenía ese tiempo. La opción `pes_payload_size=0` lo desactiva: un PES por cada frame
+de audio.
+
+**2. El acoplamiento entre vídeo y audio dentro de FFmpeg** (corregido el 13 de octubre de 2026).
+Eran dos mecanismos distintos que se sumaban:
+
+- **Un grafo de filtros compartido.** El vídeo y el audio pasaban por un único grafo de filtros.
+  FFmpeg alimenta un grafo pidiendo frames a sus entradas por turnos, según sus marcas de tiempo, de
+  modo que el vídeo avanzaba al compás de los frames de audio del fichero de origen (MP3, 24 ms cada
+  uno) en vez de al suyo. Ahora el audio tiene su propio grafo (`-filter_complex` aparte).
+- **El intercalado estricto del multiplexor.** Para escribir los paquetes en orden exacto de
+  tiempo, FFmpeg retiene cada frame de vídeo hasta tener un paquete de audio posterior. Como el
+  audio llega más espaciado, el vídeo salía de dos en dos. La opción `-max_interleave_delta 1` hace
+  que cada paquete se escriba en cuanto está listo.
+
+Hacían falta los dos cambios: cada uno por separado solo lo arreglaba a medias.
+
+| Fuente con tres calidades, 20 s, calidad 1080p | Mediana | p95 | Máximo | Huecos > 33 ms | Huecos > 50 ms |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Antes | 15,9 ms | 45,2 ms | 93,7 ms | 156 | 25 |
+| Solo el grafo separado (una calidad, 15 s) | 16,4 ms | 36,3 ms | 45,8 ms | 117 | 0 |
+| Solo `-max_interleave_delta 1` | 15,0 ms | 48,9 ms | 74,8 ms | 146 | 50 |
+| Los dos cambios | 16,3 ms | 24,1 ms | 38,0 ms | 8 | 0 |
+| Referencia: la misma fuente sin audio | 16,4 ms | 24,1 ms | 36,0 ms | 3 | 0 |
+
+Las cifras son la separación entre frames consecutivos a la salida de la fuente; lo ideal es
+16,7 ms. Con los dos cambios queda igual que sin audio.
+
+El arreglo tiene un segundo efecto, que beneficia a las tres ramas: como el vídeo ya no espera al
+audio, la etapa de codificación del desglose baja de unos 30 ms a unos 10 ms de mediana.
+
+La contrapartida es que vídeo y audio ya no van intercalados en orden estricto de tiempo dentro del
+MPEG-TS: el audio de un instante puede ir unas decenas de milisegundos detrás del vídeo del mismo
+instante. Los tres empaquetadores lo aceptan, y las marcas de tiempo de cada frame no cambian.
 
 ### C.10. Lo que hace cada rama con el flujo
 
