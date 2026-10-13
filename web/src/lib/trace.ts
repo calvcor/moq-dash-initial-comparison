@@ -242,6 +242,7 @@ export class MoqTracer {
     // dibuje, y se anota qué frame era
     let frameTime = 0;
     let lastSample = 0;
+    let lastId: number | null = null;
     this.#channel.port1.onmessage = () => {
       const seenMs = serverNowMs(frameTime);
       if (frameTime - lastSample < SAMPLE_EVERY_MS || seenMs === null) return;
@@ -253,8 +254,15 @@ export class MoqTracer {
         return;
       }
       if (!frame) return;
-      lastSample = frameTime;
       const id = frame.timestamp;
+      // El canvas conserva el último frame mientras no llega otro. Volver a muestrearlo le atribuiría
+      // como espera en el búfer todo el tiempo que lleva en pantalla.
+      if (id === lastId) {
+        frame.close();
+        return;
+      }
+      lastId = id;
+      lastSample = frameTime;
       readAndClose(meter, frame).then((code) => {
         if (code !== null) this.#samples.push({ stampMs: stampFromCode(code, seenMs), paintedMs: seenMs, id });
       });
