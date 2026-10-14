@@ -129,9 +129,9 @@ Las dos ramas reciben **el mismo bitstream H.264**: la fuente codifica una sola 
 | :--- | :--- | :--- | :--- |
 | `testbed-edge` | `nginx:alpine` | 80/tcp | Entrada HTTP única: reparte entre dashboard (`/`), API (`/api`), LL-DASH (`/media/dash`) y huella del certificado del relay |
 | `testbed-router` | Alpine + `tc` + `iptables` + agente Python | 4433/udp | Paso obligado hacia DASH y MoQ; reenvía a nivel IP y emula la red |
-| `testbed-orchestrator` | Python 3.12 + FastAPI + FFmpeg 7.1 + `moq` CLI 0.14.3 | ninguno | Fuente maestra, empaquetadores, origen LL-DASH en memoria y API de control |
+| `testbed-orchestrator` | Python 3.12 + FastAPI + FFmpeg 7.1 + `moq` CLI 0.14.4 | ninguno | Fuente maestra, empaquetadores, origen LL-DASH en memoria y API de control |
 | `testbed-nginx-dash` | `nginx:alpine` | ninguno | Reenvía `/media/dash/` al origen con `proxy_buffering off` |
-| `testbed-moq-relay` | `moqdev/moq-relay:0.17.3` | ninguno | Relay MoQ con certificado autofirmado |
+| `testbed-moq-relay` | `moqdev/moq-relay:0.17.4` | ninguno | Relay MoQ con certificado autofirmado |
 | `testbed-mediamtx` | `bluenviron/mediamtx:1.21.2` | ninguno | Servidor WebRTC: recibe la calidad más alta por RTSP y la sirve por WHEP |
 | `testbed-web` | React 19 + Vite + Tailwind, servido por Nginx | ninguno | Dashboard, con cabeceras COOP/COEP para `SharedArrayBuffer` |
 
