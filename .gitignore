@@ -6,6 +6,8 @@ media/
 
 # Certificados locales del diseño inicial (incluyen una clave privada)
 server/certs/
+# Certificado del puerto directo de DASH y cuenta de Let's Encrypt (clave privada)
+certs/
 
 # Python
 __pycache__/
@@ -18,5 +20,5 @@ __pycache__/
 node_modules/
 dist/
 
-# Configuración local del despliegue (HTTP_PORT, MOQ_PORT, PUBLIC_HOST, MOQ_HOST)
+# Configuración local del despliegue (HTTP_PORT, MOQ_PORT, PUBLIC_HOST, MOQ_HOST, DASH_HOST, DUCKDNS_TOKEN)
 .env

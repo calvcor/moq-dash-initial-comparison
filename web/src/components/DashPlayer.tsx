@@ -21,6 +21,9 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
 }) => {
   // El servidor da la ruta del manifiesto relativa al punto de entrada; dash.js la necesita absoluta
   const url = new URL(manifestPath, window.location.href).href;
+  // Directo: el navegador conecta al servidor de DASH a través del router, y su propia conexión TCP es la
+  // que sufre la red emulada. Si no, pasa por el punto de entrada, que es un proxy.
+  const direct = new URL(url).host !== window.location.host;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [playerStatus, setPlayerStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
@@ -382,7 +385,15 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
       </div>
 
       <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
-        <span>Manifest: /media/dash/manifest.mpd</span>
+        <span
+          title={
+            direct
+              ? 'El navegador conecta directamente al servidor de DASH a través del router de emulación: su propia conexión TCP atraviesa la red emulada, como en MoQ y WebRTC.'
+              : 'El navegador conecta al punto de entrada, que reenvía a DASH por otra conexión TCP. La red emulada actúa sobre esa segunda conexión, no sobre la del navegador. Para ir directo hay que configurar DASH_HOST en el servidor.'
+          }
+        >
+          {direct ? `Directo · ${new URL(url).host}` : 'Vía proxy · /media/dash/manifest.mpd'}
+        </span>
         <label className="flex items-center space-x-1.5" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
           <span>Calidad:</span>
           <select

@@ -226,6 +226,7 @@ export function App() {
         elapsed_s: Math.round((performance.now() - epochRef.current.startedAt) / 1000),
         gop_size: status?.config.gop_size ?? null,
         ladder: status?.config.renditions.map((r) => `${r.height}p@${r.bitrate_kbps}`).join('|') ?? null,
+        dash_path: status?.dash_path ?? null,
         seg_duration: status?.config.seg_duration ?? null,
         frag_duration: status?.config.frag_duration ?? null,
         dash_g2g_ms: currentDash.latencyMs,

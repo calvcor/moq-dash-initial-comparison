@@ -6,6 +6,8 @@
 # Variables opcionales (fichero .env): HTTP_PORT (80), MOQ_PORT (4433), PUBLIC_HOST (localhost), el nombre
 # con el que el navegador accede, para el certificado autofirmado del relay, y MOQ_HOST, la dirección a la
 # que el navegador debe conectar por MoQ cuando el nombre de la página apunta a un proxy y no a este servidor.
+# DASH directo: DASH_HOST (un nombre DNS que apunte a este servidor), DUCKDNS_TOKEN (para obtener su
+# certificado) y DASH_PORT (8443). Sin ellas, DASH pasa por el punto de entrada, que es un proxy.
 #
 # Las versiones de los servidores de terceros van fijadas (MOQ_RELAY_VERSION, MEDIAMTX_VERSION): con
 # "latest" cambiarían solas al volver a descargar la imagen y dos medidas dejarían de ser comparables.
@@ -43,6 +45,7 @@ services:
     ports:
       - "${MOQ_PORT:-4433}:4433/udp"   # MoQ / QUIC -> moq-relay:4433 (el navegador va directo)
       - "8189:8189/udp"                # WebRTC (ICE, DTLS, SRTP) -> mediamtx:8189 (el navegador va directo)
+      - "${DASH_PORT:-8443}:8443/tcp"  # LL-DASH con TLS -> nginx-dash:443 (el navegador va directo, si hay DASH_HOST)
     networks:
       default:
       core:
@@ -85,11 +88,30 @@ services:
   nginx-dash:
     image: nginx:alpine
     container_name: testbed-nginx-dash
+    entrypoint: ["/bin/sh", "/dash-entrypoint.sh"]
+    environment:
+      - DASH_HOST=${DASH_HOST:-}
     volumes:
       - ./server/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./server/dash-direct.conf.template:/etc/nginx/direct.conf.template:ro
+      - ./server/dash-entrypoint.sh:/dash-entrypoint.sh:ro
+      - ./certs/dash:/certs:ro
     networks:
       core:
         ipv4_address: 172.30.50.10
+    restart: unless-stopped
+
+  # Certificado del puerto directo de DASH (Let's Encrypt, reto DNS de DuckDNS). Inactivo sin DASH_HOST.
+  dash-cert:
+    image: goacme/lego:v4.26.0
+    container_name: testbed-dash-cert
+    entrypoint: ["/bin/sh", "/dash-cert.sh"]
+    environment:
+      - DASH_HOST=${DASH_HOST:-}
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN:-}
+    volumes:
+      - ./server/dash-cert.sh:/dash-cert.sh:ro
+      - ./certs/dash:/certs
     restart: unless-stopped
 
   # 3. Orquestador FastAPI + FFmpeg (Codificación de BBB y publicación dual)
@@ -104,6 +126,8 @@ services:
       - ROUTER_URL=http://172.30.50.2:9000
       - MOQ_PORT=${MOQ_PORT:-4433}
       - MOQ_HOST=${MOQ_HOST:-}
+      - DASH_HOST=${DASH_HOST:-}
+      - DASH_PORT=${DASH_PORT:-8443}
       - RTC_PUBLISH_URL=rtsp://172.30.50.12:8554/live
       # Solo para mostrarlas en el dashboard: deben coincidir con las etiquetas de imagen de arriba
       - MOQ_RELAY_VERSION=${MOQ_RELAY_VERSION:-0.17.3}

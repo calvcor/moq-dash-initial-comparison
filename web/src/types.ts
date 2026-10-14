@@ -59,6 +59,7 @@ export interface ServerStatus {
     pipeline: boolean;
   };
   dash_url: string;
+  dash_path?: 'direct' | 'proxy'; // direct: el navegador va al servidor de DASH por el router; proxy: a través del punto de entrada
   moq_port?: number;
   moq_host?: string | null; // dirección directa para MoQ; null = el host de la página
   spki_fingerprint: string;
@@ -127,6 +128,7 @@ export interface SampleRow {
   elapsed_s: number; // segundos desde el inicio del epoch
   gop_size: number | null;
   ladder: string | null; // escalera codificada, p. ej. 1080p@4000|720p@2000
+  dash_path: string | null; // direct o proxy: si la conexión del navegador atraviesa la red emulada
   seg_duration: number | null;
   frag_duration: number | null;
   dash_g2g_ms: number | null;

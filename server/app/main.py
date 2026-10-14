@@ -51,6 +51,14 @@ TSGATE = os.path.join(os.path.dirname(__file__), "tsgate.py")
 UTC_TIMING_URL = os.getenv("UTC_TIMING_URL", "/api/utc")
 CERTS_DIR = "/certs"
 
+# DASH directo: nombre DNS que apunta a este servidor y puerto TLS que el router reenvía a nginx-dash
+DASH_HOST = os.getenv("DASH_HOST", "").strip()
+DASH_PORT = int(os.getenv("DASH_PORT", "8443"))
+
+def dash_url() -> str:
+    path = "/media/dash/manifest.mpd"
+    return f"https://{DASH_HOST}:{DASH_PORT}{path}" if DASH_HOST else path
+
 # MoQ relay URL dentro de la red docker
 MOQ_RELAY_URL = os.getenv("MOQ_RELAY_URL", "https://moq-relay:4433/anon")
 
@@ -365,8 +373,10 @@ def get_status():
         "stream_ids": stream_ids,
         "source": source.state,
         "restarts": restarts,
-        # Rutas relativas al punto de entrada; MoQ va directo por UDP al puerto indicado
-        "dash_url": "/media/dash/manifest.mpd",
+        # Con DASH_HOST, el navegador pide DASH directamente a este servidor por el router; sin él, a
+        # través del punto de entrada, que es un proxy. MoQ va siempre directo por UDP al puerto indicado.
+        "dash_url": dash_url(),
+        "dash_path": "direct" if DASH_HOST else "proxy",
         "moq_port": int(os.getenv("MOQ_PORT", "4433")),
         # Vacío: el mismo nombre de host que la página. Detrás de un proxy HTTP ese nombre apunta al proxy,
         # que no reenvía QUIC, y hay que indicar la dirección directa de este servidor.

@@ -3,7 +3,8 @@
 Reenvía a nivel IP (DNAT, sin terminar conexiones) los puertos que usa el navegador hacia los servidores
 finales y degrada ese tráfico con tc en los dos sentidos:
 
-    navegador -> :8080/tcp -> nginx-dash:80      (LL-DASH)
+    navegador -> :8443/tcp -> nginx-dash:443     (LL-DASH directo, con TLS)
+    punto de entrada -> :8080/tcp -> nginx-dash:80   (LL-DASH a través del proxy, sin DASH_HOST)
     navegador -> :4433/udp -> moq-relay:4433     (MoQ sobre QUIC)
     navegador -> :8189/udp -> mediamtx:8189      (WebRTC: ICE, DTLS y SRTP)
 
@@ -21,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 NGINX_IP = os.environ["NGINX_IP"]
 RELAY_IP = os.environ["RELAY_IP"]
 RTC_IP = os.environ["RTC_IP"]
-DASH_PORT, MOQ_PORT, CERT_PORT, RTC_PORT = 8080, 4433, 8081, 8189
+DASH_PORT, DASH_TLS_PORT, MOQ_PORT, CERT_PORT, RTC_PORT = 8080, 8443, 4433, 8081, 8189
 
 # Cada protocolo tiene su propia cola por sentido, con el mismo perfil: los dos ven un enlace idéntico
 # en vez de competir entre sí por uno compartido. Clase de la qdisc raíz y handles del limitador y de netem.
@@ -58,6 +59,7 @@ def setup():
     # Reenvío de los puertos del cliente a los servidores finales, con contadores por protocolo y sentido
     for proto, port, dest_ip, dest_port in (
         ("tcp", DASH_PORT, NGINX_IP, 80),
+        ("tcp", DASH_TLS_PORT, NGINX_IP, 443),
         ("udp", MOQ_PORT, RELAY_IP, MOQ_PORT),
         ("tcp", CERT_PORT, RELAY_IP, CERT_PORT),
         ("udp", RTC_PORT, RTC_IP, RTC_PORT),
@@ -67,6 +69,8 @@ def setup():
     for name, rule in (
         ("dash_down", f"-s {NGINX_IP} -p tcp --sport 80"),
         ("dash_up", f"-d {NGINX_IP} -p tcp --dport 80"),
+        ("dash_down", f"-s {NGINX_IP} -p tcp --sport 443"),
+        ("dash_up", f"-d {NGINX_IP} -p tcp --dport 443"),
         ("moq_down", f"-s {RELAY_IP} -p udp --sport {MOQ_PORT}"),
         ("moq_up", f"-d {RELAY_IP} -p udp --dport {MOQ_PORT}"),
         ("rtc_down", f"-s {RTC_IP} -p udp --sport {RTC_PORT}"),
@@ -86,6 +90,8 @@ def setup():
             run(f"{u32} match ip protocol 6 0xff match ip sport {DASH_PORT} 0xffff flowid {QUEUES['dash_down'][0]}")
             run(f"{u32} match ip protocol 17 0xff match ip sport {MOQ_PORT} 0xffff flowid {QUEUES['moq_down'][0]}")
             run(f"{u32} match ip protocol 6 0xff match ip dst {NGINX_IP}/32 match ip dport 80 0xffff flowid {QUEUES['dash_up'][0]}")
+            run(f"{u32} match ip protocol 6 0xff match ip sport {DASH_TLS_PORT} 0xffff flowid {QUEUES['dash_down'][0]}")
+            run(f"{u32} match ip protocol 6 0xff match ip dst {NGINX_IP}/32 match ip dport 443 0xffff flowid {QUEUES['dash_up'][0]}")
             run(f"{u32} match ip protocol 17 0xff match ip dst {RELAY_IP}/32 match ip dport {MOQ_PORT} 0xffff flowid {QUEUES['moq_up'][0]}")
             run(f"{u32} match ip protocol 17 0xff match ip sport {RTC_PORT} 0xffff flowid {QUEUES['rtc_down'][0]}")
             run(f"{u32} match ip protocol 17 0xff match ip dst {RTC_IP}/32 match ip dport {RTC_PORT} 0xffff flowid {QUEUES['rtc_up'][0]}")
@@ -132,7 +138,10 @@ def stats() -> dict:
     for line in run("iptables-save -c -t filter").splitlines():
         if "--comment" in line and line.startswith("["):
             packets, size = line[1 : line.index("]")].split(":")
-            out[line.split("--comment")[1].split()[0].strip('"')] = {"packets": int(packets), "bytes": int(size)}
+            # DASH tiene dos reglas por sentido (camino directo y a través del proxy): se suman
+            entry = out.setdefault(line.split("--comment")[1].split()[0].strip('"'), {"packets": 0, "bytes": 0})
+            entry["packets"] += int(packets)
+            entry["bytes"] += int(size)
     # Descartes de la emulación por cola: pérdida aleatoria de netem y desbordamiento de la cola
     for queue, (_, _, netem) in QUEUES.items():
         dropped = backlog = 0
