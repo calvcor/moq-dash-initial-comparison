@@ -6,6 +6,8 @@ const COMPONENTS: { key: string; name: string; where: string }[] = [
   { key: 'moq_relay', name: 'moq-relay', where: 'docker-compose.yml (MOQ_RELAY_VERSION)' },
   { key: 'moq_cli', name: 'moq-cli', where: 'server/Dockerfile' },
   { key: 'moq_watch', name: '@moq/watch', where: 'web/package.json' },
+  { key: 'moq_net', name: '@moq/net', where: 'dependencia de @moq/watch, fijada en web/package-lock.json' },
+  { key: 'moq_hang', name: '@moq/hang', where: 'dependencia de @moq/watch, fijada en web/package-lock.json' },
   { key: 'dashjs', name: 'dash.js', where: 'web/package.json' },
   { key: 'mediamtx', name: 'MediaMTX', where: 'docker-compose.yml (MEDIAMTX_VERSION)' },
   { key: 'ffmpeg', name: 'FFmpeg', where: 'paquete de Debian de la imagen del orquestador' },

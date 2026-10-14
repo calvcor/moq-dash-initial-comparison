@@ -66,6 +66,9 @@ SOURCES = {
     "mediamtx": lambda: docker_hub("bluenviron/mediamtx"),
     # Los reproductores se empaquetan con el dashboard: su versión instalada la conoce el propio dashboard
     "moq_watch": lambda: npm("@moq/watch"),
+    # Dependencias de @moq/watch con la parte de red y el catálogo: pueden cambiar sin que cambie @moq/watch
+    "moq_net": lambda: npm("@moq/net"),
+    "moq_hang": lambda: npm("@moq/hang"),
     "dashjs": lambda: npm("dashjs"),
 }
 

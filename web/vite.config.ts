@@ -9,7 +9,14 @@ const installed = (name: string): string => JSON.parse(readFileSync(new URL(`./n
 // https://vite.dev/config/
 export default defineConfig({
   define: {
-    __PLAYER_VERSIONS__: JSON.stringify({ moq_watch: installed('@moq/watch'), dashjs: installed('dashjs') }),
+    // @moq/net y @moq/hang son dependencias de @moq/watch, pero contienen la parte de red y el catálogo: también
+    // condicionan las medidas, y pueden cambiar sin que cambie @moq/watch
+    __PLAYER_VERSIONS__: JSON.stringify({
+      moq_watch: installed('@moq/watch'),
+      moq_net: installed('@moq/net'),
+      moq_hang: installed('@moq/hang'),
+      dashjs: installed('dashjs'),
+    }),
   },
   plugins: [
     react(),
