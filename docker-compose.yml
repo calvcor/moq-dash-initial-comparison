@@ -103,7 +103,7 @@ services:
 
   # Certificado del puerto directo de DASH (Let's Encrypt, reto DNS de DuckDNS). Inactivo sin DASH_HOST.
   dash-cert:
-    image: goacme/lego:v4.26.0
+    image: neilpang/acme.sh:3.1.1
     container_name: testbed-dash-cert
     entrypoint: ["/bin/sh", "/dash-cert.sh"]
     environment:
