@@ -214,8 +214,13 @@ El manifiesto completo, con todos sus campos explicados y ejemplos de cálculo, 
      genera.
 2. **Origen.** Un servidor en memoria dentro del orquestador (`origin.py`) recibe esos PUT y sirve
    los GET. Si un GET llega mientras el PUT sigue abierto, reenvía los bytes según entran.
-3. **Entrega.** nginx reenvía sin búfer (`proxy_buffering off`), a través del router de emulación,
-   hasta el navegador.
+3. **Entrega.** nginx reenvía sin búfer (`proxy_buffering off`). Hay dos caminos:
+   - **Directo** (con `DASH_HOST` configurado): el navegador conecta por HTTPS y HTTP/1.1 al puerto
+     8443 del servidor, que el router reenvía al nginx de DASH. La conexión TCP del propio navegador
+     atraviesa la red emulada, como en MoQ y WebRTC.
+   - **A través del punto de entrada**: el navegador conecta al nginx de entrada (o a un proxy
+     externo), que abre otra conexión, esa sí por el router. La red emulada actúa sobre esa segunda
+     conexión, no sobre la del navegador.
 4. **Reproducción.** `dash.js` descarga con `fetch` leyendo el cuerpo a trozos, y va metiendo cada
    fragmento en el `SourceBuffer` de **MSE** (*Media Source Extensions*). A partir de ahí decodifica
    y pinta el elemento `<video>` del navegador. El reproductor se explica en 3.8.
@@ -1215,8 +1220,10 @@ Diferencias entre las ramas que no son del protocolo en sí, y que conviene cont
    parte, comparar configuraciones de búfer.
 5. **Implementación**: se mide `dash.js`, `@moq/watch` y el WebRTC del navegador, no los protocolos
    en abstracto. Otras implementaciones se comportarían distinto.
-6. **Proxy**: detrás de Nginx Proxy Manager, la conexión TCP de DASH termina en el proxy y no en el
-   servidor; MoQ y WebRTC van directos por UDP.
+6. **Proxy**: si DASH pasa por el punto de entrada, la conexión TCP del navegador termina en el proxy
+   y la red emulada actúa sobre una segunda conexión interna. Se evita con el camino directo
+   (`DASH_HOST`), en el que la conexión del navegador atraviesa el router igual que en MoQ y WebRTC.
+   El CSV registra qué camino se usó (`dash_path`).
 
 ---
 

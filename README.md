@@ -58,7 +58,13 @@ Fuera de `localhost` el navegador solo permite WebTransport y WebCodecs en pági
 4. Los puertos **4433/udp** (MoQ) y **8189/udp** (WebRTC) del servidor deben ser alcanzables directamente desde los navegadores: no pasan por el proxy.
 5. Si el nombre público resuelve al proxy y no al servidor (lo habitual con un comodín DNS), añadir al `.env` la dirección directa del servidor para MoQ: `MOQ_HOST=10.0.0.5`. El relay usa un certificado autofirmado fijado por huella, así que vale una IP. La alternativa es que el proxy reenvíe el puerto 4433/udp como *stream*.
 
-A tener en cuenta en las medidas: detrás del proxy, DASH llega al navegador por la conexión del proxy (normalmente HTTP/2) y la emulación de red actúa sobre el tramo interno, no sobre la conexión TCP del navegador. MoQ sí va extremo a extremo.
+6. **DASH directo (recomendado para medir).** Por defecto DASH pasa por el punto de entrada, que es un proxy: la conexión TCP del navegador termina en él y la emulación de red actúa sobre una segunda conexión interna, no sobre la del navegador. Para que DASH vaya extremo a extremo, como MoQ y WebRTC:
+   - Crear un nombre DNS que apunte **directamente** al servidor (no al proxy). Con DuckDNS, un subdominio propio, p. ej. `phd-testing.duckdns.org` → `10.0.0.5`.
+   - Añadir al `.env` `DASH_HOST=phd-testing.duckdns.org` y `DUCKDNS_TOKEN=<token>`. El token solo vive en ese fichero, que no se sube al repositorio.
+   - El servicio `dash-cert` obtiene y renueva un certificado de Let's Encrypt por el reto DNS (con `acme.sh`, sin registrar correo), que se guarda en `certs/`, también fuera del repositorio. `nginx-dash` lo activa al aparecer y sirve DASH con TLS y HTTP/1.1 en el puerto **8443/tcp**, que el router reenvía y degrada igual que los de MoQ y WebRTC.
+   - El puerto 8443/tcp del servidor debe ser alcanzable desde los navegadores.
+
+   El pie del reproductor DASH indica el camino en uso ("Directo" o "Vía proxy"), y el CSV lo registra en la columna `dash_path`. Sin `DASH_HOST`, todo sigue funcionando por el proxy.
 
 La emulación de red necesita en el kernel los módulos `sch_prio`, `sch_tbf`, `sch_netem` y `cls_u32`. En un contenedor LXC deben estar cargados en el anfitrión; si faltan, todo lo demás funciona y el panel lo indica.
 
