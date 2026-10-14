@@ -10,7 +10,8 @@ registros del servidor desplegado (9 de octubre de 2026). Cuando algo es una ded
 comprobación directa, se dice.
 
 > **Versiones desplegadas:** relay 0.17.3 y publicador 0.14.3 desde el 13 de octubre de 2026; relay
-> 0.17.4 y publicador 0.14.4 desde el 14 de octubre. Lo que este documento describe se observó con las
+> 0.17.4 desde el 14 de octubre, con el publicador en 0.14.3, porque el 0.14.4 acumula retraso en su
+> entrada sin parar. Lo que este documento describe se observó con las
 > de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
 
 | Componente                                                | Versión comprobada    |
