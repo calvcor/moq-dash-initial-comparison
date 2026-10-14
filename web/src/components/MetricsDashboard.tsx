@@ -152,12 +152,13 @@ const Telemetry: React.FC<{
   color: string;
   bufferLabel: string;
   bufferHint?: React.ReactNode;
+  reportedHint: React.ReactNode;
   networkHint: React.ReactNode;
   qualityHint: React.ReactNode;
   estimateHint: React.ReactNode;
   metrics: PlayerMetrics;
   stats: ReturnType<typeof summarize>;
-}> = ({ title, engine, color, bufferLabel, bufferHint, networkHint, qualityHint, estimateHint, metrics, stats }) => (
+}> = ({ title, engine, color, bufferLabel, bufferHint, reportedHint, networkHint, qualityHint, estimateHint, metrics, stats }) => (
   <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl">
     <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-800">
       <span className={`font-semibold text-sm ${color}`}>{title}</span>
@@ -165,7 +166,7 @@ const Telemetry: React.FC<{
     </div>
     <div className="grid grid-cols-2 gap-3 text-center">
       <Stat label="Latencia glass-to-glass" value={fmt(metrics.latencyMs, 'ms')} accent wide />
-      <Stat label="Latencia según reproductor" value={fmt(metrics.reportedLatencyMs, 'ms')} />
+      <Stat label="Latencia según reproductor" value={fmt(metrics.reportedLatencyMs, 'ms')} hint={reportedHint} />
       <Stat label="Frames presentados" value={fmt(metrics.fps, 'fps')} />
       <Stat
         label={`Calidad (${metrics.qualityMode === 'auto' ? 'auto' : 'fijada'})`}
@@ -300,6 +301,19 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           engine="dash.js engine"
           color="text-blue-400"
           bufferLabel="Búfer local"
+          reportedHint={
+            <>
+              <p>
+                <b>Qué es:</b> la distancia al directo que calcula el propio dash.js (<code>getCurrentLiveLatency()</code>): la hora actual,
+                sincronizada con el servidor, menos la posición del vídeo contada desde la hora de inicio del manifiesto.
+              </p>
+              <p>
+                <b>Es una medida real</b>, pero según el reloj del manifiesto: deja fuera lo anterior a esa hora de inicio, básicamente la
+                codificación. Por eso sale algo por debajo de la glass-to-glass.
+              </p>
+              <p>Solo como contraste: la cifra rigurosa es la glass-to-glass, que se mide igual en las tres ramas.</p>
+            </>
+          }
           networkHint={DASH_NETWORK_HINT}
           qualityHint={<p>Representación que reproduce dash.js y su bitrate declarado en el manifiesto. En auto decide su algoritmo ABR por defecto.</p>}
           estimateHint={<p>Caudal medio que dash.js mide en sus descargas de vídeo; es la entrada de su ABR. Con entrega chunked de baja latencia esta medida es poco precisa.</p>}
@@ -311,6 +325,20 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           engine="WebTransport QUIC"
           color="text-emerald-400"
           bufferLabel="Búfer de jitter"
+          reportedHint={
+            <>
+              <p>
+                <b>Qué es:</b> el retardo de sincronización de @moq/watch: la latencia objetivo del slider (o la calculada en auto) más el
+                jitter que el catálogo declara para las pistas.
+              </p>
+              <p>
+                <b>No es una medida, sino un objetivo:</b> cuánto se propone esperar el reproductor desde el frame que más rápido llegó. No
+                sabe nada del camino hasta el navegador (codificación, publicador, relay y red), así que sale bastante por debajo de la
+                glass-to-glass.
+              </p>
+              <p>Solo como contraste: la cifra rigurosa es la glass-to-glass, que se mide igual en las tres ramas.</p>
+            </>
+          }
           bufferHint={
             <p>
               Tiempo medio que cada frame pasa retenido en el reproductor: desde que @moq/watch lo lee de la red hasta que lo entrega para
@@ -336,6 +364,20 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           engine="RTCPeerConnection"
           color="text-amber-400"
           bufferLabel="Búfer de jitter"
+          reportedHint={
+            <>
+              <p>
+                <b>No disponible:</b> la API de WebRTC no informa de ninguna latencia respecto al directo, y el navegador no tiene con qué
+                calcularla. Recibe marcas de tiempo RTP, que son relativas (cuánto dista un frame del anterior), no la hora a la que se
+                capturó cada uno.
+              </p>
+              <p>
+                El protocolo prevé dos formas de saber esa hora: una extensión de cabecera con la hora de captura, que MediaMTX no negocia, y
+                los informes RTCP del emisor, que aquí darían como mucho la hora de llegada a MediaMTX y no la de captura.
+              </p>
+              <p>Lo que sí se mide es la glass-to-glass y, como parte de ella, el búfer de jitter.</p>
+            </>
+          }
           bufferHint={
             <p>
               Tiempo medio que cada frame pasa en el búfer de jitter del navegador: desde que llega su primer paquete hasta que sale hacia el
