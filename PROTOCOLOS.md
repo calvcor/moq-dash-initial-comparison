@@ -242,7 +242,13 @@ cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
 - **`maxDrift`** (el slider "Salto al directo", 1,5 s por defecto aquí; 12 s es el valor por defecto
   de la librería). Si el desvío supera este umbral, deja de corregir con la velocidad y **salta**
   al directo con un *seek*. El salto aborta las descargas en curso y abre peticiones nuevas.
-- **Parada.** Si el búfer baja de 0,3 s (`stallThreshold`), el vídeo se congela hasta rellenarse.
+- **Búfer "vacío".** Si el búfer baja de un umbral (0,3 s de fábrica; `lowLatencyStallThreshold` en
+  baja latencia, `stallThreshold` fuera de ella), `dash.js` lo declara vacío. Eso **no detiene el
+  vídeo**: la regla de búfer insuficiente fuerza la calidad más baja, la corrección de latencia da la
+  reproducción por parada y sus métricas registran un rebuffering. El vídeo solo se congela de verdad
+  cuando el navegador se queda sin datos. (`dash.js` puede detenerlo al cruzar el umbral, pero esa
+  opción, `syntheticStallEvents`, viene desactivada.) Con la latencia objetivo en 0,3 s, el búfer
+  oscila justo alrededor de este umbral. Es configurable desde el panel ("Umbral de búfer vacío").
 
 Con latencias objetivo muy bajas el búfer es casi nulo: cualquier retraso de un fragmento lo vacía.
 Es la razón de que DASH necesite del orden de segundos para ser estable.
@@ -356,7 +362,7 @@ Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
 | :--- | :--- | :--- |
 | `streaming.liveCatchup.playbackRate` | −0,5 a +0,5 | Cuánto puede frenar o acelerar: entre 0,5× y 1,5×. |
 | `streaming.liveCatchup.playbackBufferMin` | 0,5 s | En modo LoL+, por debajo de este búfer la librería frena la reproducción. |
-| `streaming.buffer.stallThreshold` | 0,3 s | Por debajo de este búfer se declara una parada. |
+| `streaming.buffer.stallThreshold`, `lowLatencyStallThreshold` | 0,3 s | Por debajo de este búfer lo declara vacío: fuerza la calidad más baja y la corrección de latencia lo da por parado. No detiene el vídeo. Configurable desde el panel. |
 | `streaming.abr.rules` | Ver 3.6 | Qué reglas de ABR están activas. |
 | `streaming.utcSynchronization.enabled` | `true` | Sincronización de reloj con el servidor. |
 

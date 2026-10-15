@@ -245,6 +245,7 @@ export function App() {
         dash_bw_estimate_kbps: currentDash.bandwidthEstimateKbps,
         dash_quality_mode: currentDash.qualityMode,
         dash_max_drift_s: currentDash.maxDriftSec ?? null,
+        dash_stall_threshold_s: currentDash.stallThresholdSec ?? null,
         moq_g2g_ms: currentMoq.latencyMs,
         moq_reported_ms: currentMoq.reportedLatencyMs,
         moq_kbps: currentMoq.bitrateKbps,

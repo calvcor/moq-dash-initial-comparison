@@ -108,6 +108,7 @@ export interface PlayerMetrics {
   bandwidthEstimateKbps: number | null; // estimación en la que se basa la adaptación
   qualityMode: 'auto' | 'manual';
   maxDriftSec?: number; // solo DASH: desvío a partir del cual dash.js salta al directo (0 = nunca)
+  stallThresholdSec?: number; // solo DASH: nivel de búfer por debajo del cual dash.js lo declara vacío
   packetsLost?: number | null; // solo WebRTC: paquetes RTP perdidos según el navegador
   stages?: StageBreakdown | null;
   status: 'idle' | 'connecting' | 'playing' | 'error';
@@ -147,6 +148,7 @@ export interface SampleRow {
   dash_bw_estimate_kbps: number | null;
   dash_quality_mode: string;
   dash_max_drift_s: number | null;
+  dash_stall_threshold_s: number | null;
   moq_g2g_ms: number | null;
   moq_reported_ms: number | null;
   moq_kbps: number | null;

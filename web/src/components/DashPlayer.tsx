@@ -32,6 +32,10 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // Desvío respecto al objetivo a partir del cual dash.js deja de corregir con la velocidad de
   // reproducción y salta al directo, abortando las descargas en curso. 0 = no saltar nunca.
   const [maxDrift, setMaxDrift] = useState<number>(1.5);
+  // Nivel de búfer por debajo del cual dash.js lo declara vacío: fuerza la calidad más baja (regla
+  // insufficientBufferRule) y da por parada la reproducción en la corrección de latencia. No detiene el
+  // vídeo: eso solo lo hace el navegador al quedarse sin datos. 0,3 s es el valor de fábrica.
+  const [stallThreshold, setStallThreshold] = useState<number>(0.3);
 
   // Actualizar liveDelay en caliente si el reproductor está activo
   const handleLatencyChange = (newSec: number) => {
@@ -83,9 +87,16 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
     }
   };
 
+  const stallSettings = (sec: number) => ({ streaming: { buffer: { stallThreshold: sec, lowLatencyStallThreshold: sec } } });
+
+  const handleStallThresholdChange = (newSec: number) => {
+    setStallThreshold(newSec);
+    if (playerRef.current) playerRef.current.updateSettings(stallSettings(newSec));
+  };
+
   useEffect(() => {
-    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift });
-  }, [targetLatency, maxDrift]);
+    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift, stallThresholdSec: stallThreshold });
+  }, [targetLatency, maxDrift, stallThreshold]);
 
   useEffect(() => {
     const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
@@ -194,6 +205,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           },
         },
       });
+      player.updateSettings(stallSettings(stallThreshold));
 
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
         console.log('[dash.js] Stream inicializado');
@@ -381,6 +393,30 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
             className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
           <span className="text-[10px] text-slate-500 font-mono">10s</span>
+        </div>
+      </div>
+
+      {/* Umbral de búfer vacío (buffer.stallThreshold y lowLatencyStallThreshold) */}
+      <div
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex items-center justify-between text-xs"
+        title="Si el búfer baja de este nivel, dash.js lo declara vacío: la regla de búfer insuficiente fuerza la calidad más baja, la corrección de latencia da la reproducción por parada y se registra un rebuffering en sus métricas. No detiene el vídeo: eso solo ocurre cuando el navegador se queda sin datos. Con una latencia objetivo baja el búfer ronda este valor. 0,3 s es el valor de fábrica de dash.js."
+      >
+        <div className="flex items-center space-x-2">
+          <span className="text-slate-400 font-medium">Umbral de búfer vacío:</span>
+          <span className="font-mono text-blue-400 font-semibold">{`${stallThreshold.toFixed(2)}s`}{stallThreshold === 0.3 && ' (de fábrica)'}</span>
+        </div>
+        <div className="flex items-center space-x-3 w-1/2 max-w-xs">
+          <span className="text-[10px] text-slate-500 font-mono">0s</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={stallThreshold}
+            onChange={(e) => handleStallThresholdChange(Math.round(parseFloat(e.target.value) * 100) / 100)}
+            className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          />
+          <span className="text-[10px] text-slate-500 font-mono">1s</span>
         </div>
       </div>
 
