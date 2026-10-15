@@ -54,7 +54,7 @@ services:
 
   # 1. MoQ Relay Oficial (Docker Hub moqdev/moq-relay), con la versión fijada
   moq-relay:
-    image: moqdev/moq-relay:${MOQ_RELAY_VERSION:-0.17.4}
+    image: moqdev/moq-relay:${MOQ_RELAY_VERSION:-0.17.5}
     container_name: testbed-moq-relay
     command: >
       --listen 0.0.0.0:4433
@@ -130,7 +130,7 @@ services:
       - DASH_PORT=${DASH_PORT:-8443}
       - RTC_PUBLISH_URL=rtsp://172.30.50.12:8554/live
       # Solo para mostrarlas en el dashboard: deben coincidir con las etiquetas de imagen de arriba
-      - MOQ_RELAY_VERSION=${MOQ_RELAY_VERSION:-0.17.4}
+      - MOQ_RELAY_VERSION=${MOQ_RELAY_VERSION:-0.17.5}
       - MEDIAMTX_VERSION=${MEDIAMTX_VERSION:-1.21.2}
     networks:
       - default

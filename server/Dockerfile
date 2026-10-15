@@ -12,8 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Descargar e instalar el binario dinámico oficial de moq-cli para Linux (soporta amd64 y arm64)
-# Se mantiene en 0.14.3: con 0.14.4 el publicador lee su entrada más despacio que el ritmo de la fuente y
-# acumula retraso sin parar (medido el 14 de octubre de 2026: 16-18 s de espera al minuto y medio).
+# Se mantiene en 0.14.3. Con 0.14.4 el publicador lee su entrada más despacio que el ritmo de la fuente y
+# acumula retraso sin parar (14 de octubre de 2026: 16-18 s de espera al minuto y medio). Con 0.14.5 aguanta
+# sin espectadores, pero con uno se queda atrás (15 de octubre, tres calidades: 3 s de espera mediana y MoQ
+# a 2 s de latencia; con una calidad, 49 congelados en 85 s frente a 13 con 0.14.3).
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ]; then \
         URL="https://github.com/moq-dev/moq/releases/download/moq-cli-v0.14.3/moq-cli-v0.14.3-aarch64-unknown-linux-gnu.tar.gz"; \
