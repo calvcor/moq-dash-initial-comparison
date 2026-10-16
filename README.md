@@ -441,6 +441,7 @@ Desde el panel de control:
 | GOP | 15, 30, 60, 120 frames (0,25 a 2 s) | Tamaño del grupo MoQ y límite inferior del segmento DASH |
 | Escalera de calidades | 1 a 5; altura 1080/720/540/480/360/240 y bitrate libre | Lo que codifica la fuente. Con una sola no hay adaptación |
 | Calidad (por reproductor) | Auto o una calidad fija | Auto usa la adaptación de cada reproductor; fijar una la desactiva |
+| Reproductores activos | Cualquier combinación de LL-DASH, MoQ y WebRTC, con al menos uno | Un reproductor apagado se desmonta: cierra su conexión y no descarga nada, así que no compite con los demás por la red ni por el navegador. Se recuerda en el navegador; cada cambio abre un tramo de medida nuevo. En el CSV, `players` lista los activos y las métricas de los apagados quedan vacías |
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
 | Latencia objetivo DASH | 0,05 a 6,0 s (0,3 s al abrir) | `liveDelay` de dash.js, con catch-up LoL+ |

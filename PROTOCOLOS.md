@@ -1247,6 +1247,7 @@ Diferencias entre las ramas que no son del protocolo en sí, y que conviene cont
 | **Salto al directo** | `liveCatchup.maxDrift` | — | — |
 | **Calidad** | Fija la Representation y desactiva el ABR | Fija la pista (`target.name`) | — |
 | **Red emulada** | Cola propia en el router | Cola propia en el router | Cola propia en el router |
+| **Reproductores activos** | Apagado: no descarga ni ocupa la red | Apagado: no descarga ni ocupa la red | Apagado: no descarga ni ocupa la red |
 
 ---
 
