@@ -8,12 +8,87 @@ import { NetworkPanel } from './components/NetworkPanel';
 import { PipelineDiagram } from './components/PipelineDiagram';
 import { VersionsPanel, versionsLabel } from './components/VersionsPanel';
 import { RateWindow } from './lib/glass';
+import { gridCols } from './lib/layout';
 import { syncClock, getClockSync } from './lib/clock';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile, VersionReport } from './types';
 import { Activity, Radio, Cpu, Network } from 'lucide-react';
 
 // Mismo origen que el dashboard: el punto de entrada (edge) reparte /api, /media/dash y el resto
 const API_BASE = '';
+
+type PlayerId = 'dash' | 'moq' | 'rtc';
+const PLAYER_IDS: PlayerId[] = ['dash', 'moq', 'rtc'];
+const PLAYERS_KEY = 'testbed.players';
+
+/** Reproductores activos, recordados en este navegador. Si no se puede leer, los tres. */
+function loadPlayers(): Record<PlayerId, boolean> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || 'null');
+    if (saved && PLAYER_IDS.some((id) => saved[id] === true)) return { dash: !!saved.dash, moq: !!saved.moq, rtc: !!saved.rtc };
+  } catch (_) {}
+  return { dash: true, moq: true, rtc: true };
+}
+
+// Métricas de un reproductor sin medida: así queda también uno desactivado, para que el CSV lo deje vacío
+const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
+  dash: {
+      protocol: 'LL-DASH',
+      latencyMs: null,
+      reportedLatencyMs: null,
+      bitrateKbps: null,
+      networkKbps: null,
+      fps: null,
+      bufferLengthSec: null,
+      stalls: 0,
+      stallMs: 0,
+      restarts: 0,
+      targetLatencyMs: null,
+      renditionHeight: null,
+      renditionKbps: null,
+      qualitySwitches: 0,
+      bandwidthEstimateKbps: null,
+      qualityMode: 'auto',
+      status: 'idle',
+  },
+  moq: {
+      protocol: 'Media over QUIC',
+      latencyMs: null,
+      reportedLatencyMs: null,
+      bitrateKbps: null,
+      networkKbps: null,
+      fps: null,
+      bufferLengthSec: null,
+      stalls: 0,
+      stallMs: 0,
+      restarts: 0,
+      targetLatencyMs: null,
+      renditionHeight: null,
+      renditionKbps: null,
+      qualitySwitches: 0,
+      bandwidthEstimateKbps: null,
+      qualityMode: 'auto',
+      status: 'idle',
+  },
+  rtc: {
+      protocol: 'WebRTC',
+      latencyMs: null,
+      reportedLatencyMs: null,
+      bitrateKbps: null,
+      networkKbps: null,
+      fps: null,
+      bufferLengthSec: null,
+      stalls: 0,
+      stallMs: 0,
+      restarts: 0,
+      targetLatencyMs: null,
+      renditionHeight: null,
+      renditionKbps: null,
+      qualitySwitches: 0,
+      bandwidthEstimateKbps: null,
+      qualityMode: 'manual',
+      status: 'idle',
+  },
+};
 
 const stage = (metrics: PlayerMetrics, key: string) => metrics.stages?.stages.find((s) => s.key === key)?.ms ?? null;
 
@@ -47,65 +122,11 @@ export function App() {
     frag_duration: 0.1,
   });
 
-  const [dashMetrics, setDashMetrics] = useState<PlayerMetrics>({
-    protocol: 'LL-DASH',
-    latencyMs: null,
-    reportedLatencyMs: null,
-    bitrateKbps: null,
-    networkKbps: null,
-    fps: null,
-    bufferLengthSec: null,
-    stalls: 0,
-    stallMs: 0,
-    restarts: 0,
-    targetLatencyMs: null,
-    renditionHeight: null,
-    renditionKbps: null,
-    qualitySwitches: 0,
-    bandwidthEstimateKbps: null,
-    qualityMode: 'auto',
-    status: 'idle',
-  });
+  const [dashMetrics, setDashMetrics] = useState<PlayerMetrics>(INITIAL_METRICS.dash);
 
-  const [moqMetrics, setMoqMetrics] = useState<PlayerMetrics>({
-    protocol: 'Media over QUIC',
-    latencyMs: null,
-    reportedLatencyMs: null,
-    bitrateKbps: null,
-    networkKbps: null,
-    fps: null,
-    bufferLengthSec: null,
-    stalls: 0,
-    stallMs: 0,
-    restarts: 0,
-    targetLatencyMs: null,
-    renditionHeight: null,
-    renditionKbps: null,
-    qualitySwitches: 0,
-    bandwidthEstimateKbps: null,
-    qualityMode: 'auto',
-    status: 'idle',
-  });
+  const [moqMetrics, setMoqMetrics] = useState<PlayerMetrics>(INITIAL_METRICS.moq);
 
-  const [rtcMetrics, setRtcMetrics] = useState<PlayerMetrics>({
-    protocol: 'WebRTC',
-    latencyMs: null,
-    reportedLatencyMs: null,
-    bitrateKbps: null,
-    networkKbps: null,
-    fps: null,
-    bufferLengthSec: null,
-    stalls: 0,
-    stallMs: 0,
-    restarts: 0,
-    targetLatencyMs: null,
-    renditionHeight: null,
-    renditionKbps: null,
-    qualitySwitches: 0,
-    bandwidthEstimateKbps: null,
-    qualityMode: 'manual',
-    status: 'idle',
-  });
+  const [rtcMetrics, setRtcMetrics] = useState<PlayerMetrics>(INITIAL_METRICS.rtc);
 
   const [history, setHistory] = useState<{
     labels: string[];
@@ -190,6 +211,24 @@ export function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Reproductores activos. Uno desactivado se desmonta entero: cierra su conexión y deja de descargar, así
+  // que no compite con los demás por la red ni por el navegador.
+  const [players, setPlayers] = useState<Record<PlayerId, boolean>>(loadPlayers);
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const resetters: Record<PlayerId, (m: PlayerMetrics) => void> = { dash: setDashMetrics, moq: setMoqMetrics, rtc: setRtcMetrics };
+  const togglePlayer = (id: PlayerId) => {
+    const next = { ...players, [id]: !players[id] };
+    if (!PLAYER_IDS.some((p) => next[p])) return; // siempre queda al menos uno
+    setPlayers(next);
+    try {
+      localStorage.setItem(PLAYERS_KEY, JSON.stringify(next));
+    } catch (_) {}
+    if (!next[id]) resetters[id](INITIAL_METRICS[id]);
+    // Cambian las condiciones de la medida (carga del navegador y de la red): tramo nuevo
+    startMeasureEpoch();
+  };
+
   const dashMetricsRef = useRef(dashMetrics);
   const moqMetricsRef = useRef(moqMetrics);
   const rtcMetricsRef = useRef(rtcMetrics);
@@ -212,9 +251,11 @@ export function App() {
 
     const interval = setInterval(() => {
       const timeStr = new Date().toLocaleTimeString();
-      const currentDash = dashMetricsRef.current;
-      const currentMoq = moqMetricsRef.current;
-      const currentRtc = rtcMetricsRef.current;
+      // Un reproductor desactivado aporta su fila vacía, nunca su último valor
+      const active = playersRef.current;
+      const currentDash = active.dash ? dashMetricsRef.current : INITIAL_METRICS.dash;
+      const currentMoq = active.moq ? moqMetricsRef.current : INITIAL_METRICS.moq;
+      const currentRtc = active.rtc ? rtcMetricsRef.current : INITIAL_METRICS.rtc;
 
       const status = serverStatusRef.current;
       const clock = getClockSync();
@@ -223,6 +264,7 @@ export function App() {
       samplesRef.current.push({
         time_iso: new Date().toISOString(),
         epoch: epochRef.current.epoch,
+        players: PLAYER_IDS.filter((id) => active[id]).join('|'),
         elapsed_s: Math.round((performance.now() - epochRef.current.startedAt) / 1000),
         gop_size: status?.config.gop_size ?? null,
         ladder: status?.config.renditions.map((r) => `${r.height}p@${r.bitrate_kbps}`).join('|') ?? null,
@@ -490,18 +532,40 @@ export function App() {
         {/* Emulación de red, igual para las tres ramas */}
         <NetworkPanel network={serverStatus?.network} ipRates={ipRates()} isLoading={isLoading} onApply={handleApplyNetwork} />
 
-        {/* Reproductores Lado a Lado (Split-Screen) */}
-        <div className="grid grid-cols-3 gap-4">
-          <DashPlayer
+        {/* Reproductores activos: se pueden probar por separado o comparar de dos en dos */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-400 font-medium mr-1">Reproductores:</span>
+          {PLAYER_IDS.map((id) => {
+            const on = players[id];
+            const last = on && PLAYER_IDS.filter((p) => players[p]).length === 1;
+            const style = { dash: 'border-blue-600 bg-blue-900/50 text-blue-200', moq: 'border-emerald-600 bg-emerald-900/50 text-emerald-200', rtc: 'border-amber-600 bg-amber-900/50 text-amber-200' }[id];
+            return (
+              <button
+                key={id}
+                onClick={() => togglePlayer(id)}
+                disabled={last}
+                title={last ? 'Tiene que quedar al menos un reproductor activo' : on ? 'Desactivar: se cierra su conexión y deja de descargar' : 'Activar'}
+                className={`px-3 py-1 rounded-lg border font-medium transition-colors ${on ? style : 'border-slate-700 bg-slate-900 text-slate-500 hover:text-slate-300'} ${last ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                {{ dash: 'LL-DASH', moq: 'MoQ', rtc: 'WebRTC' }[id]} {on ? '· activo' : '· apagado'}
+              </button>
+            );
+          })}
+          <span className="text-slate-500 ml-2">Activar o apagar uno empieza un tramo de medida nuevo.</span>
+        </div>
+
+        {/* Reproductores lado a lado */}
+        <div className={`grid gap-4 ${gridCols(players)}`}>
+          {players.dash && <DashPlayer
             key={`dash-${dashStreamId}`}
             url={serverStatus?.dash_url || '/media/dash/manifest.mpd'}
             timecodes={serverStatus?.timecodes}
             renditions={serverStatus?.config.renditions}
             isStreaming={isStreaming}
             onMetricsUpdate={(m) => setDashMetrics((prev) => ({ ...prev, ...m }))}
-          />
+          />}
 
-          <MoqPlayer
+          {players.moq && <MoqPlayer
             key={`moq-${moqStreamId}`}
             url={`https://${serverStatus?.moq_host || window.location.hostname}:${serverStatus?.moq_port ?? 4433}/anon`}
             spkiFingerprint={serverStatus?.spki_fingerprint}
@@ -509,18 +573,19 @@ export function App() {
             renditions={serverStatus?.config.renditions}
             isStreaming={isStreaming}
             onMetricsUpdate={(m) => setMoqMetrics((prev) => ({ ...prev, ...m }))}
-          />
+          />}
 
-          <RtcPlayer
+          {players.rtc && <RtcPlayer
             key={`rtc-${rtcStreamId}`}
             timecodes={serverStatus?.timecodes}
             isStreaming={isStreaming}
             onMetricsUpdate={(m) => setRtcMetrics((prev) => ({ ...prev, ...m }))}
-          />
+          />}
         </div>
 
         {/* Recorrido de un frame con la latencia medida en cada etapa */}
         <PipelineDiagram
+          players={players}
           stages={{ dash: dashMetrics.stages, moq: moqMetrics.stages, rtc: rtcMetrics.stages }}
           latency={{ dash: dashMetrics.latencyMs, moq: moqMetrics.latencyMs, rtc: rtcMetrics.latencyMs }}
         />
@@ -537,6 +602,7 @@ export function App() {
             dashMetrics={dashMetrics}
             moqMetrics={moqMetrics}
             rtcMetrics={rtcMetrics}
+            players={players}
             history={history}
             samples={samplesRef.current.filter((r) => r.epoch === measureEpoch)}
             anomalies={serverStatus?.ingest_anomalies}

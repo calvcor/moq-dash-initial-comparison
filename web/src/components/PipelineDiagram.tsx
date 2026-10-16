@@ -146,6 +146,7 @@ const LANES: { id: LaneId; title: string; color: string; bar: string; stages: St
 ];
 
 interface PipelineDiagramProps {
+  players: Record<LaneId, boolean>;
   stages: Record<LaneId, StageBreakdown | null | undefined>;
   latency: Record<LaneId, number | null>;
 }
@@ -187,9 +188,12 @@ const Particles: React.FC<{ stages: Stage[]; breakdown?: StageBreakdown | null; 
   return <div ref={track} className="relative h-0.5 bg-slate-700/70 rounded mx-1 my-2" />;
 };
 
-export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ stages: data, latency }) => {
-  const [selected, setSelected] = useState<{ lane: LaneId; key: string }>({ lane: 'dash', key: 'deliver' });
-  const scaleMs = Math.max(data.dash?.totalMs ?? 0, data.moq?.totalMs ?? 0, data.rtc?.totalMs ?? 0, 1);
+export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ players, stages: data, latency }) => {
+  const [chosen, setSelected] = useState<{ lane: LaneId; key: string }>({ lane: 'dash', key: 'deliver' });
+  // Solo los carriles de los reproductores activos; si el elegido se apaga, se muestra el primero que quede
+  const lanes = LANES.filter((l) => players[l.id]);
+  const selected = players[chosen.lane] ? chosen : { lane: lanes[0].id, key: lanes[0].stages[0].key };
+  const scaleMs = Math.max(...lanes.map((l) => data[l.id]?.totalMs ?? 0), 1);
   const clock = getClockSync();
   const clockError = clock ? clock.rttMs / 2 : null;
 
@@ -208,7 +212,7 @@ export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ stages: data, 
       </div>
 
       <div className="space-y-5">
-        {LANES.map((l) => {
+        {lanes.map((l) => {
           const breakdown = data[l.id];
           const nodes = l.stages.reduce((sum, s) => sum + s.nodes.length, 0);
           return (

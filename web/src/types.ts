@@ -125,7 +125,8 @@ export interface StageBreakdown {
 // Una fila por segundo del registro exportable de la sesión
 export interface SampleRow {
   time_iso: string;
-  epoch: number; // se incrementa en cada reconfiguración del pipeline o de la red
+  epoch: number; // se incrementa en cada reconfiguración del pipeline o de la red, o al activar o apagar un reproductor
+  players: string; // reproductores activos en esa muestra, p. ej. dash|moq
   elapsed_s: number; // segundos desde el inicio del epoch
   gop_size: number | null;
   ladder: string | null; // escalera codificada, p. ej. 1080p@4000|720p@2000

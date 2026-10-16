@@ -1,3 +1,4 @@
+import { gridCols } from '../lib/layout';
 import React, { useState } from 'react';
 import {
   Chart as ChartJS,
@@ -20,6 +21,7 @@ interface MetricsDashboardProps {
   dashMetrics: PlayerMetrics;
   moqMetrics: PlayerMetrics;
   rtcMetrics: PlayerMetrics;
+  players: { dash: boolean; moq: boolean; rtc: boolean };
   history: {
     labels: string[];
     dashLatency: (number | null)[];
@@ -198,6 +200,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   dashMetrics,
   moqMetrics,
   rtcMetrics,
+  players,
   history,
   samples,
   anomalies,
@@ -222,6 +225,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     datasets: [
       {
         label: 'LL-DASH Latencia G2G (ms)',
+        hidden: !players.dash,
         data: history.dashLatency,
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.5)',
@@ -229,6 +233,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       },
       {
         label: 'MoQ Latencia G2G (ms)',
+        hidden: !players.moq,
         data: history.moqLatency,
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.5)',
@@ -236,6 +241,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       },
       {
         label: 'WebRTC Latencia G2G (ms)',
+        hidden: !players.rtc,
         data: history.rtcLatency,
         borderColor: '#f59e0b',
         backgroundColor: 'rgba(245, 158, 11, 0.5)',
@@ -249,6 +255,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     datasets: [
       {
         label: 'LL-DASH Bitrate Recibido (kbps)',
+        hidden: !players.dash,
         data: history.dashBitrate,
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.5)',
@@ -256,6 +263,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       },
       {
         label: 'MoQ Bitrate Recibido (kbps)',
+        hidden: !players.moq,
         data: history.moqBitrate,
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.5)',
@@ -263,6 +271,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       },
       {
         label: 'WebRTC Bitrate Recibido (kbps)',
+        hidden: !players.rtc,
         data: history.rtcBitrate,
         borderColor: '#f59e0b',
         backgroundColor: 'rgba(245, 158, 11, 0.5)',
@@ -295,8 +304,8 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   return (
     <div className="space-y-4">
       {/* Tarjetas comparativas: mismas métricas y mismo método de medida en las tres ramas */}
-      <div className="grid grid-cols-3 gap-4">
-        <Telemetry
+      <div className={`grid gap-4 ${gridCols(players)}`}>
+        {players.dash && <Telemetry
           title="Telemetría LL-DASH"
           engine="dash.js engine"
           color="text-blue-400"
@@ -319,8 +328,8 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           estimateHint={<p>Caudal medio que dash.js mide en sus descargas de vídeo; es la entrada de su ABR. Con entrega chunked de baja latencia esta medida es poco precisa.</p>}
           metrics={dashMetrics}
           stats={dashStats}
-        />
-        <Telemetry
+        />}
+        {players.moq && <Telemetry
           title="Telemetría Media over QUIC"
           engine="WebTransport QUIC"
           color="text-emerald-400"
@@ -358,8 +367,8 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           estimateHint={<p>Tasa de recepción que estima el relay con su control de congestión y envía al reproductor (mensajes PROBE de MoQ).</p>}
           metrics={moqMetrics}
           stats={moqStats}
-        />
-        <Telemetry
+        />}
+        {players.rtc && <Telemetry
           title="Telemetría WebRTC"
           engine="RTCPeerConnection"
           color="text-amber-400"
@@ -389,7 +398,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           estimateHint={<p>No aplica: en esta rama no hay adaptación de calidad en el reproductor.</p>}
           metrics={rtcMetrics}
           stats={rtcStats}
-        />
+        />}
       </div>
 
       {/* Validez de la medida y exportación */}
