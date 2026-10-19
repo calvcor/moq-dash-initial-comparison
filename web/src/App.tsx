@@ -7,11 +7,12 @@ import { ControlPanel } from './components/ControlPanel';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PipelineDiagram } from './components/PipelineDiagram';
 import { VersionsPanel, versionsLabel } from './components/VersionsPanel';
+import { QoETestView } from './components/QoETestView';
 import { RateWindow } from './lib/glass';
 import { gridCols } from './lib/layout';
 import { syncClock, getClockSync } from './lib/clock';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile, VersionReport } from './types';
-import { Activity, Radio, Cpu, Network } from 'lucide-react';
+import { Activity, Radio, Cpu, Network, Award } from 'lucide-react';
 
 // Mismo origen que el dashboard: el punto de entrada (edge) reparte /api, /media/dash y el resto
 const API_BASE = '';
@@ -93,6 +94,7 @@ const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
 const stage = (metrics: PlayerMetrics, key: string) => metrics.stages?.stages.find((s) => s.key === key)?.ms ?? null;
 
 export function App() {
+  const [currentView, setCurrentView] = useState<'dashboard' | 'qoe'>('dashboard');
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
   const [versions, setVersions] = useState<VersionReport | null>(null);
   const versionsRef = useRef<VersionReport | null>(null);
@@ -513,10 +515,26 @@ export function App() {
                 {serverStatus ? 'Conectado (:8000)' : 'Desconectado'}
               </span>
             </div>
+
+            <button
+              onClick={() => setCurrentView(currentView === 'dashboard' ? 'qoe' : 'dashboard')}
+              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg border font-sans font-semibold text-xs transition-colors cursor-pointer ${
+                currentView === 'qoe'
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <Award className="w-4 h-4 text-amber-400" />
+              <span>{currentView === 'qoe' ? 'Volver al Monitor' : 'Evaluador QoE'}</span>
+            </button>
           </div>
         </header>
 
-        <VersionsPanel report={versions} />
+        {currentView === 'qoe' ? (
+          <QoETestView status={serverStatus} onClose={() => setCurrentView('dashboard')} />
+        ) : (
+          <>
+            <VersionsPanel report={versions} />
 
         {/* Panel de Mandos */}
         <ControlPanel
@@ -612,9 +630,11 @@ export function App() {
             onReset={handleResetSamples}
           />
         </div>
-      </div>
-    </div>
-  );
+      </>
+    )}
+  </div>
+</div>
+);
 }
 
 export default App;

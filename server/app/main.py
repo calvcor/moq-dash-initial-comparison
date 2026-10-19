@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from . import source, trace, versions
+from . import qoe, source, trace, versions
 from .origin import origin, router as origin_router
 from .source import VIDEO_FILE
 
@@ -580,6 +580,11 @@ def stop_pipeline():
 @app.post("/api/config")
 def update_config(config: StreamConfig):
     return start_pipeline(config)
+
+@app.post("/api/qoe/evaluate", response_model=qoe.QoEEvaluationResponse)
+def evaluate_qoe(req: qoe.QoEEvaluationRequest):
+    """Evalúa la QoE de una prueba completada usando la formulación adaptada de LL-GABR."""
+    return qoe.calculate_ll_gabr_qoe(req)
 
 def supervise():
     """Relanza lo que se haya caído o colgado mientras la emisión deba estar en marcha.
