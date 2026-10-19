@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import type { ServerStatus, QoEEvaluationResponse } from '../types';
+import { Award, Play, Square, RefreshCw, Download, ArrowLeft, AlertCircle } from 'lucide-react';
+import type { ServerStatus, QoEEvaluationResponse, QoESecondTimeline } from '../types';
 import { QoERunner } from '../lib/qoe';
 import { grabFromVideo } from '../lib/glass';
 import * as Watch from '@moq/watch';
@@ -14,7 +15,8 @@ interface QoETestViewProps {
 export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => {
   const [protocol, setProtocol] = useState<'dash' | 'moq' | 'rtc'>('dash');
   const [durationS, setDurationS] = useState<number>(30);
-  const [state, setState] = useState<'idle' | 'running' | 'evaluating' | 'completed' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'preparing' | 'running' | 'completed' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [progress, setProgress] = useState<{ elapsedS: number; remainingS: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [result, setResult] = useState<QoEEvaluationResponse | null>(null);
@@ -23,7 +25,6 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runnerRef = useRef<QoERunner | null>(null);
 
-  // Instancias de reproductores
   const dashPlayerRef = useRef<any>(null);
   const moqPlayerRef = useRef<Watch.Player | null>(null);
   const moqConnRef = useRef<Net.Connection | null>(null);
@@ -66,23 +67,42 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
   const handleStart = async () => {
     setErrorMsg('');
     setResult(null);
-    setState('running');
+    setState('preparing');
     cleanupPlayers();
 
     try {
+      // 1. Asegurar que la emisión está activa en el servidor
+      setStatusMessage('Verificando emisión en servidor...');
+      const statusRes = await fetch('/api/status');
+      const currentServer = statusRes.ok ? await statusRes.json() : null;
+
+      if (currentServer?.status !== 'running') {
+        setStatusMessage('Iniciando emisión en servidor (POST /api/start)...');
+        const startRes = await fetch('/api/start', { method: 'POST' });
+        if (!startRes.ok) {
+          throw new Error(`No se pudo arrancar la emisión: ${await startRes.text()}`);
+        }
+        // Margen de 2 segundos para que los empaquetadores generen los primeros fragmentos
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      // 2. Conectar el reproductor correspondiente
+      setStatusMessage(`Conectando reproductor ${protocol.toUpperCase()}...`);
       let grabber: () => VideoFrame | null = () => null;
       let getPlaybackRate: () => number = () => 1.0;
       let getRenditionHeight: () => number = () => 1080;
 
       if (protocol === 'dash') {
-        const dashjs = (window as any).dashjs;
-        if (!dashjs) throw new Error('dash.js no disponible');
         const video = videoRef.current;
-        if (!video) throw new Error('Elemento video no montado');
+        if (!video) throw new Error('Elemento <video> no disponible');
+
+        const dashjs = (window as any).dashjs;
+        if (!dashjs) throw new Error('Librería dash.js no cargada');
 
         const player = dashjs.MediaPlayer().create();
         dashPlayerRef.current = player;
-        player.initialize(video, status?.dash_url || '/media/dash/manifest.mpd', true);
+        const manifestUrl = status?.dash_url || '/media/dash/manifest.mpd';
+        player.initialize(video, manifestUrl, true);
         player.updateSettings({
           streaming: {
             lowLatencyEnabled: true,
@@ -104,7 +124,7 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
         };
       } else if (protocol === 'moq') {
         const canvas = canvasRef.current;
-        if (!canvas) throw new Error('Elemento canvas no montado');
+        if (!canvas) throw new Error('Elemento <canvas> no disponible');
 
         let hexFingerprint = '';
         try {
@@ -154,7 +174,7 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
         };
       } else if (protocol === 'rtc') {
         const video = videoRef.current;
-        if (!video) throw new Error('Elemento video no montado');
+        if (!video) throw new Error('Elemento <video> no disponible');
 
         const pc = new RTCPeerConnection();
         rtcPcRef.current = pc;
@@ -184,8 +204,12 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
         getRenditionHeight = () => (video.videoHeight > 0 ? video.videoHeight : 1080);
       }
 
-      // Dejar 1.5 s de cortesía para enganchar
+      // Tiempo de estabilización para sincronizar el buffer
+      setStatusMessage('Estabilizando reproducción...');
       await new Promise((r) => setTimeout(r, 1500));
+
+      setState('running');
+      setStatusMessage('');
 
       const runner = new QoERunner({
         protocol,
@@ -204,6 +228,7 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
       setResult(evalResult);
       setState('completed');
     } catch (err: any) {
+      console.error('[QoE] Error en prueba:', err);
       setErrorMsg(err.message || String(err));
       setState('error');
     } finally {
@@ -230,319 +255,288 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
   };
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1200px', margin: '0 auto', color: '#f3f4f6' }}>
-      {/* Cabecera */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0, color: '#60a5fa' }}>
-            Evaluación Aislada de QoE (LL-GABR + VMAF)
-          </h2>
-          <p style={{ margin: '0.25rem 0 0 0', color: '#9ca3af', fontSize: '0.9rem' }}>
-            Banco de pruebas doctoral: evaluación matemática objetiva en ventanas uniformes de 1 segundo
-          </p>
+    <div className="space-y-6">
+      {/* Contenedores multimedia ocultos pero SIEMPRE montados en el DOM */}
+      <div className={`relative w-full max-w-4xl mx-auto aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl ${state === 'running' ? 'block' : 'hidden'}`}>
+        <video
+          ref={videoRef}
+          playsInline
+          autoPlay
+          muted
+          className={`w-full h-full object-contain ${protocol === 'moq' ? 'hidden' : 'block'}`}
+        />
+        <canvas
+          ref={canvasRef}
+          className={`w-full h-full object-contain ${protocol === 'moq' ? 'block' : 'hidden'}`}
+        />
+      </div>
+
+      {/* Cabecera del Panel */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-indigo-900/60 border border-indigo-700/50 rounded-lg text-indigo-400">
+            <Award className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-slate-200">
+              Evaluador de Calidad de Experiencia (QoE) para Baja Latencia
+            </h3>
+            <p className="text-xs text-slate-400">
+              Medida objetiva con la formulación de LL-GABR (Raman et al., 2024) y alineación por timecode
+            </p>
+          </div>
         </div>
+
         <button
           onClick={onClose}
-          style={{
-            background: '#374151',
-            color: '#e5e7eb',
-            border: 'none',
-            padding: '0.5rem 1rem',
-            borderRadius: '0.375rem',
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs transition-colors cursor-pointer"
         >
-          Volver al Dashboard
+          <ArrowLeft className="w-4 h-4" />
+          <span>Volver al Monitor</span>
         </button>
       </div>
 
-      {/* Controles de Configuración */}
+      {/* Panel de Configuración Inicial */}
       {state === 'idle' && (
-        <div style={{ background: '#1f2937', padding: '1.5rem', borderRadius: '0.5rem', marginBottom: '1.5rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
-            {/* Protocolo */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Selector de Protocolo */}
             <div>
-              <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.5rem', color: '#d1d5db' }}>
-                Protocolo a evaluar:
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Protocolo a Evaluar
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {(['dash', 'moq', 'rtc'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setProtocol(p)}
-                    style={{
-                      flex: 1,
-                      padding: '0.6rem 0.5rem',
-                      borderRadius: '0.375rem',
-                      border: protocol === p ? '2px solid #3b82f6' : '1px solid #4b5563',
-                      background: protocol === p ? '#1e3a8a' : '#374151',
-                      color: protocol === p ? '#93c5fd' : '#d1d5db',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {p === 'dash' ? 'LL-DASH' : p === 'moq' ? 'MoQ (QUIC)' : 'WebRTC'}
-                  </button>
-                ))}
+              <div className="grid grid-cols-3 gap-2">
+                {(['dash', 'moq', 'rtc'] as const).map((p) => {
+                  const active = protocol === p;
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setProtocol(p)}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-mono font-bold transition-all cursor-pointer ${
+                        active
+                          ? 'border-indigo-500 bg-indigo-900/40 text-indigo-200 shadow-md'
+                          : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      {p === 'dash' ? 'LL-DASH' : p === 'moq' ? 'MoQ (QUIC)' : 'WebRTC'}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Duración */}
+            {/* Selector de Duración */}
             <div>
-              <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.5rem', color: '#d1d5db' }}>
-                Duración de la prueba:
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Duración de la Prueba
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {[15, 30, 60].map((dur) => (
-                  <button
-                    key={dur}
-                    onClick={() => setDurationS(dur)}
-                    style={{
-                      flex: 1,
-                      padding: '0.6rem 0.5rem',
-                      borderRadius: '0.375rem',
-                      border: durationS === dur ? '2px solid #10b981' : '1px solid #4b5563',
-                      background: durationS === dur ? '#064e3b' : '#374151',
-                      color: durationS === dur ? '#6ee7b7' : '#d1d5db',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {dur}s
-                  </button>
-                ))}
+              <div className="grid grid-cols-3 gap-2">
+                {[15, 30, 60].map((dur) => {
+                  const active = durationS === dur;
+                  return (
+                    <button
+                      key={dur}
+                      onClick={() => setDurationS(dur)}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-mono font-bold transition-all cursor-pointer ${
+                        active
+                          ? 'border-emerald-500 bg-emerald-900/40 text-emerald-200 shadow-md'
+                          : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      {dur} segundos
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          <div style={{ marginTop: '1.5rem', textAlign: 'right' }}>
+          <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              La prueba evaluará exclusivamente el protocolo seleccionado en régimen aislado.
+            </p>
             <button
               onClick={handleStart}
-              style={{
-                background: '#2563eb',
-                color: '#ffffff',
-                border: 'none',
-                padding: '0.75rem 2rem',
-                borderRadius: '0.375rem',
-                fontWeight: 'bold',
-                fontSize: '1rem',
-                cursor: 'pointer',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)',
-              }}
+              className="flex items-center space-x-2 px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs tracking-wide uppercase transition-colors shadow-lg cursor-pointer"
             >
-              Iniciar Evaluación
+              <Play className="w-4 h-4 fill-white" />
+              <span>Iniciar Evaluación</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Monitor durante la prueba */}
+      {/* Fase de Preparación */}
+      {state === 'preparing' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-lg text-center space-y-4">
+          <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+          <div className="font-semibold text-slate-200">{statusMessage}</div>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Configurando el canal de streaming y estabilizando el jitter buffer del reproductor...
+          </p>
+        </div>
+      )}
+
+      {/* Fase de Ejecución */}
       {state === 'running' && (
-        <div style={{ background: '#111827', padding: '1.5rem', borderRadius: '0.5rem', marginBottom: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  background: '#ef4444',
-                  animation: 'pulse 1.5s infinite',
-                }}
-              />
-              <span style={{ fontWeight: 600, fontSize: '1.1rem', textTransform: 'uppercase' }}>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+              <span className="font-bold text-sm text-slate-100 uppercase tracking-wide">
                 Evaluando {protocol === 'dash' ? 'LL-DASH' : protocol === 'moq' ? 'MoQ' : 'WebRTC'}
               </span>
             </div>
-            <div style={{ fontSize: '1rem', color: '#93c5fd' }}>
-              Tiempo restante: <strong>{progress?.remainingS ?? durationS}s</strong> / {durationS}s
+            <div className="font-mono text-xs text-slate-400">
+              Tiempo: <strong className="text-emerald-400">{progress?.elapsedS ?? 0}s</strong> / {durationS}s
             </div>
           </div>
 
           {/* Barra de progreso */}
-          <div style={{ height: '8px', background: '#374151', borderRadius: '4px', overflow: 'hidden', marginBottom: '1rem' }}>
+          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
             <div
-              style={{
-                height: '100%',
-                background: '#3b82f6',
-                width: `${Math.min(100, (((progress?.elapsedS ?? 0) / durationS) * 100))}%`,
-                transition: 'width 0.2s ease',
-              }}
+              className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-200"
+              style={{ width: `${Math.min(100, (((progress?.elapsedS ?? 0) / durationS) * 100))}%` }}
             />
           </div>
 
-          {/* Área de vídeo/canvas */}
-          <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxHeight: '480px',
-              aspectRatio: '16/9',
-              background: '#000',
-              borderRadius: '0.375rem',
-              overflow: 'hidden',
-              margin: '0 auto',
-            }}
-          >
-            {protocol === 'moq' ? (
-              <canvas ref={canvasRef} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            ) : (
-              <video ref={videoRef} playsInline autoPlay muted style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            )}
-          </div>
-
-          <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+          <div className="flex justify-center pt-2">
             <button
               onClick={handleCancel}
-              style={{
-                background: '#dc2626',
-                color: '#fff',
-                border: 'none',
-                padding: '0.5rem 1.5rem',
-                borderRadius: '0.375rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              className="flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white font-medium text-xs transition-colors cursor-pointer"
             >
-              Cancelar Prueba
+              <Square className="w-3.5 h-3.5 fill-white" />
+              <span>Cancelar Prueba</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Estado de error */}
+      {/* Mensaje de Error */}
       {state === 'error' && (
-        <div style={{ background: '#7f1d1d', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', color: '#fecaca' }}>
-          <strong>Error durante la prueba:</strong> {errorMsg}
-          <div style={{ marginTop: '0.5rem' }}>
-            <button
-              onClick={() => setState('idle')}
-              style={{ background: '#991b1b', color: '#fff', border: 'none', padding: '0.4rem 1rem', borderRadius: '0.25rem', cursor: 'pointer' }}
-            >
-              Reintentar
-            </button>
+        <div className="bg-rose-950/40 border border-rose-800/80 rounded-xl p-4 text-rose-200 space-y-3">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-5 h-5 text-rose-400" />
+            <span className="font-semibold text-sm">Error durante la prueba de evaluación:</span>
           </div>
+          <p className="text-xs font-mono bg-rose-950/80 p-2.5 rounded border border-rose-900 text-rose-300">
+            {errorMsg}
+          </p>
+          <button
+            onClick={() => setState('idle')}
+            className="px-3 py-1.5 rounded-lg bg-rose-800 hover:bg-rose-700 text-white font-medium text-xs transition-colors cursor-pointer"
+          >
+            Volver a intentar
+          </button>
         </div>
       )}
 
-      {/* Resultados de la Evaluación */}
+      {/* Resultados Completos */}
       {state === 'completed' && result && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Tarjetas resumen */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-            {/* QoE Score */}
-            <div style={{ background: '#1e3a8a', padding: '1.25rem', borderRadius: '0.5rem', border: '1px solid #3b82f6' }}>
-              <div style={{ color: '#93c5fd', fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                QoE Global (LL-GABR)
-              </div>
-              <div style={{ fontSize: '2.5rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
-                {result.qoe_score.toFixed(2)}
-                <span style={{ fontSize: '1rem', color: '#bfdbfe', fontWeight: 500 }}> / 5.0</span>
+        <div className="space-y-6">
+          {/* Tarjetas de Métricas Principales */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* QoE Global */}
+            <div className="bg-slate-900 p-4 rounded-xl border border-indigo-500/40 shadow-lg">
+              <span className="text-xs text-slate-400 block mb-1 uppercase font-semibold">QoE Global (LL-GABR)</span>
+              <div className="flex items-baseline space-x-1.5">
+                <span className="text-3xl font-extrabold text-indigo-400">{result.qoe_score.toFixed(2)}</span>
+                <span className="text-xs text-slate-500 font-mono">/ 5.0</span>
               </div>
             </div>
 
             {/* VMAF Medio */}
-            <div style={{ background: '#1f2937', padding: '1.25rem', borderRadius: '0.5rem', border: '1px solid #374151' }}>
-              <div style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                VMAF Medio
-              </div>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: '#34d399', marginTop: '0.25rem' }}>
-                {result.vmaf_mean.toFixed(1)}
-                <span style={{ fontSize: '0.9rem', color: '#9ca3af' }}> / 100</span>
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-lg">
+              <span className="text-xs text-slate-400 block mb-1 uppercase font-semibold">VMAF Medio</span>
+              <div className="flex items-baseline space-x-1.5">
+                <span className="text-3xl font-extrabold text-emerald-400">{result.vmaf_mean.toFixed(1)}</span>
+                <span className="text-xs text-slate-500 font-mono">/ 100</span>
               </div>
             </div>
 
             {/* Latencia Media */}
-            <div style={{ background: '#1f2937', padding: '1.25rem', borderRadius: '0.5rem', border: '1px solid #374151' }}>
-              <div style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                Latencia Media
-              </div>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fbbf24', marginTop: '0.25rem' }}>
-                {result.avg_latency_s.toFixed(2)} s
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-lg">
+              <span className="text-xs text-slate-400 block mb-1 uppercase font-semibold">Latencia Media</span>
+              <div className="flex items-baseline space-x-1.5">
+                <span className="text-3xl font-extrabold text-amber-400">{result.avg_latency_s.toFixed(2)}</span>
+                <span className="text-xs text-slate-500 font-mono">s</span>
               </div>
             </div>
 
-            {/* Parones / Stalls */}
-            <div style={{ background: '#1f2937', padding: '1.25rem', borderRadius: '0.5rem', border: '1px solid #374151' }}>
-              <div style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                Parones (Stalls)
-              </div>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: result.stalls_count > 0 ? '#f87171' : '#60a5fa', marginTop: '0.25rem' }}>
-                {result.total_freeze_s.toFixed(2)} s
-                <span style={{ fontSize: '0.9rem', color: '#9ca3af', fontWeight: 400 }}> ({result.stalls_count} cortes)</span>
+            {/* Parones */}
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-lg">
+              <span className="text-xs text-slate-400 block mb-1 uppercase font-semibold">Tiempo Congelado</span>
+              <div className="flex items-baseline space-x-1.5">
+                <span className={`text-3xl font-extrabold ${result.stalls_count > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+                  {result.total_freeze_s.toFixed(2)}
+                </span>
+                <span className="text-xs text-slate-500 font-mono">s ({result.stalls_count} cortes)</span>
               </div>
             </div>
           </div>
 
-          {/* Desglose de penalizaciones LL-GABR */}
-          <div style={{ background: '#1f2937', padding: '1.25rem', borderRadius: '0.5rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: '0 0 1rem 0', color: '#e5e7eb' }}>
-              Desglose de Factores LL-GABR
-            </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', fontSize: '0.9rem' }}>
-              <div>
-                <span style={{ color: '#9ca3af' }}>Calidad Base (+):</span>
-                <div style={{ fontWeight: 600, color: '#34d399' }}>+{result.penalties.visual_quality_score.toFixed(2)}</div>
+          {/* Desglose de Factores LL-GABR */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-3">
+            <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              Desglose de Términos de la Ecuación LL-GABR
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs font-mono">
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block mb-1">Calidad Visual (+)</span>
+                <span className="text-emerald-400 font-bold">+{result.penalties.visual_quality_score.toFixed(2)}</span>
               </div>
-              <div>
-                <span style={{ color: '#9ca3af' }}>Penalización Parón (-):</span>
-                <div style={{ fontWeight: 600, color: '#f87171' }}>-{result.penalties.freeze_penalty.toFixed(2)}</div>
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block mb-1">Parones (-)</span>
+                <span className="text-rose-400 font-bold">-{result.penalties.freeze_penalty.toFixed(2)}</span>
               </div>
-              <div>
-                <span style={{ color: '#9ca3af' }}>Penalización Cortes (-):</span>
-                <div style={{ fontWeight: 600, color: '#f87171' }}>-{result.penalties.stall_count_penalty.toFixed(2)}</div>
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block mb-1">Nº Cortes (-)</span>
+                <span className="text-rose-400 font-bold">-{result.penalties.stall_count_penalty.toFixed(2)}</span>
               </div>
-              <div>
-                <span style={{ color: '#9ca3af' }}>Penalización Latencia (-):</span>
-                <div style={{ fontWeight: 600, color: '#fbbf24' }}>-{result.penalties.latency_penalty.toFixed(2)}</div>
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block mb-1">Latencia (-)</span>
+                <span className="text-amber-400 font-bold">-{result.penalties.latency_penalty.toFixed(2)}</span>
               </div>
-              <div>
-                <span style={{ color: '#9ca3af' }}>Penalización Catch-up (-):</span>
-                <div style={{ fontWeight: 600, color: '#e5e7eb' }}>-{result.penalties.catchup_penalty.toFixed(2)}</div>
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block mb-1">Catch-up (-)</span>
+                <span className="text-slate-200 font-bold">-{result.penalties.catchup_penalty.toFixed(2)}</span>
               </div>
-              <div>
-                <span style={{ color: '#9ca3af' }}>Inestabilidad Calidad (-):</span>
-                <div style={{ fontWeight: 600, color: '#e5e7eb' }}>-{result.penalties.smoothness_penalty.toFixed(2)}</div>
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block mb-1">Fluctuación (-)</span>
+                <span className="text-slate-200 font-bold">-{result.penalties.smoothness_penalty.toFixed(2)}</span>
               </div>
             </div>
           </div>
 
           {/* Gráfica Temporal por Segundo */}
-          <div style={{ background: '#1f2937', padding: '1.25rem', borderRadius: '0.5rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: '0 0 0.5rem 0', color: '#e5e7eb' }}>
-              Serie Temporal (Segundo a Segundo)
-            </h3>
-            <p style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', color: '#9ca3af' }}>
-              Evolución de VMAF (verde), Latencia (ámbar) y momentos de congelación (rojo)
-            </p>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-3">
+            <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              Evolución Temporal Segundo a Segundo (T = {result.duration_s} s)
+            </h4>
+            <div className="w-full h-48 relative pt-2">
+              <svg width="100%" height="100%" viewBox={`0 0 ${result.timeline.length * 20 + 40} 150`} preserveAspectRatio="none">
+                {/* Cuadrículas */}
+                <line x1="30" y1="15" x2={result.timeline.length * 20 + 30} y2="15" stroke="#1e293b" strokeDasharray="3" />
+                <line x1="30" y1="65" x2={result.timeline.length * 20 + 30} y2="65" stroke="#1e293b" strokeDasharray="3" />
+                <line x1="30" y1="115" x2={result.timeline.length * 20 + 30} y2="115" stroke="#334155" />
 
-            <div style={{ width: '100%', height: '220px', position: 'relative' }}>
-              <svg width="100%" height="100%" viewBox={`0 0 ${result.timeline.length * 20 + 40} 180`} preserveAspectRatio="none">
-                {/* Ejes y líneas de cuadrícula */}
-                <line x1="30" y1="20" x2={result.timeline.length * 20 + 30} y2="20" stroke="#374151" strokeDasharray="2" />
-                <line x1="30" y1="80" x2={result.timeline.length * 20 + 30} y2="80" stroke="#374151" strokeDasharray="2" />
-                <line x1="30" y1="140" x2={result.timeline.length * 20 + 30} y2="140" stroke="#4b5563" />
+                <text x="25" y="18" fill="#64748b" fontSize="8" textAnchor="end">100</text>
+                <text x="25" y="68" fill="#64748b" fontSize="8" textAnchor="end">50</text>
+                <text x="25" y="118" fill="#64748b" fontSize="8" textAnchor="end">0</text>
 
-                {/* Etiquetas eje Y */}
-                <text x="25" y="24" fill="#9ca3af" fontSize="9" textAnchor="end">100</text>
-                <text x="25" y="84" fill="#9ca3af" fontSize="9" textAnchor="end">50</text>
-                <text x="25" y="144" fill="#9ca3af" fontSize="9" textAnchor="end">0</text>
-
-                {/* Barras de freeze en fondo */}
-                {result.timeline.map((s, idx) => {
+                {/* Parones en rojo */}
+                {result.timeline.map((s: QoESecondTimeline, idx: number) => {
                   const x = 30 + idx * 20;
                   if (s.freeze_s > 0) {
                     return (
                       <rect
-                        key={`frz-${s.sec}`}
+                        key={`f-${s.sec}`}
                         x={x}
-                        y="20"
+                        y="15"
                         width="18"
-                        height="120"
-                        fill="rgba(239, 68, 68, 0.25)"
-                        stroke="#ef4444"
+                        height="100"
+                        fill="rgba(244, 63, 94, 0.25)"
+                        stroke="#f43f5e"
                         strokeWidth="1"
                       />
                     );
@@ -556,9 +550,9 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
                   stroke="#10b981"
                   strokeWidth="2.5"
                   points={result.timeline
-                    .map((s, idx) => {
+                    .map((s: QoESecondTimeline, idx: number) => {
                       const x = 39 + idx * 20;
-                      const y = 140 - (s.vmaf / 100) * 120;
+                      const y = 115 - (s.vmaf / 100) * 100;
                       return `${x},${y}`;
                     })
                     .join(' ')}
@@ -569,76 +563,49 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
                   fill="none"
                   stroke="#f59e0b"
                   strokeWidth="2"
-                  strokeDasharray="3 2"
+                  strokeDasharray="4 2"
                   points={result.timeline
-                    .map((s, idx) => {
+                    .map((s: QoESecondTimeline, idx: number) => {
                       const x = 39 + idx * 20;
-                      const clampedLat = Math.min(5.0, s.latency_s);
-                      const y = 140 - (clampedLat / 5.0) * 120;
+                      const clamped = Math.min(5.0, s.latency_s);
+                      const y = 115 - (clamped / 5.0) * 100;
                       return `${x},${y}`;
                     })
                     .join(' ')}
                 />
-
-                {/* Puntos de cada segundo */}
-                {result.timeline.map((s, idx) => {
-                  const x = 39 + idx * 20;
-                  const y = 140 - (s.vmaf / 100) * 120;
-                  return (
-                    <circle
-                      key={`pt-${s.sec}`}
-                      cx={x}
-                      cy={y}
-                      r="3"
-                      fill={s.freeze_s > 0 ? '#ef4444' : '#10b981'}
-                    />
-                  );
-                })}
               </svg>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem', marginTop: '0.75rem', fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span style={{ width: '12px', height: '3px', background: '#10b981' }} /> VMAF (0-100)
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span style={{ width: '12px', height: '2px', background: '#f59e0b', borderTop: '2px dashed #f59e0b' }} /> Latencia (0-5 s)
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span style={{ width: '10px', height: '10px', background: 'rgba(239, 68, 68, 0.4)', border: '1px solid #ef4444' }} /> Congelación
-              </div>
+            <div className="flex items-center justify-center space-x-6 text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800">
+              <span className="flex items-center space-x-1.5">
+                <span className="w-3 h-0.5 bg-emerald-500" />
+                <span>VMAF (0–100)</span>
+              </span>
+              <span className="flex items-center space-x-1.5">
+                <span className="w-3 h-0.5 bg-amber-500 border-t border-dashed" />
+                <span>Latencia (0–5 s)</span>
+              </span>
+              <span className="flex items-center space-x-1.5">
+                <span className="w-2.5 h-2.5 bg-rose-500/40 border border-rose-500" />
+                <span>Congelación</span>
+              </span>
             </div>
           </div>
 
-          {/* Botones de acción final */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+          {/* Acciones */}
+          <div className="flex items-center justify-between pt-2">
             <button
               onClick={() => setState('idle')}
-              style={{
-                background: '#374151',
-                color: '#e5e7eb',
-                border: 'none',
-                padding: '0.6rem 1.25rem',
-                borderRadius: '0.375rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs transition-colors cursor-pointer"
             >
-              Nueva Prueba
+              Configurar Nueva Prueba
             </button>
             <button
               onClick={exportJSON}
-              style={{
-                background: '#2563eb',
-                color: '#ffffff',
-                border: 'none',
-                padding: '0.6rem 1.25rem',
-                borderRadius: '0.375rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              className="flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors cursor-pointer shadow-md"
             >
-              Descargar Informe JSON
+              <Download className="w-4 h-4" />
+              <span>Descargar Informe JSON</span>
             </button>
           </div>
         </div>
