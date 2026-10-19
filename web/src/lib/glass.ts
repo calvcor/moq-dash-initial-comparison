@@ -46,7 +46,7 @@ export interface GlassSnapshot {
 export class GlassMeter {
   #getLayouts: () => TimecodeLayout[];
   #grab: FrameGrabber;
-  #buffer = new Uint8Array(0);
+  #bufferHolder = { buffer: new Uint8Array(0) };
   #reading = false;
   #raf = 0;
   #channel = new MessageChannel();
@@ -156,68 +156,81 @@ export class GlassMeter {
    * No cierra el frame. Lo usan también los trazadores de etapas, que necesitan seguir un frame concreto.
    */
   async decode(frame: VideoFrame): Promise<number | null> {
-    const w = frame.displayWidth;
-    const h = frame.displayHeight;
-    if (!w || !h) return null;
-
-    // Cada calidad lleva su timecode con su propio tamaño de celda: se usa el de la altura que se está viendo
-    const layouts = this.#getLayouts();
-    const layout = layouts.find((l) => l.height === h) ?? layouts[0] ?? DEFAULT_TIMECODE;
-    const { bits, cell } = layout;
-    const n = bits + 4;
-    const scale = w / layout.width;
-    const cellPx = cell * scale;
-
-    // Solo dos filas del centro de la franja. Coordenadas pares, como exigen los formatos 4:2:0.
-    const even = (value: number) => Math.floor(value / 2) * 2;
-    const visible = frame.visibleRect!;
-    const rect = {
-      x: visible.x + even(layout.x * scale),
-      y: visible.y + even((layout.y + cell / 2) * scale - 1),
-      width: Math.min(even(n * cellPx + 1), even(visible.width - layout.x * scale)),
-      height: 2,
-    };
-    let planes: PlaneLayout[];
-    try {
-      const size = frame.allocationSize({ rect });
-      if (this.#buffer.length < size) this.#buffer = new Uint8Array(size);
-      planes = await frame.copyTo(this.#buffer, { rect });
-    } catch (_) {
-      return null;
-    }
-    // Formatos planares (NV12, I420...): el primer plano es la luma. Empaquetados (RGBA, BGRA...): 4 bytes
-    // por píxel, y como luma basta la media de los tres primeros.
-    const px = this.#buffer;
-    const { offset, stride } = planes[0];
-    const packed = planes.length === 1;
-    const at = (row: number, col: number) => {
-      const o = offset + row * stride + (packed ? col * 4 : col);
-      return packed ? (px[o] + px[o + 1] + px[o + 2]) / 3 : px[o];
-    };
-
-    // Luma media de los 2x2 píxeles centrales de cada celda
-    const luma = (i: number) => {
-      const col = Math.min(rect.width - 2, Math.floor((i + 0.5) * cellPx) - 1);
-      return (at(0, col) + at(0, col + 1) + at(1, col) + at(1, col + 1)) / 4;
-    };
-
-    // Las celdas de referencia de los extremos fijan el umbral y delatan una imagen sin timecode
-    const white = Math.min(luma(0), luma(n - 1));
-    const black = Math.max(luma(1), luma(n - 2));
-    const range = white - black;
-    if (range < 80) return null;
-    const threshold = black + range / 2;
-
-    let bit = 0;
-    let value = 0;
-    for (let i = 0; i < bits; i++) {
-      const l = luma(2 + i);
-      if (Math.abs(l - threshold) < range * 0.2) return null; // celda ambigua
-      bit ^= l > threshold ? 1 : 0; // Gray → binario, de MSB a LSB
-      value = value * 2 + bit;
-    }
-    return value;
+    return decodeTimecodeFromFrame(frame, this.#getLayouts(), this.#bufferHolder);
   }
+}
+
+/**
+ * Decodifica el timecode binario/Gray de un VideoFrame de manera asíncrona y segura.
+ * Compatible con formatos planares de hardware (NV12, I420) y formatos empaquetados (RGBA).
+ */
+export async function decodeTimecodeFromFrame(
+  frame: VideoFrame,
+  layouts: TimecodeLayout[],
+  bufferHolder: { buffer: Uint8Array }
+): Promise<number | null> {
+  const w = frame.displayWidth;
+  const h = frame.displayHeight;
+  if (!w || !h) return null;
+
+  // Cada calidad lleva su timecode con su propio tamaño de celda: se usa el de la altura que se está viendo
+  const layout = layouts.find((l) => l.height === h) ?? layouts[0] ?? DEFAULT_TIMECODE;
+  const { bits, cell } = layout;
+  const n = bits + 4;
+  const scale = w / layout.width;
+  const cellPx = cell * scale;
+
+  // Solo dos filas del centro de la franja. Coordenadas pares, como exigen los formatos 4:2:0.
+  const even = (value: number) => Math.floor(value / 2) * 2;
+  const visible = frame.visibleRect;
+  if (!visible) return null;
+
+  const rect = {
+    x: visible.x + even(layout.x * scale),
+    y: visible.y + even((layout.y + cell / 2) * scale - 1),
+    width: Math.min(even(n * cellPx + 1), even(visible.width - layout.x * scale)),
+    height: 2,
+  };
+  let planes: PlaneLayout[];
+  try {
+    const size = frame.allocationSize({ rect });
+    if (bufferHolder.buffer.length < size) bufferHolder.buffer = new Uint8Array(size);
+    planes = await frame.copyTo(bufferHolder.buffer, { rect });
+  } catch (_) {
+    return null;
+  }
+  // Formatos planares (NV12, I420...): el primer plano es la luma. Empaquetados (RGBA, BGRA...): 4 bytes
+  // por píxel, y como luma basta la media de los tres primeros.
+  const px = bufferHolder.buffer;
+  const { offset, stride } = planes[0];
+  const packed = planes.length === 1;
+  const at = (row: number, col: number) => {
+    const o = offset + row * stride + (packed ? col * 4 : col);
+    return packed ? (px[o] + px[o + 1] + px[o + 2]) / 3 : px[o];
+  };
+
+  // Luma media de los 2x2 píxeles centrales de cada celda
+  const luma = (i: number) => {
+    const col = Math.min(rect.width - 2, Math.floor((i + 0.5) * cellPx) - 1);
+    return (at(0, col) + at(0, col + 1) + at(1, col) + at(1, col + 1)) / 4;
+  };
+
+  // Las celdas de referencia de los extremos fijan el umbral y delatan una imagen sin timecode
+  const white = Math.min(luma(0), luma(n - 1));
+  const black = Math.max(luma(1), luma(n - 2));
+  const range = white - black;
+  if (range < 80) return null;
+  const threshold = black + range / 2;
+
+  let bit = 0;
+  let value = 0;
+  for (let i = 0; i < bits; i++) {
+    const l = luma(2 + i);
+    if (Math.abs(l - threshold) < range * 0.2) return null; // celda ambigua
+    bit ^= l > threshold ? 1 : 0; // Gray → binario, de MSB a LSB
+    value = value * 2 + bit;
+  }
+  return value;
 }
 
 /** Tasa media (kbps) a partir de un contador acumulado de bytes, sobre una ventana deslizante. */

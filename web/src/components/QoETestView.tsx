@@ -134,7 +134,7 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
 
         const host = status?.moq_host || window.location.hostname;
         const port = status?.moq_port || 4433;
-        const targetUrl = new URL(`https://${host}:${port}/moq`);
+        const targetUrl = new URL(`https://${host}:${port}/anon`);
 
         const conn = new Net.Connection({
           url: targetUrl,
@@ -145,6 +145,8 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
         });
         moqConnRef.current = conn;
 
+        const delaySignal = new Signal<any>('auto');
+        const targetSignal = new Signal<Watch.Video.Target | undefined>(undefined);
         const player = new Watch.Player({
           origin: conn.origin,
           probe: conn.probe,
@@ -153,6 +155,8 @@ export const QoETestView: React.FC<QoETestViewProps> = ({ status, onClose }) => 
           visible: 'always',
           canvas,
           muted: new Signal(true),
+          delay: delaySignal,
+          target: targetSignal,
         });
         moqPlayerRef.current = player;
 

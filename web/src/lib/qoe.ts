@@ -1,4 +1,5 @@
 import { serverNowMs } from './clock';
+import { DEFAULT_TIMECODE, decodeTimecodeFromFrame } from './glass';
 import type {
   TimecodeLayout,
   QoEFrameSample,
@@ -6,8 +7,6 @@ import type {
   QoEEvaluationRequest,
   QoEEvaluationResponse,
 } from '../types';
-
-export const DEFAULT_TIMECODE: TimecodeLayout = { bits: 20, cell: 32, x: 64, y: 992, width: 1920, height: 1080 };
 
 const STALL_THRESHOLD_MS = 150; // ~9 frames a 60 fps sin cambio
 const SAMPLER_GAP_MS = 250;
@@ -38,11 +37,12 @@ export class QoERunner {
   #raf = 0;
   #channel = new MessageChannel();
   #reading = false;
-  #buffer = new Uint8Array(0);
+  #bufferHolder = { buffer: new Uint8Array(0) };
 
   #running = false;
   #startWallTime = 0;
   #lastTick = 0;
+  #lastTimestamp: number | null = null;
   #lastCode: number | null = null;
   #lastChange = 0;
   #inStall = false;
@@ -70,10 +70,12 @@ export class QoERunner {
       this.#running = true;
       this.#startWallTime = performance.now();
       this.#lastChange = this.#startWallTime;
+      this.#lastTimestamp = null;
+      this.#lastCode = null;
       this.#frames = [];
       this.#stalls = [];
       this.#inStall = false;
-      this.#lastCode = null;
+      this.#currentStallCode = null;
 
       const tick = (t: number) => {
         if (!this.#running) return;
@@ -122,6 +124,14 @@ export class QoERunner {
     }
   }
 
+  #checkStall(code: number, t: number) {
+    if (!this.#inStall && t - this.#lastChange > STALL_THRESHOLD_MS) {
+      this.#inStall = true;
+      this.#currentStallStart = this.#lastChange;
+      this.#currentStallCode = code;
+    }
+  }
+
   async #sample(t: number) {
     if (!this.#running) return;
 
@@ -134,24 +144,30 @@ export class QoERunner {
     const frame = this.#grab();
     if (!frame) return;
 
+    // Si el timestamp no ha cambiado, no hay nuevo frame en pantalla.
+    // Evitamos llamar a copyTo() innecesariamente (crítico para estabilidad de GPU en Chromium/Brave).
+    const ts = frame.timestamp;
+    if (this.#lastTimestamp !== null && ts !== null && ts === this.#lastTimestamp && this.#lastCode !== null) {
+      frame.close();
+      this.#checkStall(this.#lastCode, t);
+      return;
+    }
+
     this.#reading = true;
     let code: number | null = null;
     try {
-      code = await this.#decode(frame);
+      code = await decodeTimecodeFromFrame(frame, this.#getLayouts(), this.#bufferHolder);
     } finally {
       frame.close();
       this.#reading = false;
     }
 
     if (code === null) return;
+    this.#lastTimestamp = ts;
 
     // Comprobar parón
     if (code === this.#lastCode) {
-      if (!this.#inStall && t - this.#lastChange > STALL_THRESHOLD_MS) {
-        this.#inStall = true;
-        this.#currentStallStart = this.#lastChange;
-        this.#currentStallCode = code;
-      }
+      this.#checkStall(code, t);
       return;
     }
 
@@ -183,57 +199,9 @@ export class QoERunner {
       wall_time_ms: t,
       timecode_ms: code,
       rendition_height: renditionH,
-      latency_ms: latency,
+      latency_ms: Math.max(0, latency),
       playback_rate: playbackRate,
     });
-  }
-
-  async #decode(frame: VideoFrame): Promise<number | null> {
-    const w = frame.displayWidth;
-    const h = frame.displayHeight;
-    const layout = this.#getLayouts().find((l) => l.width === w && l.height === h) ?? DEFAULT_TIMECODE;
-
-    const span = (layout.bits + 4) * layout.cell;
-    const rect = { x: layout.x, y: layout.y + (layout.cell >> 1), width: span, height: 2 };
-    const needed = span * 2 * 4;
-    if (this.#buffer.length < needed) {
-      this.#buffer = new Uint8Array(needed);
-    }
-
-    try {
-      await frame.copyTo(this.#buffer, { rect, format: 'RGBA' });
-    } catch (_) {
-      return null;
-    }
-
-    const row = span * 4;
-    const sample = (col: number) => {
-      const idx = (col * layout.cell + (layout.cell >> 1)) * 4;
-      return (this.#buffer[idx] + this.#buffer[idx + row]) >> 1;
-    };
-
-    const white0 = sample(0);
-    const whiteN = sample(layout.bits + 3);
-    const black1 = sample(1);
-    const blackN = sample(layout.bits + 2);
-    const white = (white0 + whiteN) >> 1;
-    const black = (black1 + blackN) >> 1;
-
-    if (white - black < 60) return null;
-    const threshold = (white + black) >> 1;
-
-    let gray = 0;
-    for (let i = 0; i < layout.bits; i++) {
-      const v = sample(2 + i);
-      const bit = v > threshold ? 1 : 0;
-      gray = (gray << 1) | bit;
-    }
-
-    let bin = 0;
-    for (let g = gray; g > 0; g >>= 1) {
-      bin ^= g;
-    }
-    return bin;
   }
 
   async #evaluate(): Promise<QoEEvaluationResponse> {
