@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@moq/watch": "^0.6.2",
+    "@moq/watch": "^0.6.3",
     "chart.js": "^4.5.1",
     "dashjs": "^5.2.1",
     "lucide-react": "^1.53.0",

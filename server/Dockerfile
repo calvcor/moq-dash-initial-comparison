@@ -18,9 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # a 2 s de latencia; con una calidad, 49 congelados en 85 s frente a 13 con 0.14.3).
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ]; then \
-        URL="https://github.com/moq-dev/moq/releases/download/moq-cli-v0.14.5/moq-cli-v0.14.5-aarch64-unknown-linux-gnu.tar.gz"; \
+        URL="https://github.com/moq-dev/moq/releases/download/moq-cli-v0.14.7/moq-cli-v0.14.7-aarch64-unknown-linux-gnu.tar.gz"; \
     else \
-        URL="https://github.com/moq-dev/moq/releases/download/moq-cli-v0.14.5/moq-cli-v0.14.5-x86_64-unknown-linux-gnu.tar.gz"; \
+        URL="https://github.com/moq-dev/moq/releases/download/moq-cli-v0.14.7/moq-cli-v0.14.7-x86_64-unknown-linux-gnu.tar.gz"; \
     fi && \
     echo "Descargando moq-cli oficial desde $URL..." && \
     curl -sL "$URL" -o /tmp/moq.tar.gz && \
