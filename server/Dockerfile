@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Descargar e instalar el binario dinámico oficial de moq-cli para Linux (soporta amd64 y arm64)
-# 0.14.5 desde el 15 de octubre de 2026, a pesar de lo medido (abajo); la alternativa estable es 0.14.3. Con 0.14.4 el publicador lee su entrada más despacio que el ritmo de la fuente y
+# 0.14.7 desde el 19 de octubre de 2026. Con un espectador, una calidad: entrada del publicador sin esperas (máx.
+# 37 ms) y MoQ sin congelados; tres calidades: sin retraso acumulado, con picos de hasta 2 s como con 0.14.3.
+# Antecedentes: con 0.14.4 el publicador lee su entrada más despacio que el ritmo de la fuente y
 # acumula retraso sin parar (14 de octubre de 2026: 16-18 s de espera al minuto y medio). Con 0.14.5 aguanta
 # sin espectadores, pero con uno se queda atrás (15 de octubre, tres calidades: 3 s de espera mediana y MoQ
 # a 2 s de latencia; con una calidad, 49 congelados en 85 s frente a 13 con 0.14.3).

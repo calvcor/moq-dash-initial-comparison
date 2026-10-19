@@ -97,8 +97,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   del navegador en `web/package-lock.json`. Nada se actualiza solo.
 - **Antes de dar por buena una actualización de moq-cli, mide la entrada del publicador con un
   espectador conectado.** La 0.14.4 acumula retraso sin parar y la 0.14.5 se queda atrás con un
-  espectador; la estable conocida es la 0.14.3. La versión desplegada y el motivo están anotados en
-  `server/Dockerfile`.
+  espectador; la 0.14.7 (desplegada desde el 19-10-2026) no tiene ese problema. La versión desplegada y
+  sus medidas están anotadas en `server/Dockerfile`.
 - La medida: `POST /api/trace` con marcas cada 4 ms de los últimos 20 s devuelve, por frame, la llegada
   a la compuerta (`encoded_ms`) y la entrega al empaquetador (`forwarded_ms`). Si los huecos en la
   entrega crecen y en la llegada no, el empaquetador no está leyendo su entrada.
@@ -114,7 +114,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 
 ## Problemas abiertos conocidos
 
-- El publicador de MoQ deja de leer su entrada a ratos (picos de hasta 1-2 s con 0.14.3). Provoca las
+- El publicador de MoQ deja de leer su entrada a ratos con varias calidades (picos de hasta 1-2 s, con
+  0.14.3 y con 0.14.7; con una sola calidad, apenas). Provoca las
   marcas `stalled` del catálogo y los cambios continuos de calidad con varias calidades. Sin localizar
   dentro de moq-cli.
 - En WebRTC, el reparto del desglose entre "transporte" y "búfer" no es fiable (`receiveTime`).

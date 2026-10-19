@@ -12,7 +12,9 @@ comprobación directa, se dice.
 > **Versiones desplegadas:** relay 0.17.3 y publicador 0.14.3 desde el 13 de octubre de 2026; relay
 > 0.17.4 desde el 14 de octubre y 0.17.5 desde el 15. El publicador estuvo en 0.14.3 hasta el 15 de
 > octubre, cuando pasó a 0.14.5: el 0.14.4 acumula retraso en su entrada sin parar, y el 0.14.5 se queda
-> atrás en cuanto hay un espectador (medido el 15 de octubre; ver el commit de esa fecha). Lo que este documento describe se observó con las
+> atrás en cuanto hay un espectador (medido el 15 de octubre; ver el commit de esa fecha). Desde el 19 de
+> octubre: relay 0.17.7, publicador 0.14.7 (sin ese problema), `@moq/watch` 0.6.3, `@moq/net` 0.4.4 y
+> `@moq/hang` 0.5.3. Lo que este documento describe se observó con las
 > de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
 
 | Componente                                                | Versión comprobada    |
