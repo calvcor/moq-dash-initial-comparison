@@ -531,7 +531,15 @@ export function App() {
         </header>
 
         {currentView === 'qoe' ? (
-          <QoETestView status={serverStatus} onClose={() => setCurrentView('dashboard')} />
+          <QoETestView
+            status={serverStatus}
+            config={config}
+            isLoading={isLoading}
+            onConfigChange={setConfig}
+            onApplyConfig={handleApplyConfig}
+            onApplyNetwork={handleApplyNetwork}
+            onClose={() => setCurrentView('dashboard')}
+          />
         ) : (
           <>
             <VersionsPanel report={versions} />
