@@ -625,6 +625,25 @@ def get_qoe_index(rec_id: str):
         raise HTTPException(status_code=409, detail="La grabación aún no está indexada")
     return index
 
+@app.post("/api/qoe/recordings/{rec_id}/vmaf")
+def enqueue_qoe_vmaf(rec_id: str):
+    """Pone (o vuelve a poner) en la cola el cálculo de VMAF, que se hace en cuanto la emisión esté parada."""
+    qoe_recording_or_404(rec_id)
+    try:
+        qoe.recordings.enqueue_vmaf(rec_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"state": "queued"}
+
+@app.get("/api/qoe/recordings/{rec_id}/vmaf")
+def get_qoe_vmaf(rec_id: str):
+    """VMAF y PSNR de luma de cada fotograma grabado, por calidad, en el orden del índice."""
+    qoe_recording_or_404(rec_id)
+    result = qoe.recordings.vmaf(rec_id)
+    if result is None:
+        raise HTTPException(status_code=409, detail="El VMAF de esta grabación aún no se ha calculado")
+    return result
+
 @app.post("/api/qoe/recordings/{rec_id}/check")
 def check_qoe_recording(rec_id: str):
     """Comprueba por PSNR que cada fotograma grabado está emparejado con su original y no con un vecino."""
@@ -694,6 +713,8 @@ def on_startup():
     threading.Thread(target=boot, daemon=True).start()
     threading.Thread(target=supervise, daemon=True).start()
     threading.Thread(target=trace.listen, daemon=True).start()
+    # El VMAF solo se calcula con la emisión parada: comparar imágenes retrasa al codificador
+    qoe.recordings.start_worker(lambda: not desired_running and not alive("master_source"))
     versions.start()
 
 @app.on_event("shutdown")

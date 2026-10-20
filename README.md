@@ -285,6 +285,7 @@ Las medidas dependen de la versión exacta de cada pieza de terceros: entre dos 
 | `moq-cli` | `server/Dockerfile`, en la URL de descarga |
 | `@moq/watch`, `dash.js` | `web/package.json` y `web/package-lock.json` |
 | FFmpeg | El paquete de Debian de la imagen del orquestador; no se consulta si hay novedades |
+| `vmaf` (solo QoE) | `server/Dockerfile`, `VMAF_VERSION`; no se muestra en el dashboard, queda en cada resultado de VMAF |
 
 El orquestador consulta cada 6 horas la última versión publicada de cada uno (Docker Hub, las publicaciones de GitHub y el registro de npm) y el dashboard marca en ámbar los que tienen una más nueva. **Es solo un aviso: nada se actualiza solo.** Para actualizar hay que cambiar la versión fijada y volver a desplegar (`docker compose up -d --build`); las medidas hechas con versiones distintas no son comparables entre sí.
 
@@ -337,7 +338,7 @@ Objetivo: puntuar cada sesión con la QoE de LL-GABR (Raman et al., 2024, ecuaci
 
 1. Durante la prueba, el servidor graba el flujo que sale del codificador. Es el mismo que reparten las tres ramas, que no recodifican.
 2. El navegador anota qué timecode muestra y cuándo (pendiente).
-3. Con eso, el servidor reconstruye lo que vio el espectador y calcula el VMAF de cada fotograma mostrado frente a su original de Big Buck Bunny (pendiente).
+3. El servidor calcula el VMAF de cada fotograma grabado frente a su original de Big Buck Bunny (hecho) y, con el registro del navegador, reconstruye lo que vio el espectador (pendiente).
 
 En DASH y MoQ el transporte es fiable y la decodificación H.264 es determinista, así que el fotograma reconstruido es el que se pintó. En WebRTC con pérdidas no tiene por qué: la ocultación de errores del navegador no se reproduce y el VMAF saldría optimista.
 
@@ -371,7 +372,17 @@ Decodificar, escalar y comparar se hace después de grabar y en procesos con `ni
 | Se indexa | 5,5 / 15,8 / 44,7 ms | 5,3 s para 30 s grabados |
 | Se comprueba por PSNR | **10,7 / 28,4 / 48,1 ms** | 22,7 s |
 
-Grabar e indexar no se notan; la comprobación sí. Lo que compare imágenes (la comprobación y el VMAF) no debe coincidir con una medida. Las grabaciones se guardan en `media/qoe/` (se conservan las 10 últimas).
+Grabar e indexar no se notan; la comprobación sí. Por eso lo que compara imágenes (la comprobación y el VMAF) **solo se hace con la emisión parada**: la comprobación se rechaza con la emisión en marcha. Las grabaciones se guardan en `media/qoe/` (se conservan las 10 últimas).
+
+**Fase b, hecha: VMAF de cada fotograma grabado.** Al indexar, la grabación entra en una cola. El cálculo empieza en cuanto la emisión está parada (`POST /api/stop`; ni empaquetadores ni fuente). Si la emisión vuelve a arrancar a medias, se interrumpe y vuelve a la cola, igual que si se reinicia el orquestador. `POST /api/qoe/recordings/{id}/vmaf` vuelve a encolar una grabación, y el resultado se lee con `GET` en la misma ruta.
+
+- **Herramienta:** `vmaf` de Netflix 3.0.0, compilada en una etapa propia de `server/Dockerfile`. El FFmpeg de Debian no trae libvmaf y no se cambia, porque es el que codifica la fuente. FFmpeg solo decodifica y escala; `vmaf` compara.
+- **Modelo:** `vmaf_v0.6.1`, el de por defecto (1080p visto a tres alturas de pantalla). La imagen grabada se escala a 1920x1080 con bicúbico, como pide el método de VMAF; el navegador escala con su propio algoritmo.
+- **Zona comparada:** la misma de la comprobación (sin reloj, etiqueta ni franja del timecode), así que el VMAF no es el de la imagen entera.
+- **Referencia:** como los fotogramas grabados son consecutivos (lo comprueba el índice; si no lo son, el cálculo se niega), el original es un tramo continuo del vídeo fuente, partido en dos si cruza el final del bucle. Con `-stream_loop`, FFmpeg no vuelve al frame 0 después de un `-ss`: con un solo tramo, los fotogramas posteriores al corte salían con VMAF 0.
+- **Salida:** VMAF y PSNR de luma de cada fotograma, por calidad y en el orden del índice, más media, p5 y mínimo.
+
+Medido en local (10 núcleos) con la grabación que cruza el final del bucle, 20 s y tres calidades: 55 s de cálculo. VMAF medio 89,9 (1080p), 82,0 (720p) y 58,2 (360p); p5 72,5, 58,4 y 25,5. Los fotogramas en negro del final y del principio del vídeo dan 97,4 en las tres calidades.
 
 ---
 
@@ -512,7 +523,9 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/qoe/recordings` | Grabaciones guardadas, de la más reciente a la más antigua |
 | `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
 | `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
-| `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior) |
+| `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior). Solo con la emisión parada |
+| `POST /api/qoe/recordings/{id}/vmaf` | Pone en la cola el cálculo de VMAF (se encola solo al indexar). Se calcula en cuanto la emisión esté parada |
+| `GET /api/qoe/recordings/{id}/vmaf` | VMAF y PSNR de luma de cada fotograma grabado, por calidad, con la versión de vmaf, el modelo y la zona comparada |
 | `GET /api/versions` | Versiones desplegadas de los componentes de terceros y la última publicada de cada uno |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |
 | `GET /api/utc` | Reloj del servidor en ISO 8601, para el `UTCTiming` del manifiesto |

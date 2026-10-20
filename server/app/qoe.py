@@ -14,8 +14,13 @@ Con el registro de qué timecode mostró el navegador y cuándo (fase c), se pod
 el espectador y compararlo con el original. La comprobación (check) mide por PSNR que el emparejamiento
 es correcto: el fotograma emparejado debe parecerse al codificado más que cualquiera de sus vecinos.
 
-Todo el trabajo pesado (decodificar, escalar, comparar) va en procesos de FFmpeg con nice 19 y después
-de grabar, para no quitarle CPU al codificador en directo.
+Fase b: VMAF de cada fotograma grabado frente a su original. Comparar imágenes retrasa al codificador
+aunque vaya con nice 19 (medido: README, sección 4.7), así que el cálculo se encola al indexar y solo se
+hace con la emisión parada; si vuelve a arrancar a medias, se interrumpe y vuelve a la cola. Lo mismo
+vale para la comprobación por PSNR.
+
+Indexar (decodificar dos filas por fotograma) sí se hace al terminar de grabar: no se nota en el
+codificador.
 """
 import json
 import logging
@@ -23,6 +28,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Callable, Optional
@@ -46,6 +52,17 @@ SHOWINFO = re.compile(r"\bn:\s*(\d+)\s+pts:\s*(-?\d+)")
 # Comprobación del emparejamiento: PSNR frente al original emparejado y a sus vecinos
 CHECK_OFFSETS = (-2, -1, 0, 1, 2)
 CHECK_SAMPLES = 20
+
+# VMAF: modelo por defecto de libvmaf (1080p visto a 3 alturas de pantalla), con la imagen grabada escalada
+# a la resolución del original como pide su método. PSNR de luma de paso, para diagnosticar.
+VMAF_MODEL = "vmaf_v0.6.1"
+VMAF_SCALER = "bicubic"
+VMAF_POLL_S = 2.0
+IDLE_REQUIRED = "Compara imágenes: solo se hace con la emisión parada"
+
+
+class Interrupted(Exception):
+    """La emisión volvió a arrancar mientras se comparaban imágenes."""
 
 
 class RecordingRequest(BaseModel):
@@ -75,6 +92,22 @@ def source_info() -> dict:
             "height": stream["height"],
         }
     return _source_info
+
+
+_vmaf_version: Optional[str] = None
+
+
+def vmaf_version() -> str:
+    global _vmaf_version
+    if _vmaf_version is None:
+        done = subprocess.run(["vmaf", "--version"], capture_output=True, text=True)
+        _vmaf_version = (done.stdout or done.stderr).strip()  # la escribe en stderr
+    return _vmaf_version
+
+
+def percentile(values: list[float], p: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(p * len(ordered)))]
 
 
 def even(value: float) -> int:
@@ -136,6 +169,9 @@ class Recordings:
         self.lock = threading.Lock()
         self.active: Optional[str] = None
         self.checking: set[str] = set()
+        self.computing: Optional[str] = None
+        # Lo pone main.py: True si la emisión está parada (ni empaquetadores ni fuente)
+        self.idle: Callable[[], bool] = lambda: False
 
     # --- ficheros ---
 
@@ -181,7 +217,7 @@ class Recordings:
     def prune(self):
         ids = sorted(d for d in os.listdir(QOE_DIR) if REC_ID.match(d))
         for old in ids[:-KEEP_RECORDINGS]:
-            if old != self.active and old not in self.checking:
+            if old != self.active and old not in self.checking and old != self.computing:
                 shutil.rmtree(os.path.join(QOE_DIR, old), ignore_errors=True)
 
     # --- grabación ---
@@ -205,7 +241,7 @@ class Recordings:
             started_ms, stamps = self._record(rec_id, duration_s, master_start_ms)
             self.update_meta(rec_id, state="indexing", started_ms=started_ms)
             summary = self._build_index(rec_id, stamps)
-            self.update_meta(rec_id, state="ready", streams=summary)
+            self.update_meta(rec_id, state="ready", streams=summary, vmaf=self._queued())
             logger.info(f"QoE: grabación {rec_id} indexada: {summary}")
         except Exception as e:
             logger.warning(f"QoE: grabación {rec_id} fallida: {e}")
@@ -337,6 +373,8 @@ class Recordings:
         meta = self.read(rec_id, "meta.json")
         if not meta or meta.get("state") != "ready":
             raise RuntimeError("La grabación no está indexada")
+        if not self.idle():
+            raise RuntimeError(IDLE_REQUIRED)
         with self.lock:
             if rec_id in self.checking:
                 raise RuntimeError("La comprobación ya está en marcha")
@@ -440,6 +478,171 @@ class Recordings:
             "mean_psnr_db": {k: round(sum(r["psnr_db"][k] for r in rows) / len(rows), 2) for k in CHECK_OFFSETS},
             "min_margin_db": min(r["margin_db"] for r in rows),
             "region": {"width": w, "height": h, "x": cx, "y": cy},
+        }
+
+    # --- VMAF ---
+
+    @staticmethod
+    def _queued(note: Optional[str] = None) -> dict:
+        return {"state": "queued", "queued_ms": int(time.time() * 1000), "note": note}
+
+    def enqueue_vmaf(self, rec_id: str):
+        meta = self.read(rec_id, "meta.json")
+        if not meta or meta.get("state") != "ready":
+            raise RuntimeError("La grabación no está indexada")
+        if self.computing == rec_id:
+            raise RuntimeError("El VMAF de esta grabación se está calculando")
+        self.update_meta(rec_id, vmaf=self._queued())
+
+    def vmaf(self, rec_id: str) -> Optional[dict]:
+        return self.read(rec_id, "vmaf.json")
+
+    def start_worker(self, idle: Callable[[], bool]):
+        """Atiende la cola de VMAF: la grabación más antigua pendiente, solo con la emisión parada."""
+        self.idle = idle
+        # Lo que estaba calculándose cuando se reinició el orquestador vuelve a la cola
+        for meta in self.all():
+            if (meta.get("vmaf") or {}).get("state") == "running":
+                self.update_meta(meta["id"], vmaf=self._queued("Interrumpido por un reinicio del orquestador"))
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def _worker(self):
+        while True:
+            time.sleep(VMAF_POLL_S)
+            try:
+                if not self.idle():
+                    continue
+                pending = [m for m in self.all() if m.get("state") == "ready" and (m.get("vmaf") or {}).get("state") == "queued"]
+                if pending:
+                    self._compute_vmaf(min(pending, key=lambda m: m["vmaf"]["queued_ms"])["id"])
+            except Exception as e:
+                logger.warning(f"QoE: cola de VMAF: {e}")
+
+    def _compute_vmaf(self, rec_id: str):
+        self.computing = rec_id
+        began = time.time()
+        self.update_meta(rec_id, vmaf={"state": "running", "started_ms": int(began * 1000)})
+        logger.info(f"QoE: calculando VMAF de {rec_id}")
+        try:
+            streams = [self._vmaf_stream(rec_id, s) for s in self.index(rec_id)["streams"]]
+            w, h, cx, cy = compare_region(self.read(rec_id, "meta.json")["timecodes"], source_info()["width"], source_info()["height"])
+            self.write(rec_id, "vmaf.json", {
+                "vmaf_version": vmaf_version(),
+                "model": VMAF_MODEL,
+                "scaler": VMAF_SCALER,
+                "region": {"width": w, "height": h, "x": cx, "y": cy},
+                "streams": streams,
+            })
+            summary = [{k: v for k, v in s.items() if k not in ("vmaf", "psnr_y")} for s in streams]
+            self.update_meta(rec_id, vmaf={"state": "done", "elapsed_s": round(time.time() - began, 1), "streams": summary})
+            logger.info(f"QoE: VMAF de {rec_id} en {time.time() - began:.0f} s")
+        except Interrupted:
+            logger.info(f"QoE: VMAF de {rec_id} interrumpido: la emisión volvió a arrancar")
+            self.update_meta(rec_id, vmaf=self._queued("Interrumpido: la emisión volvió a arrancar"))
+        except Exception as e:
+            logger.warning(f"QoE: VMAF de {rec_id} fallido: {e}")
+            self.update_meta(rec_id, vmaf={"state": "error", "error": str(e)})
+        finally:
+            self.computing = None
+
+    def _vmaf_stream(self, rec_id: str, stream: dict) -> dict:
+        """VMAF y PSNR de luma de cada fotograma grabado de una calidad frente a su original.
+
+        Las dos entradas llegan a vmaf por tuberías con nombre, sin pasar por disco (30 s de 1080p en
+        crudo son más de 5 GB). Como los fotogramas grabados son consecutivos (lo comprueba el índice),
+        el original es un tramo continuo del vídeo fuente, partido en dos si cruza el final del bucle:
+        con -stream_loop, FFmpeg no vuelve al frame 0 después de un -ss.
+        """
+        if stream["matched"] != stream["frames"] or stream["not_consecutive"] or stream["pts_mismatch"]:
+            raise RuntimeError(f"Calidad {stream['index']}: hay fotogramas sin emparejar o no consecutivos")
+        src = source_info()
+        w, h, cx, cy = compare_region(self.read(rec_id, "meta.json")["timecodes"], src["width"], src["height"])
+        crop = f"crop={w}:{h}:{cx}:{cy},format=yuv420p"
+        count = len(stream["n"])
+        segments, first, left = [], stream["n"][0] % src["frames"], count
+        while left > 0:
+            take = min(left, src["frames"] - first)
+            segments.append((first, take))
+            left -= take
+            first = 0
+
+        tmp = tempfile.mkdtemp(prefix="vmaf-")
+        ref, dist, out = (os.path.join(tmp, name) for name in ("ref.yuv", "dist.yuv", "vmaf.json"))
+        os.mkfifo(ref)
+        os.mkfifo(dist)
+        procs: list[subprocess.Popen] = []
+        errors: list[str] = []
+
+        def run(cmd: list[str], **kwargs) -> subprocess.Popen:
+            proc = subprocess.Popen(NICE + cmd, stderr=subprocess.PIPE, **kwargs)
+            procs.append(proc)
+            return proc
+
+        def write_reference():
+            try:
+                with open(ref, "wb") as fifo:
+                    for k, take in segments:
+                        seek = src["start_time"] + k / src["fps"] - 0.25 / src["fps"]
+                        proc = run(["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seek:.6f}", "-i", VIDEO_FILE,
+                                    "-map", "0:v:0", "-frames:v", str(take), "-vf", crop, "-f", "rawvideo", "-"],
+                                   stdout=fifo)
+                        if proc.wait() != 0:
+                            errors.append(f"original: {proc.stderr.read().decode()[-300:]}")
+                            return
+            except OSError as e:
+                errors.append(f"original: {e}")
+
+        try:
+            meter = run(["vmaf", "-r", ref, "-d", dist, "-w", str(w), "-h", str(h), "-p", "420", "-b", "8",
+                         "--threads", str(os.cpu_count() or 1), "--model", f"version={VMAF_MODEL}",
+                         "--feature", "psnr", "--json", "-o", out, "-q"], stdout=subprocess.DEVNULL)
+            decoder = run(["ffmpeg", "-nostdin", "-v", "error", "-i", self.path(rec_id, "stream.ts"),
+                           "-map", f"0:v:{stream['index']}", "-frames:v", str(count),
+                           "-vf", f"scale={src['width']}:{src['height']}:flags={VMAF_SCALER},{crop}",
+                           "-fps_mode", "passthrough", "-f", "rawvideo", "-y", dist], stdout=subprocess.DEVNULL)
+            writer = threading.Thread(target=write_reference, daemon=True)
+            writer.start()
+            while meter.poll() is None:
+                if not self.idle():
+                    raise Interrupted()
+                time.sleep(0.5)
+            decoder.wait(timeout=10)
+            writer.join(timeout=10)
+            if meter.returncode != 0:
+                raise RuntimeError(f"vmaf: {meter.stderr.read().decode()[-300:]}")
+            if decoder.returncode != 0:
+                raise RuntimeError(f"grabación: {decoder.stderr.read().decode()[-300:]}")
+            if errors:
+                raise RuntimeError(errors[0])
+            with open(out) as f:
+                frames = json.load(f)["frames"]
+        finally:
+            for proc in procs:
+                if proc.poll() is None:
+                    proc.kill()
+            # Si vmaf murió antes de abrir el original, quien lo escribe sigue esperando a un lector
+            try:
+                os.close(os.open(ref, os.O_RDONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        if len(frames) != count:
+            raise RuntimeError(f"Calidad {stream['index']}: vmaf midió {len(frames)} de {count} fotogramas")
+        scores = [round(f["metrics"]["vmaf"], 3) for f in frames]
+        psnr = [round(f["metrics"]["psnr_y"], 3) for f in frames]
+        return {
+            "index": stream["index"],
+            "height": stream["height"],
+            "first_n": stream["n"][0],
+            "frames": count,
+            "mean": round(sum(scores) / count, 2),
+            "p5": round(percentile(scores, 0.05), 2),
+            "min": round(min(scores), 2),
+            "psnr_y_mean": round(sum(psnr) / count, 2),
+            # Por fotograma, en el orden del índice (el mismo que stream["n"])
+            "vmaf": scores,
+            "psnr_y": psnr,
         }
 
 

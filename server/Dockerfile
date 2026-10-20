@@ -1,3 +1,17 @@
+# Herramienta vmaf de Netflix, compilada aparte: Debian no la empaqueta y el FFmpeg de Debian no trae
+# libvmaf. Así el FFmpeg que codifica la fuente no cambia. Solo se usa para la QoE (qoe.py), con la
+# emisión parada. v3.0.0 desde el 20 de octubre de 2026; el modelo vmaf_v0.6.1 va dentro del binario.
+FROM python:3.12-slim AS vmaf
+ARG VMAF_VERSION=3.0.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential meson ninja-build nasm xxd curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL "https://github.com/Netflix/vmaf/archive/refs/tags/v${VMAF_VERSION}.tar.gz" | tar -xz -C /tmp && \
+    cd /tmp/vmaf-${VMAF_VERSION}/libvmaf && \
+    meson setup build --buildtype=release --default-library=static -Denable_tests=false -Denable_docs=false && \
+    ninja -C build && \
+    install -m 755 build/tools/vmaf /usr/local/bin/vmaf
+
 FROM python:3.12-slim
 
 # Instalar FFmpeg, fuentes tipográficas para drawtext, openssl, ca-certificates y tar
@@ -30,6 +44,8 @@ RUN ARCH=$(uname -m) && \
     mv /tmp/moq-cli-*/bin/moq /usr/local/bin/moq && \
     chmod +x /usr/local/bin/moq && \
     rm -rf /tmp/moq*
+
+COPY --from=vmaf /usr/local/bin/vmaf /usr/local/bin/vmaf
 
 WORKDIR /app
 
