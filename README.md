@@ -362,7 +362,16 @@ Una grabación de 20 s que cruza el cambio de vuelta del bucle (frames 37 500 a 
 
 Las muestras en que gana un vecino tienen todas menos de 0,5 dB de diferencia, están en escenas lentas y el vecino es siempre uno anterior; con poco bitrate x264 copia bloques del fotograma de referencia y la imagen arrastra algo del anterior (deducción, no medida). Un desplazamiento del índice daría el máximo fuera de 0 también en las escenas con movimiento, y con márgenes de varios dB.
 
-Decodificar, escalar y comparar se hace después de grabar y en procesos con `nice 19`, para no quitar CPU al codificador. Las grabaciones se guardan en `media/qoe/` (se conservan las 10 últimas).
+Decodificar, escalar y comparar se hace después de grabar y en procesos con `nice 19`, pero **con `nice 19` no basta para no tocar al codificador**. Medido en el servidor el 20-10-2026, con una calidad 1080p y sin espectadores, el retraso del codificador (marca quemada → llegada a la compuerta, `POST /api/trace`):
+
+| Mientras | Retraso p50 / p95 / máx. | Duración |
+| :--- | :--- | :--- |
+| Reposo | 6,1 / 15,8 / 42,6 ms | |
+| Se graba | 4,8 / 11,2 / 19,6 ms | 30 s |
+| Se indexa | 5,5 / 15,8 / 44,7 ms | 5,3 s para 30 s grabados |
+| Se comprueba por PSNR | **10,7 / 28,4 / 48,1 ms** | 22,7 s |
+
+Grabar e indexar no se notan; la comprobación sí. Lo que compare imágenes (la comprobación y el VMAF) no debe coincidir con una medida. Las grabaciones se guardan en `media/qoe/` (se conservan las 10 últimas).
 
 ---
 
