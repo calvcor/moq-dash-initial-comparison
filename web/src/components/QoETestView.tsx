@@ -14,20 +14,34 @@ import {
   Layers,
   Gauge,
   Wifi,
+  Activity,
 } from 'lucide-react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
 import type {
   ServerStatus,
   StreamConfig,
   NetworkProfile,
   LinkProfile,
   QoEEvaluationResponse,
-  QoESecondTimeline,
 } from '../types';
 import { QoERunner } from '../lib/qoe';
 import { grabFromVideo } from '../lib/glass';
 import * as Watch from '@moq/watch';
 import * as Net from '@moq/net';
 import { Signal } from '@moq/signals';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 interface QoETestViewProps {
   status: ServerStatus | null;
@@ -1045,86 +1059,200 @@ export const QoETestView: React.FC<QoETestViewProps> = ({
             </div>
           </div>
 
-          {/* Gráfica Temporal por Segundo */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg space-y-3">
-            <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-              Evolución Temporal Segundo a Segundo (T = {result.duration_s} s)
-            </h4>
-            <div className="w-full h-48 relative pt-2">
-              <svg width="100%" height="100%" viewBox={`0 0 ${result.timeline.length * 20 + 40} 150`} preserveAspectRatio="none">
-                {/* Cuadrículas */}
-                <line x1="30" y1="15" x2={result.timeline.length * 20 + 30} y2="15" stroke="#1e293b" strokeDasharray="3" />
-                <line x1="30" y1="65" x2={result.timeline.length * 20 + 30} y2="65" stroke="#1e293b" strokeDasharray="3" />
-                <line x1="30" y1="115" x2={result.timeline.length * 20 + 30} y2="115" stroke="#334155" />
-
-                <text x="25" y="18" fill="#64748b" fontSize="8" textAnchor="end">100</text>
-                <text x="25" y="68" fill="#64748b" fontSize="8" textAnchor="end">50</text>
-                <text x="25" y="118" fill="#64748b" fontSize="8" textAnchor="end">0</text>
-
-                {/* Parones en rojo */}
-                {result.timeline.map((s: QoESecondTimeline, idx: number) => {
-                  const x = 30 + idx * 20;
-                  if (s.freeze_s > 0) {
-                    return (
-                      <rect
-                        key={`f-${s.sec}`}
-                        x={x}
-                        y="15"
-                        width="18"
-                        height="100"
-                        fill="rgba(244, 63, 94, 0.25)"
-                        stroke="#f43f5e"
-                        strokeWidth="1"
-                      />
-                    );
-                  }
-                  return null;
-                })}
-
-                {/* Curva VMAF */}
-                <polyline
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="2.5"
-                  points={result.timeline
-                    .map((s: QoESecondTimeline, idx: number) => {
-                      const x = 39 + idx * 20;
-                      const y = 115 - (s.vmaf / 100) * 100;
-                      return `${x},${y}`;
-                    })
-                    .join(' ')}
-                />
-
-                {/* Curva Latencia */}
-                <polyline
-                  fill="none"
-                  stroke="#f59e0b"
-                  strokeWidth="2"
-                  strokeDasharray="4 2"
-                  points={result.timeline
-                    .map((s: QoESecondTimeline, idx: number) => {
-                      const x = 39 + idx * 20;
-                      const clamped = Math.min(5.0, s.latency_s);
-                      const y = 115 - (clamped / 5.0) * 100;
-                      return `${x},${y}`;
-                    })
-                    .join(' ')}
-                />
-              </svg>
+          {/* Gráfica Temporal por Segundo Interactiva */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <Activity className="w-4 h-4 text-indigo-400" />
+                <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
+                  Evolución Temporal Segundo a Segundo (T = {result.duration_s} s)
+                </h4>
+              </div>
+              <span className="text-[11px] text-slate-500 font-mono">
+                Pasa el cursor sobre la gráfica para inspeccionar cada segundo
+              </span>
             </div>
 
-            <div className="flex items-center justify-center space-x-6 text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800">
+            <div className="w-full h-72 relative">
+              <Line
+                data={{
+                  labels: result.timeline.map((s) => `${s.sec}s`),
+                  datasets: [
+                    {
+                      label: 'Calidad VMAF (0–100)',
+                      data: result.timeline.map((s) => Math.round(s.vmaf * 10) / 10),
+                      borderColor: '#10b981',
+                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                      borderWidth: 2.5,
+                      fill: true,
+                      tension: 0.25,
+                      yAxisID: 'y',
+                      pointRadius: (ctx: any) => {
+                        const s = result.timeline[ctx.dataIndex];
+                        return s && s.freeze_s > 0 ? 5 : 2;
+                      },
+                      pointBackgroundColor: (ctx: any) => {
+                        const s = result.timeline[ctx.dataIndex];
+                        return s && s.freeze_s > 0 ? '#f43f5e' : '#10b981';
+                      },
+                    },
+                    {
+                      label: 'Latencia Glass-to-Glass (s)',
+                      data: result.timeline.map((s) => Math.round(s.latency_s * 100) / 100),
+                      borderColor: '#f59e0b',
+                      backgroundColor: 'transparent',
+                      borderWidth: 2,
+                      borderDash: [5, 3],
+                      tension: 0.2,
+                      yAxisID: 'y1',
+                      pointRadius: 2,
+                      pointHoverRadius: 6,
+                    },
+                    {
+                      label: 'Tiempo Congelado (s)',
+                      data: result.timeline.map((s) => Math.round(s.freeze_s * 100) / 100),
+                      borderColor: '#f43f5e',
+                      backgroundColor: 'rgba(244, 63, 94, 0.35)',
+                      borderWidth: 1.5,
+                      tension: 0.1,
+                      yAxisID: 'y1',
+                      pointRadius: (ctx: any) => {
+                        const s = result.timeline[ctx.dataIndex];
+                        return s && s.freeze_s > 0 ? 4 : 0;
+                      },
+                      pointBackgroundColor: '#f43f5e',
+                    },
+                  ],
+                }}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  interaction: {
+                    mode: 'index',
+                    intersect: false,
+                  },
+                  plugins: {
+                    legend: {
+                      position: 'top',
+                      labels: {
+                        color: '#94a3b8',
+                        font: { size: 11, family: 'monospace' },
+                        boxWidth: 14,
+                        padding: 15,
+                      },
+                    },
+                    tooltip: {
+                      backgroundColor: '#0f172a',
+                      borderColor: '#334155',
+                      borderWidth: 1,
+                      titleColor: '#f8fafc',
+                      titleFont: { size: 12, weight: 'bold' },
+                      bodyColor: '#cbd5e1',
+                      bodyFont: { size: 11, family: 'monospace' },
+                      padding: 12,
+                      cornerRadius: 8,
+                      callbacks: {
+                        title: (items: any) => `Segundo ${items[0]?.label}`,
+                        label: (ctx: any) => {
+                          const val = ctx.parsed.y;
+                          if (ctx.dataset.label.includes('VMAF')) {
+                            return ` Calidad VMAF: ${val} / 100`;
+                          }
+                          if (ctx.dataset.label.includes('Latencia')) {
+                            return ` Latencia: ${val.toFixed(2)} s (${Math.round(val * 1000)} ms)`;
+                          }
+                          if (ctx.dataset.label.includes('Congelado')) {
+                            return val > 0 ? ` ⚠️ Congelación: ${val.toFixed(2)} s` : ` Sin parones`;
+                          }
+                          return ` ${ctx.dataset.label}: ${val}`;
+                        },
+                        afterBody: (items: any) => {
+                          const idx = items[0]?.dataIndex;
+                          if (idx == null || !result.timeline[idx]) return '';
+                          const s = result.timeline[idx];
+                          const lines = [];
+                          if (s.rendition_height > 0) {
+                            lines.push(`Resolución: ${s.rendition_height}p`);
+                          }
+                          lines.push(`Velocidad reproducción: ${s.speed.toFixed(2)}x`);
+                          lines.push(`Fotogramas en este segundo: ${s.frames_count}`);
+                          if (s.stalls_count > 0) {
+                            lines.push(`Cortes registrados: ${s.stalls_count}`);
+                          }
+                          return lines.join('\n');
+                        },
+                      },
+                    },
+                  },
+                  scales: {
+                    x: {
+                      grid: { color: '#1e293b' },
+                      ticks: {
+                        color: '#94a3b8',
+                        font: { size: 10, family: 'monospace' },
+                        maxTicksLimit: 25,
+                      },
+                      title: {
+                        display: true,
+                        text: 'Línea de tiempo de reproducción (segundos)',
+                        color: '#64748b',
+                        font: { size: 11, family: 'sans-serif' },
+                      },
+                    },
+                    y: {
+                      type: 'linear',
+                      display: true,
+                      position: 'left',
+                      min: 0,
+                      max: 100,
+                      grid: { color: '#1e293b' },
+                      ticks: {
+                        color: '#10b981',
+                        font: { size: 10, family: 'monospace' },
+                        stepSize: 20,
+                      },
+                      title: {
+                        display: true,
+                        text: 'VMAF (0–100)',
+                        color: '#10b981',
+                        font: { size: 11, weight: 'bold' },
+                      },
+                    },
+                    y1: {
+                      type: 'linear',
+                      display: true,
+                      position: 'right',
+                      min: 0,
+                      grid: { drawOnChartArea: false },
+                      ticks: {
+                        color: '#f59e0b',
+                        font: { size: 10, family: 'monospace' },
+                        callback: (v: any) => `${v}s`,
+                      },
+                      title: {
+                        display: true,
+                        text: 'Latencia y Congelación (s)',
+                        color: '#f59e0b',
+                        font: { size: 11, weight: 'bold' },
+                      },
+                    },
+                  },
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-center space-x-6 text-[11px] font-mono text-slate-400 pt-1 border-t border-slate-800/80">
               <span className="flex items-center space-x-1.5">
                 <span className="w-3 h-0.5 bg-emerald-500" />
-                <span>VMAF (0–100)</span>
+                <span>VMAF (Eje Izquierdo)</span>
               </span>
               <span className="flex items-center space-x-1.5">
                 <span className="w-3 h-0.5 bg-amber-500 border-t border-dashed" />
-                <span>Latencia (0–5 s)</span>
+                <span>Latencia (Eje Derecho)</span>
               </span>
               <span className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 bg-rose-500/40 border border-rose-500" />
-                <span>Congelación</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                <span>Puntos con Congelación / Rebuffering</span>
               </span>
             </div>
           </div>
