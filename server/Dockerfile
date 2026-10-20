@@ -1,29 +1,15 @@
 FROM python:3.12-slim
 
-# Instalar paquetes base, fuentes tipográficas para drawtext, openssl, ca-certificates, tar y xz-utils
+# Instalar FFmpeg, fuentes tipográficas para drawtext, openssl, ca-certificates y tar
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     fonts-dejavu-core \
     openssl \
     curl \
     ca-certificates \
     tar \
     gzip \
-    xz-utils \
     && rm -rf /var/lib/apt/lists/*
-
-# Instalar FFmpeg oficial estático con libvmaf y x264 habilitados (soporta amd64 y arm64)
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ]; then \
-        FF_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"; \
-    else \
-        FF_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"; \
-    fi && \
-    mkdir -p /tmp/ffmpeg-vmaf && \
-    curl -sL "$FF_URL" | tar -xJ -C /tmp/ffmpeg-vmaf --strip-components=1 && \
-    mv /tmp/ffmpeg-vmaf/bin/ffmpeg /usr/local/bin/ffmpeg && \
-    mv /tmp/ffmpeg-vmaf/bin/ffprobe /usr/local/bin/ffprobe && \
-    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
-    rm -rf /tmp/ffmpeg-vmaf
 
 # Descargar e instalar el binario dinámico oficial de moq-cli para Linux (soporta amd64 y arm64)
 # 0.14.7 desde el 19 de octubre de 2026. Con un espectador, una calidad: entrada del publicador sin esperas (máx.

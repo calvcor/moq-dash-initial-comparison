@@ -256,19 +256,7 @@ Cuando no hay medida se muestra `--`; no se rellena con valores supuestos.
 
 Silenciado, `@moq/watch` no descarga el audio, mientras que dash.js lo descarga siempre: unos 130 kbps de la diferencia en descarga total vienen de ahí.
 
-### 4.3. Evaluación de QoE de baja latencia (LL-GABR + VMAF)
-
-Para evaluar de forma cuantitativa e integrada la calidad de experiencia subjetiva sin penalizar el rendimiento en tiempo real, el testbed incluye una herramienta dedicada de **Evaluación Aislada de QoE** accesible desde la cabecera del dashboard (`Evaluador QoE`).
-
-- **Mecánica:** Evalúa un protocolo a la vez (LL-DASH, MoQ o WebRTC) durante una prueba delimitada (15 s, 30 s o 60 s).
-- **Instrumentación en cliente:** El navegador registra asíncronamente cada fotograma renderizado mediante `requestVideoFrameCallback` y `MessageChannel`, leyendo el timecode quemado y detectando eventos de congelación (`stalls` $\ge 150\text{ ms}$).
-- **Cálculo en servidor:** Al terminar la prueba, el cliente envía la traza al endpoint `POST /api/qoe/evaluate`. El servidor discretiza la sesión en ventanas uniformes de **1 segundo de reloj del espectador** y calcula la métrica adaptada de **LL-GABR** (Raman et al., 2024):
-
-$$\text{QoE}_{\text{LL}} = \alpha \sum_{t=1}^T \frac{vmaf_t}{20} - \beta \sum_{t=1}^T rtt_t - \gamma \cdot N_{\text{stalls}} - \sigma \frac{1}{T} \sum_{t=1}^T l_t - \mu \frac{1}{T} \sum_{t=1}^T |1 - s_t| - \omega \sum_{t=2}^T \frac{|vmaf_t - vmaf_{t-1}|}{20}$$
-
-- **Salida:** Ofrece la puntuación consolidada en escala [0, 5], el VMAF medio, el desglose analítico de penalizaciones (calidad visual, parones, latencia, catch-up e inestabilidad) y una gráfica interactiva de la serie temporal por segundo, con opción de descarga en formato JSON.
-
-### 4.4. Indicadores de validez
+### 4.3. Indicadores de validez
 
 El panel muestra, y el CSV registra:
 
@@ -276,7 +264,7 @@ El panel muestra, y el CSV registra:
 - **Anomalías de ingesta**: saltos de continuidad o paquetes corruptos entre la fuente y cada empaquetador. Cualquier valor distinto de cero invalida la comparación de esa sesión.
 - **Deriva de disponibilidad DASH**: desfase de cada segmento respecto al calendario que anuncia el manifiesto.
 
-### 4.5. Estadísticos y exportación
+### 4.4. Estadísticos y exportación
 
 Cada tarjeta muestra n, media, σ, p50, p95, mínimo y máximo de la latencia glass-to-glass, descartando los 10 primeros segundos tras cada arranque y las muestras tomadas con la pestaña oculta.
 
