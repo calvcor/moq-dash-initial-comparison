@@ -1025,7 +1025,7 @@ A diferencia de TCP y QUIC, aquí la retransmisión es **selectiva y con plazo**
 4. El receptor envía un PLI para pedir un keyframe. En una videollamada, el codificador genera uno
    de inmediato y la imagen vuelve.
 
-En este testbed el paso 4 tiene una limitación: **MediaMTX no codifica, solo reenvía**. No puede
+En este testbed el paso 4 tiene una limitación (ver también la variable de confusión 7 de 6.4): **MediaMTX no codifica, solo reenvía**. No puede
 fabricar un keyframe a petición, así que el receptor tiene que esperar al siguiente keyframe del
 flujo, que llega cada GOP (1 s). No he comprobado si MediaMTX traslada el PLI de alguna forma al
 origen; por cómo está montada la ingesta (RTSP desde un FFmpeg que copia), no hay nadie que pueda
@@ -1237,6 +1237,33 @@ Diferencias entre las ramas que no son del protocolo en sí, y que conviene cont
    y la red emulada actúa sobre una segunda conexión interna. Se evita con el camino directo
    (`DASH_HOST`), en el que la conexión del navegador atraviesa el router igual que en MoQ y WebRTC.
    El CSV registra qué camino se usó (`dash_path`).
+7. **Codificación pensada para emisión, no para WebRTC interactivo.** Las tres ramas reciben el mismo
+   flujo: H.264 *Constrained Baseline* sin B-frames, un keyframe cada GOP (1 s por defecto) y bitrate
+   con tope (120 % del nominal, búfer de 1 s). Es la configuración que recomiendan los servicios que
+   reciben WebRTC desde un codificador externo (WHIP): sin B-frames y keyframe cada 1-2 s. Pero no es
+   como codifica WebRTC en una videollamada. Allí el codificador de los navegadores (libwebrtc) usa
+   bitrate constante ajustado en vivo por el control de congestión, un intervalo de keyframes de 3000
+   frames (50 s a 60 fps) y keyframes adicionales cuando el receptor los pide tras una pérdida.
+
+   Aquí falta ese lazo con el codificador. MediaMTX reenvía lo que recibe de un FFmpeg que solo copia,
+   así que nadie atiende las peticiones de keyframe del navegador (PLI/FIR) ni ajusta la tasa del
+   codificador según la congestión. Tras una pérdida, la imagen solo se recupera en el siguiente GOP, y
+   ante falta de ancho de banda no hay forma de bajar la tasa. Las otras dos ramas tampoco tienen ese
+   lazo, pero no lo necesitan: DASH y MoQ adaptan eligiendo entre calidades ya codificadas.
+
+   El GOP fijo es aquí la elección correcta (con un GOP "a lo libwebrtc", la espera tras una pérdida
+   podría ser de 50 s) y es necesario para las otras ramas: en DASH cada segmento empieza por un
+   keyframe, y en MoQ cada grupo es un GOP. Pero significa que **WebRTC se mide en condiciones
+   distintas a las de su uso habitual**, especialmente con pérdidas o con ancho de banda limitado. Para
+   medirlo "como en una videollamada" haría falta un emisor propio que atienda la realimentación del
+   receptor (un navegador o un emisor basado en libwebrtc); rompería el flujo idéntico para las tres
+   ramas, así que sería un experimento aparte y declarado.
+
+   Fuentes: el estándar solo fija los códecs (RFC 7742); el comportamiento de libwebrtc sale de su
+   código (`libvpx_vp8_encoder.cc`, `h264_encoder_impl.cc` y los valores por defecto de
+   `video_encoder.cc`); las recomendaciones de ingesta, de guías de Gcore, Alibaba Cloud, VDO.Ninja y
+   nanocosmos. Las unidades del búfer de libvpx (milisegundos) son una lectura de su configuración, no
+   un comentario del código.
 
 ---
 

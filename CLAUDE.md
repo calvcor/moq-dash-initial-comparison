@@ -30,7 +30,7 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
    invalidadas. Cualquier instrumentación nueva en el navegador debe ser barata y asíncrona.
 3. **No rellenes con valores supuestos.** Sin medida se muestra `--` y en el CSV queda vacío.
 4. **Declara las variables de confusión** en vez de ocultarlas: BBRv3 (relay) frente a CUBIC (DASH),
-   WebRTC sin adaptación ni audio, bitrate del catálogo de MoQ (máximo medido) frente al del MPD
+   WebRTC sin adaptación ni audio y sin codificador que atienda sus peticiones de keyframe, bitrate del catálogo de MoQ (máximo medido) frente al del MPD
    (nominal), sliders de latencia que significan cosas distintas en cada rama, red del cliente.
 5. **Distingue medida de deducción** al informar. Si algo sale del código y no de una prueba, dilo.
 
