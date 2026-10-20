@@ -172,6 +172,7 @@ ffmpeg -re -stream_loop -1 -i <vídeo> -re -stream_loop -1 -i <vídeo> \
 - **Tope de tasa**: cada calidad lleva `-maxrate` al 120 % y un VBV de 1 s, para que el bitrate nominal sea una referencia fiable para la adaptación y la emulación de red.
 - **Etiqueta de calidad**: cada calidad lleva quemado arriba a la derecha su nombre (`720p 2000 kbps`), para ver de un vistazo cuál se reproduce.
 - **Timecode binario**: se quema en cada calidad después de escalarla. Ver sección 4.
+- **Cuatro salidas**: UDP 5001 (DASH), 5002 (MoQ), 5003 (WebRTC) y 5004, que solo se escucha mientras se graba una prueba de QoE (sección 4.7). Sin nadie escuchando, los paquetes de 5004 se descartan en el kernel.
 
 Cambiar el GOP o la escalera reinicia la fuente; cambiar segmento o fragmento solo reinicia los empaquetadores. **Detener Pipeline** para también la fuente, que es la que consume CPU, y el servidor queda en reposo; la parada se conserva aunque se reinicie el contenedor o la máquina.
 
@@ -330,6 +331,39 @@ Medidos en Chrome headless en la misma máquina, con latencia objetivo de 3,0 s 
 
 En DASH la diferencia entre real y declarada (~55 ms) es el tiempo de codificación, empaquetado y pintado. En MoQ quedan ~200 ms sin atribuir (publicador, relay o decodificación por software del navegador headless).
 
+### 4.7. Evaluación de QoE (en construcción)
+
+Objetivo: puntuar cada sesión con la QoE de LL-GABR (Raman et al., 2024, ecuación 6), que combina VMAF, parones, latencia, velocidad de reproducción y cambios de calidad. **El VMAF no se calcula en el navegador ni se graba allí el vídeo**: grabar los fotogramas cargaría el navegador (y alteraría la medida) y enviarlos obligaría a recodificar. En su lugar:
+
+1. Durante la prueba, el servidor graba el flujo que sale del codificador. Es el mismo que reparten las tres ramas, que no recodifican.
+2. El navegador anota qué timecode muestra y cuándo (pendiente).
+3. Con eso, el servidor reconstruye lo que vio el espectador y calcula el VMAF de cada fotograma mostrado frente a su original de Big Buck Bunny (pendiente).
+
+En DASH y MoQ el transporte es fiable y la decodificación H.264 es determinista, así que el fotograma reconstruido es el que se pintó. En WebRTC con pérdidas no tiene por qué: la ocultación de errores del navegador no se reproduce y el VMAF saldría optimista.
+
+**Fase a, hecha: grabación y emparejamiento con el original.** `POST /api/qoe/recordings` graba de 5 a 300 s desde el siguiente keyframe (`server/app/recorder.py`, que escucha en la cuarta salida del tee de la fuente, UDP 5004, solo mientras graba). Después `server/app/qoe.py` indexa cada fotograma de cada calidad:
+
+- lee su timecode con la misma lectura que el navegador (`decodeTimecodeFromFrame`);
+- lo convierte en número de frame con las marcas que FFmpeg escribe al quemarlo (las mismas del desglose por etapas, copiadas mientras dura la grabación);
+- el número de frame módulo los frames del original (38 072) es el fotograma de Big Buck Bunny del que viene: la fuente numera en orden de decodificación (`setpts=N`) y vuelve a empezar en cada vuelta del bucle.
+
+Como control cruzado, entre dos fotogramas emparejados la diferencia de PTS debe ser la de número de frame por 1500 ticks; el índice cuenta los que no cuadran (`pts_mismatch`, `not_consecutive`), que deben ser 0. El último fotograma de cada calidad se descarta: el grabador lo corta y el decodificador lo completa con el anterior.
+
+`POST /api/qoe/recordings/{id}/check` comprueba el emparejamiento por PSNR: para 20 fotogramas por calidad, escalados a 1080p, compara con su original y con los dos anteriores y posteriores. Se compara sin lo que la fuente dibuja encima (reloj, etiqueta de calidad y franja del timecode: filas 136 a 927 en la escalera por defecto). Medido en local el 20-10-2026:
+
+| Calidad | PSNR medio (−2, −1, **0**, +1, +2) | Máximo en el emparejado |
+| :--- | :--- | :--- |
+| 1080p (sola) | 30,2 · 31,8 · **35,4** · 31,6 · 29,9 dB | 19 de 20 |
+| 1080p (escalera) | 30,2 · 31,8 · **34,1** · 31,5 · 29,6 dB | 17 de 20 |
+| 720p | 29,4 · 30,6 · **32,2** · 30,2 · 28,7 dB | 13 de 20 |
+| 360p | 27,5 · 28,2 · **29,1** · 28,0 · 27,0 dB | 11 de 20 |
+
+Una grabación de 20 s que cruza el cambio de vuelta del bucle (frames 37 500 a 38 698, con el corte en 38 072) da lo mismo a ambos lados del corte: 1080p 44,7 dB en el emparejado frente a 34,3 y 34,2 en los vecinos inmediatos, 720p 43,1 frente a 35,7 y 35,6, 360p 36,5 frente a 31,9 y 32,0, sin ningún PTS ni número de frame incoherente.
+
+Las muestras en que gana un vecino tienen todas menos de 0,5 dB de diferencia, están en escenas lentas y el vecino es siempre uno anterior; con poco bitrate x264 copia bloques del fotograma de referencia y la imagen arrastra algo del anterior (deducción, no medida). Un desplazamiento del índice daría el máximo fuera de 0 también en las escenas con movimiento, y con márgenes de varios dB.
+
+Decodificar, escalar y comparar se hace después de grabar y en procesos con `nice 19`, para no quitar CPU al codificador. Las grabaciones se guardan en `media/qoe/` (se conservan las 10 últimas).
+
 ---
 
 ## 5. Emulación de red
@@ -465,6 +499,11 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |
+| `POST /api/qoe/recordings` | Graba el flujo codificado `duration_s` segundos (5-300) y lo indexa al terminar. Exige la emisión en marcha |
+| `GET /api/qoe/recordings` | Grabaciones guardadas, de la más reciente a la más antigua |
+| `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
+| `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
+| `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior) |
 | `GET /api/versions` | Versiones desplegadas de los componentes de terceros y la última publicada de cada uno |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |
 | `GET /api/utc` | Reloj del servidor en ISO 8601, para el `UTCTiming` del manifiesto |
@@ -495,6 +534,8 @@ moq-dash-initial-comparison/
 │       ├── main.py               # API de control y ciclo de vida de los procesos
 │       ├── source.py             # Descarga del vídeo fuente si falta
 │       ├── trace.py              # Registro de por dónde pasa cada frame, para el desglose por etapas
+│       ├── qoe.py                # QoE: grabación del flujo codificado, índice y emparejamiento con el original
+│       ├── recorder.py           # Grabador MPEG-TS de la cuarta salida de la fuente (UDP 5004)
 │       ├── origin.py             # Origen LL-DASH en memoria y calibración del AST
 │       └── tsgate.py             # Compuerta MPEG-TS: arranque en IDR y continuidad
 └── web/

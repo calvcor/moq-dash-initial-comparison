@@ -59,6 +59,15 @@ class FrameLog:
                 return numbers[best], marks[best]
         return None
 
+    def stamps_since(self, stamp_ms: float) -> dict:
+        """Copia de las marcas posteriores a stamp_ms: calidad -> [(marca ms, número de frame)...]."""
+        with self.lock:
+            out = {}
+            for stream, (marks, numbers) in self.stamps.items():
+                i = bisect.bisect_left(marks, stamp_ms)
+                out[stream] = list(zip(marks[i:], numbers[i:]))
+            return out
+
     def reset(self, branch: str):
         with self.lock:
             self.frames[branch] = {}

@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from . import source, trace, versions
+from . import qoe, source, trace, versions
 from .origin import origin, router as origin_router
 from .source import VIDEO_FILE
 
@@ -287,6 +287,7 @@ def ensure_master_source(force_restart: bool = False):
         # pes_payload_size=0: un PES por frame de audio. Por defecto MPEG-TS agrupa ~180 ms de audio y los
         # empaquetadores retienen el vídeo ese tiempo al intercalar.
         # Emite continuamente por UDP 5001 (DASH), 5002 (MoQ) y 5003 (WebRTC) con cabeceras repetidas para sincronización en caliente
+        # y por 5004 al grabador de las pruebas de QoE (qoe.py), que solo escucha mientras graba
         # Vídeo y audio se leen por entradas separadas: el fichero los intercala en bloques de 0,5 s y con
         # una sola entrada a ritmo real el audio llega a ráfagas, el muxer retiene el vídeo hasta tenerlo
         # y ambas ramas reciben los frames a trompicones y con retardo añadido.
@@ -302,7 +303,7 @@ def ensure_master_source(force_restart: bool = False):
             # con el doble de separación y huecos de más de 50 ms cada segundo. Con 1 µs escribe cada
             # paquete en cuanto lo tiene.
             f"-max_interleave_delta 1 "
-            f"-f tee \"[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5003?pkt_size=1316\""
+            f"-f tee \"[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5003?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5004?pkt_size=1316\""
         )
         logger.info(f"Iniciando Fuente Maestra Continua FFmpeg con reloj en vivo (epoch {start_epoch_sec})...")
         processes["master_source"] = subprocess.Popen(
@@ -580,6 +581,59 @@ def stop_pipeline():
 @app.post("/api/config")
 def update_config(config: StreamConfig):
     return start_pipeline(config)
+
+@app.post("/api/qoe/recordings")
+def start_qoe_recording(req: qoe.RecordingRequest):
+    """Graba el flujo codificado (todas las calidades) durante la prueba y después lo indexa (ver qoe.py)."""
+    if not desired_running or not alive("master_source"):
+        raise HTTPException(status_code=409, detail="La emisión no está en marcha")
+    context = {
+        "fps": current_config.fps,
+        "renditions": [r.model_dump() for r in current_config.renditions],
+        "timecodes": [timecode_layout(r.width, r.height) for r in current_config.renditions],
+        "master_start_time_ms": int(master_start_time * 1000),
+    }
+    try:
+        return qoe.recordings.start(req.duration_s, context, lambda: int(master_start_time * 1000))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+@app.get("/api/qoe/recordings")
+def list_qoe_recordings():
+    return qoe.recordings.all()
+
+def qoe_recording_or_404(rec_id: str) -> dict:
+    try:
+        meta = qoe.recordings.get(rec_id)
+    except KeyError:
+        meta = None
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Grabación no encontrada")
+    return meta
+
+@app.get("/api/qoe/recordings/{rec_id}")
+def get_qoe_recording(rec_id: str):
+    """Estado, resumen del índice por calidad y, si se ha hecho, la comprobación del emparejamiento."""
+    return qoe_recording_or_404(rec_id)
+
+@app.get("/api/qoe/recordings/{rec_id}/index")
+def get_qoe_index(rec_id: str):
+    """Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente."""
+    qoe_recording_or_404(rec_id)
+    index = qoe.recordings.index(rec_id)
+    if index is None:
+        raise HTTPException(status_code=409, detail="La grabación aún no está indexada")
+    return index
+
+@app.post("/api/qoe/recordings/{rec_id}/check")
+def check_qoe_recording(rec_id: str):
+    """Comprueba por PSNR que cada fotograma grabado está emparejado con su original y no con un vecino."""
+    qoe_recording_or_404(rec_id)
+    try:
+        qoe.recordings.start_check(rec_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"state": "running"}
 
 def supervise():
     """Relanza lo que se haya caído o colgado mientras la emisión deba estar en marcha.

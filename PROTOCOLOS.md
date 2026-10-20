@@ -59,6 +59,9 @@ Fichero ─▶ FFmpeg ────────┼─ UDP 5002 ─ tsgate ─ moq
 (x264, 1 a 5 calidades)   └─ UDP 5003 ─ tsgate ─ ffmpeg (-f rtsp) ─ RTSP ▶ MediaMTX ──────────────────▶ router ─▶ navegador (RTCPeerConnection)
 ```
 
+Hay una cuarta salida, UDP 5004, que no va a ninguna rama: la graba `recorder.py` durante las pruebas
+de QoE, para calcular después el VMAF con el vídeo tal como salió del codificador (README, sección 4.7).
+
 Consecuencias para la comparación:
 
 - **La codificación no es una variable.** Mismo códec (H.264 *baseline*, `ultrafast`, `zerolatency`,
