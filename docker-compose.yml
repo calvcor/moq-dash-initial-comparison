@@ -119,6 +119,11 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
+      # Publicador moq-cli: "release" (el publicado, por defecto) o "git" (compilado desde MOQ_CLI_COMMIT).
+      # Los valores por defecto repiten los de server/Dockerfile.
+      args:
+        MOQ_CLI_FROM: ${MOQ_CLI_FROM:-release}
+        MOQ_CLI_COMMIT: ${MOQ_CLI_COMMIT:-bc64b9c52561209322dcb8dec9992bf867f499f7}
     container_name: testbed-orchestrator
     init: true  # recoge los procesos FFmpeg huérfanos al reiniciar pipelines
     environment:

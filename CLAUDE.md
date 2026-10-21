@@ -96,6 +96,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 
 - Todo va fijado: relay y MediaMTX en `docker-compose.yml`, moq-cli en `server/Dockerfile`, librerías
   del navegador en `web/package-lock.json`. Nada se actualiza solo.
+- moq-cli se puede compilar desde un commit con `MOQ_CLI_FROM=git` y `MOQ_CLI_COMMIT` en el `.env`
+  (README, 4.4b); el panel y el CSV lo muestran como `git@<commit>`. Compilar necesita varios GB de RAM.
 - **Antes de dar por buena una actualización de moq-cli, mide la entrada del publicador con un
   espectador conectado.** La 0.14.4 acumula retraso sin parar y la 0.14.5 se queda atrás con un
   espectador; la 0.14.7 (desplegada desde el 19-10-2026) no tiene ese problema. La versión desplegada y

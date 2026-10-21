@@ -17,7 +17,8 @@ const parts = (version: string) => version.split('.').map((n) => parseInt(n, 10)
 
 /** Si `latest` es posterior a `installed`, comparando número a número. */
 export function isNewer(latest: string | null | undefined, installed: string | null | undefined): boolean {
-  if (!latest || !installed) return false;
+  // Un binario compilado desde un commit (git@abc1234) no tiene número de versión con el que comparar
+  if (!latest || !installed || !/^\d/.test(installed)) return false;
   const [a, b] = [parts(latest), parts(installed)];
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);

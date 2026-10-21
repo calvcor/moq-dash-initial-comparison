@@ -297,10 +297,12 @@ Las medidas dependen de la versión exacta de cada pieza de terceros: entre dos 
 | :--- | :--- |
 | `moq-relay` | `docker-compose.yml`, `MOQ_RELAY_VERSION` (dos valores por defecto: la imagen y la variable que la muestra) |
 | MediaMTX | `docker-compose.yml`, `MEDIAMTX_VERSION` (igual) |
-| `moq-cli` | `server/Dockerfile`, en la URL de descarga |
+| `moq-cli` | `server/Dockerfile`: la versión publicada, en la URL de descarga. Con `MOQ_CLI_FROM=git` en el `.env` se compila desde el commit `MOQ_CLI_COMMIT` (ver abajo) y se identifica como `git@<commit>` |
 | `@moq/watch`, `dash.js` | `web/package.json` y `web/package-lock.json` |
 | FFmpeg | El paquete de Debian de la imagen del orquestador; no se consulta si hay novedades |
 | `vmaf` (solo QoE) | `server/Dockerfile`, `VMAF_VERSION`; no se muestra en el dashboard, queda en cada resultado de VMAF |
+
+**`moq-cli` desde un commit.** Para medir una versión del publicador aún no publicada, el `.env` admite `MOQ_CLI_FROM=git` y `MOQ_CLI_COMMIT=<hash>` (por defecto, `release` y el commit `bc64b9c` de `main`). La etapa de compilación solo se construye con `git`; con `release` no se compila nada. Compila con LTO *thin* y solo el transporte QUIC (el LTO completo no cupo en 7,7 GB de RAM) y guarda las cachés de Cargo entre construcciones, así que la memoria solo se usa al construir y cambiar de commit reutiliza las dependencias. Si no cambia el commit, la etapa sale de la caché de Docker. Para liberar el disco de esas cachés: `docker builder prune`.
 
 El orquestador consulta cada 6 horas la última versión publicada de cada uno (Docker Hub, las publicaciones de GitHub y el registro de npm) y el dashboard marca en ámbar los que tienen una más nueva. **Es solo un aviso: nada se actualiza solo.** Para actualizar hay que cambiar la versión fijada y volver a desplegar (`docker compose up -d --build`); las medidas hechas con versiones distintas no son comparables entre sí.
 

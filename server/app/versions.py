@@ -32,7 +32,9 @@ def run_version(cmd: list[str], pattern: str):
 # de imagen fijada en docker-compose.yml, que llega aquí como variable de entorno.
 installed = {
     "moq_relay": os.getenv("MOQ_RELAY_VERSION") or None,
-    "moq_cli": run_version(["moq", "--version"], r"moq (\S+)"),
+    # Compilado desde un commit (MOQ_CLI_FROM=git en el Dockerfile), su --version no lo identifica: git@<commit>
+    "moq_cli": (open("/usr/local/share/moq-cli-build").read().strip() if os.path.exists("/usr/local/share/moq-cli-build") else "")
+    or run_version(["moq", "--version"], r"moq (\S+)"),
     "mediamtx": os.getenv("MEDIAMTX_VERSION") or None,
     "ffmpeg": run_version(["ffmpeg", "-version"], r"ffmpeg version (\d+(?:\.\d+)+)"),
 }
