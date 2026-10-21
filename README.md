@@ -413,7 +413,7 @@ El router (`router/agent.py`) reenvía los puertos del navegador con DNAT, sin t
 | :--- | :--- | :--- |
 | Ancho de banda (kbit/s) | Sí | Vacío = sin límite |
 | Retardo (ms) | Sí | El RTT es la suma de bajada y subida |
-| Jitter (ms) | Sí | No puede superar el retardo; puede reordenar paquetes |
+| Jitter (ms) | Sí | No puede superar el retardo. **Desordena los paquetes, y mucho** (ver abajo) |
 | Pérdida (%) | Sí | Aleatoria e independiente por paquete |
 | Cola (ms) | Sí | Búfer del cuello de botella; solo actúa con ancho de banda limitado |
 
@@ -429,6 +429,20 @@ Limitaciones:
 - **En macOS, el extremo TCP del cliente es el proxy de Docker Desktop**, no el navegador. Para DASH la conexión degradada es proxy–Nginx; el control de congestión del servidor sí es el real. QUIC no se ve afectado. En un host Linux no ocurre.
 - **La cola se dimensiona en paquetes** suponiendo paquetes de 1500 bytes, así que su duración real es aproximada.
 - **La tabla siguiente es anterior a la escalera de calidades**: se midió con una única calidad y sin tope de tasa en la fuente.
+
+**El jitter de netem desordena los paquetes, y eso hunde a MoQ (medido el 21-10-2026, en local).** netem da a cada paquete un retardo aleatorio propio (uniforme en ±jitter, correlación 25 %) y los entrega por orden de salida, así que dos paquetes que salen juntos pueden llegar con hasta 2×jitter de diferencia y en orden inverso. Con un flujo de prueba numerado por la cola de bajada de MoQ (ráfagas de 6 paquetes cada 16,7 ms):
+
+| Perfil | Llegan fuera de orden | Adelantados por 3 o más posteriores |
+| :--- | :--- | :--- |
+| 150 ms, sin jitter | 0 % | 0 % |
+| 150 ± 20 ms | 69 % | 39 % (máx. 12) |
+| 150 ± 50 ms | 79-80 % | 60 % (máx. 27) |
+
+QUIC (RFC 9002) da un paquete por perdido cuando se confirma otro 3 números posterior. La pila del relay (`noq` 1.3.0) usa ese umbral fijo, sin adaptarlo al desorden, y su BBRv3 recorta la ventana en cuanto la pérdida de una ronda supera el 2 %. Traza qlog del relay (compilado con `qlog`) con 150 ± 50 ms y un espectador: el 36 % de los paquetes dados por perdidos, todos por `reordering_threshold` y **todos confirmados después** (no se perdió ninguno); ventana de congestión mediana de 17 kB frente a 433 kB sin desorden, y 0,54 Mbit/s enviados para un vídeo de ~4,3. A MoQ le llegan 7-8 fps. El TCP de DASH (Linux, CUBIC con RACK) adapta su umbral de desorden con los DSACK (`tcp_max_reordering` = 300): en el mismo perfil detectó 4.234 desórdenes y retransmitió 6 segmentos de 17.543, y a DASH le llegan 60 fps. WebRTC no retransmite ni recorta por desorden: el búfer de jitter reordena.
+
+Con el mismo 150 ± 50 ms pero conservando el orden (`netem ... rate 1gbit`: cada paquete sale como pronto cuando sale el anterior), MoQ recibe 60 fps y pinta 52-58, sin congelados. Esa variante estrecha el reparto de retardos (p5-p95 de 44-79 ms frente a 6-95 ms), así que hay un control con el mismo reparto y con desorden, 150 ± 20 ms: MoQ sufre (45-59 fps pintados, 2-10 s de congelados) pero no se hunde. El daño crece con la profundidad del desorden. Con la escalera de calidades MoQ sí baja, a 360p, porque la estimación del relay cae a 0,2-0,9 Mbit/s, pero ni esa calidad cabe.
+
+**Consecuencia para las medidas:** el parámetro jitter del testbed mezcla dos cosas, variación de retardo y desorden profundo, y la segunda castiga casi solo a QUIC. En redes reales el retardo varía sobre todo en las colas, que no desordenan. Cualquier resultado de MoQ con jitter hay que leerlo así. Sin desorden, DASH tuvo problemas por encima de TCP (cero retransmisiones, pero el reproductor no llegó a pintar); no investigado.
 
 Comportamiento observado en Chrome headless (45 s por caso, vídeo a 4 Mbit, objetivos de 3 s en DASH y 200 ms en MoQ):
 
