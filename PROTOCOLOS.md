@@ -853,6 +853,13 @@ Con la misma red, MoQ mide 268 o 625 ms según se haya cambiado el perfil en cal
 recargado, y en el primer caso no le queda margen para el jitter. En `auto` el búfer crece con el
 RTT, no con el jitter medido: con 150 ms por sentido y sin jitter reserva 444 ms.
 
+Ese margen de 1,25 × RTT es el que deja llegar a tiempo un paquete retransmitido. Con 150 ms por
+sentido y un 1 % de pérdida (sin jitter), durante 30 s: la sesión que conservaba el búfer calculado
+sin retardo (88 ms) pintó 23 fps de mediana, con 29 de los 30 segundos por debajo de 50 fps y 57
+congelados nuevos; la sesión recargada (444 ms) pintó 60 fps con 2 congelados, a 633 ms de latencia
+frente a 277. La latencia alta tras recargar es el precio de aguantar pérdidas; la baja sin
+recargar solo se sostiene en una red sin pérdidas ni jitter.
+
 **La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
 "adelantada" se tolera antes de recolocar la referencia:
 

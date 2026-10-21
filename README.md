@@ -452,7 +452,16 @@ Con el mismo 150 ± 50 ms pero conservando el orden (`netem ... rate 1gbit`: cad
 | 1,0 s | 59,8 | 0 | 0 | 1,0× | 1.048 ms |
 | 0,3 s sin retardo de red | 59,8 | 0 | 0 | 1,0× | 339 ms |
 
-(Los congelados se cuentan desde la carga de la página e incluyen el arranque.) Con un objetivo inalcanzable no se queda en la latencia que puede sostener: la persigue acelerando y se para. Comparar DASH con los otros dos a igual perfil de red exige elegir su objetivo para ese perfil, y declararlo; una alternativa es medir, por perfil, el objetivo mínimo sin congelados.
+(Los congelados se cuentan desde la carga de la página e incluyen el arranque.) dash.js 5.2.1 no adapta el objetivo: `liveDelay` se fija al arrancar y solo cambia si el usuario busca a mano. Lo que sí deja configurar es cómo lo persigue (`liveCatchup`), y ninguna combinación probada lo deja en la latencia que la red permite (objetivo 0,3 s, mismo perfil):
+
+| `liveCatchup` | Congelados | Saltos al directo | Velocidad media | Latencia real |
+| :--- | :--- | :--- | :--- | :--- |
+| `maxDrift` 1,5 s (el del testbed) | 19 (16,8 s) | 3 | 1,3× | 707 ms |
+| `maxDrift` 0 (sin salto) | 8 (11,5 s) | 0 | 1,4× | 1.505 ms |
+| `maxDrift` 0, `playbackBufferMin` 1 s | 15 (13,9 s) | 0 | 1,3× | 1.040 ms |
+| `maxDrift` 0, `liveThreshold` 0,3 s | 0 | 0 | 1,0× | 2.264 ms |
+
+Con `liveThreshold` deja de perseguir el objetivo y se queda en la latencia a la que le llevaron los congelados del arranque. En `LoLP` la velocidad media sigue en 1,3-1,4× aunque el búfer debería estar por debajo de `playbackBufferMin`; no se ha averiguado por qué no frena. Con un objetivo inalcanzable no se queda en la latencia que puede sostener: la persigue acelerando y se para. Comparar DASH con los otros dos a igual perfil de red exige elegir su objetivo para ese perfil, y declararlo; una alternativa es medir, por perfil, el objetivo mínimo sin congelados.
 
 **Consecuencia para las medidas:** el parámetro jitter del testbed mezcla dos cosas, variación de retardo y desorden profundo, y la segunda castiga casi solo a QUIC. En redes reales el retardo varía sobre todo en las colas, que no desordenan. Cualquier resultado de MoQ con jitter hay que leerlo así. Sin desorden, DASH tuvo problemas por encima de TCP (cero retransmisiones, pero el reproductor no llegó a pintar); no investigado.
 
