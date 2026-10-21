@@ -100,7 +100,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   (README, 4.4b); el panel y el CSV lo muestran como `git@<commit>`. Compilar necesita varios GB de RAM.
 - **Antes de dar por buena una actualización de moq-cli, mide la entrada del publicador con un
   espectador conectado.** La 0.14.4 acumula retraso sin parar y la 0.14.5 se queda atrás con un
-  espectador; la 0.14.7 (desplegada desde el 19-10-2026) no tiene ese problema. La versión desplegada y
+  espectador; la 0.14.7 (desplegada del 19 al 21-10-2026) no tiene ese problema. Desde el 21-10-2026 el
+  servidor usa moq-cli compilado desde `main` (`git@bc64b9c`, `MOQ_CLI_FROM=git` en su `.env`). La versión desplegada y
   sus medidas están anotadas en `server/Dockerfile`.
 - La medida: `POST /api/trace` con marcas cada 4 ms de los últimos 20 s devuelve, por frame, la llegada
   a la compuerta (`encoded_ms`) y la entrega al empaquetador (`forwarded_ms`). Si los huecos en la
