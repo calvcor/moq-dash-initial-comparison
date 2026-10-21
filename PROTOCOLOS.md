@@ -965,6 +965,13 @@ concreto que se cite.
   Ocurre igual sin espectadores, con control de congestión `loss` o BBRv3, con 1 o 2 hilos de tokio
   y con H.264 crudo (`import avc3`) en vez de MPEG-TS, así que no es la red ni el demultiplexor TS.
   El vídeo llega al relay con un tirón por grupo, que solo se ve si el búfer del reproductor es menor.
+  **Está resuelto en la rama principal de moq, sin versión publicada todavía** (medido el 21-10-2026,
+  commit `bc64b9c`, compilado en local con LTO *thin* y solo el transporte QUIC): lee la entrada a
+  200-730 MB/s sin ritmo real, frente a 1,9-2,0 MB/s de la 0.14.7 tanto publicada como compilada con
+  esos mismos ajustes, así que la diferencia es del código y no de la compilación. En directo, con
+  un espectador: el keyframe espera 0,2-0,3 ms en la compuerta (0.14.7: 32-55 ms de mediana); con la
+  escalera de tres calidades, ningún cambio de calidad ni hueco de entrega en 40 s (0.14.7: 92-140
+  cambios y espera p95 de 117-146 ms).
 - **Red**: QUIC. Una pérdida retrasa solo los frames siguientes de ese grupo.
 - **Búfer**: `delay` + *jitter* de la rendition (más lo que retenga `buffer`, aquí 0). Es la mayor
   partida: unos 200 ms de ~300 ms en las medidas del testbed.

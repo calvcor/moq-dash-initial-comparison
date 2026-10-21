@@ -123,6 +123,9 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   Con la escalera de tres calidades se satura (espera p95 de 0,6-0,7 s en local) y es la causa de la
   mayoría de las marcas `stalled` y de los cambios de calidad: con la mitad de bitrate caen dos tercios
   (PROTOCOLOS, final de 4.10).
-  Dentro de `moq-cli` no se ha llegado a la función: el binario no trae símbolos.
+  Dentro de `moq-cli` no se ha llegado a la función: el binario no trae símbolos. **La rama principal
+  de moq ya no lo tiene** (commit `bc64b9c`, 21-10-2026: 200-730 MB/s, sin cambios de calidad con la
+  escalera); cuando salga una versión nueva de `moq-cli`, medirla con el procedimiento de arriba y,
+  si se confirma, desplegarla.
 - En WebRTC, el reparto del desglose entre "transporte" y "búfer" no es fiable (`receiveTime`).
 - La configuración de la emisión no persiste entre reinicios del orquestador.
