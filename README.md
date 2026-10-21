@@ -257,6 +257,19 @@ Cuando no hay medida se muestra `--`; no se rellena con valores supuestos.
 
 Silenciado, `@moq/watch` no descarga el audio, mientras que dash.js lo descarga siempre: unos 130 kbps de la diferencia en descarga total vienen de ahí.
 
+#### Por qué los frames presentados bajan de 60
+
+Medido el 21-10-2026 con Chrome headless en el Mac del usuario contra el servidor, por la VPN WireGuard, con una calidad 1080p y una sonda que cuenta cada segundo lo que llega, lo que se decodifica y lo que se pinta en cada reproductor (`requestVideoFrameCallback` y `getVideoPlaybackQuality` en los `<video>`, `getStats` en WebRTC, y en MoQ el contador `frameCount` del decodificador y los cambios de `decoder.out.frame` y `renderer.out.frame`). Son tres causas distintas:
+
+1. **La red, cuando reproducen los tres a la vez por la VPN.** Los tres flujos suman unos 12,5 Mbit/s, más las ráfagas de DASH al arrancar, y el túnel da unos 21 Mbit/s en una conexión TCP. En los colapsos el RTT HTTP al servidor pasa de unos 50 ms a 1,2-5,9 s y la llegada cae a la vez en las tres ramas (de 0 a 30 fps durante varios segundos, y después llega todo de golpe), mientras la traza del servidor muestra el codificador a 60 fps sin huecos. Sin reproductores, en 71 s el RTT no pasó de 138 ms. Por la red local no se ha medido.
+2. **Pintar 60 fps en una pantalla de 60 Hz sin acompasar los frames al refresco.** Con la llegada y la decodificación a 60 fps:
+   - **WebRTC** pinta unos 52-53: el navegador descarta unos 7 frames por segundo ya decodificados cuando dos caen en el mismo refresco. Con `--disable-frame-rate-limit` pinta 59 y descarta 1 por segundo; no depende de la carga ni del medidor.
+   - **MoQ** pinta 45-56 según la pasada: `@moq/watch` libera cada frame a su hora de presentación y, si llegan dos antes del siguiente refresco, dibuja solo el último. Con `delay: auto` el búfer queda en unos 75 ms para un jitter medido de 27 ms, y los frames que llegan tarde se liberan nada más decodificarse y se amontonan. Alternando en la misma sesión: con `auto` (76 ms), 53,6 fps pintados; con 500 ms (546 ms), 59,5. Es el comportamiento por defecto de la librería, y así se mide.
+   - **DASH** pinta 57-60: el `<video>` con MSE presenta al ritmo del reloj de reproducción.
+3. **El propio medidor.** La lectura del timecode (`VideoFrame.copyTo`) ocupa el 21,5 % del hilo principal con los tres reproductores, unos 1,3 ms síncronos por lectura. Apagándola en tramos alternos de 8 s, el hilo principal pasa del 40 % al 10 % ocupado y MoQ pinta 47,3 fps en vez de 44,9; DASH y WebRTC no cambian. El medidor le cuesta a MoQ unos 2-3 fps.
+
+Lo que marca el medidor coincide con lo que pinta cada reproductor (diferencias de menos de 1 fps): la caída es real, no un error de cuenta. Con una pantalla de 120 Hz la causa 2 debería pesar menos; no se ha medido. Aparte, en el servidor la entrada del publicador de MoQ tuvo esperas de hasta 665 ms con una sola calidad (`forwarded_ms` de `POST /api/trace`), que dejan a MoQ solo sin frames durante unos segundos.
+
 ### 4.3. Indicadores de validez
 
 El panel muestra, y el CSV registra:
