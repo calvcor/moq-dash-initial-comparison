@@ -625,6 +625,15 @@ def get_qoe_index(rec_id: str):
         raise HTTPException(status_code=409, detail="La grabación aún no está indexada")
     return index
 
+@app.post("/api/qoe/recordings/{rec_id}/index")
+def reindex_qoe_recording(rec_id: str):
+    """Rehace el índice de una grabación con sus marcas guardadas y vuelve a encolar su VMAF."""
+    qoe_recording_or_404(rec_id)
+    try:
+        return qoe.recordings.reindex(rec_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
 @app.post("/api/qoe/recordings/{rec_id}/vmaf")
 def enqueue_qoe_vmaf(rec_id: str):
     """Pone (o vuelve a poner) en la cola el cálculo de VMAF, que se hace en cuanto la emisión esté parada."""

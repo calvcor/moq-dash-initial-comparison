@@ -344,11 +344,13 @@ En DASH y MoQ el transporte es fiable y la decodificación H.264 es determinista
 
 **Fase a, hecha: grabación y emparejamiento con el original.** `POST /api/qoe/recordings` graba de 5 a 300 s desde el siguiente keyframe (`server/app/recorder.py`, que escucha en la cuarta salida del tee de la fuente, UDP 5004, solo mientras graba). Después `server/app/qoe.py` indexa cada fotograma de cada calidad:
 
-- lee su timecode con la misma lectura que el navegador (`decodeTimecodeFromFrame`);
-- lo convierte en número de frame con las marcas que FFmpeg escribe al quemarlo (las mismas del desglose por etapas, copiadas mientras dura la grabación);
-- el número de frame módulo los frames del original (38 072) es el fotograma de Big Buck Bunny del que viene: la fuente numera en orden de decodificación (`setpts=N`) y vuelve a empezar en cada vuelta del bucle.
+- saca su número de frame del PTS, que la fuente pone exacto (`setpts=N`: número de frame por 1500 ticks más una base);
+- fija esa base con el timecode: lee el de cada fotograma con la misma lectura que el navegador (`decodeTimecodeFromFrame`) y cada uno que cae a menos de 4 ms de una marca de las que FFmpeg escribe al quemarlo (las del desglose por etapas, copiadas mientras dura la grabación) vota por la base que resulta;
+- el número de frame módulo los frames del original (38 072) es el fotograma de Big Buck Bunny del que viene: la fuente vuelve a empezar la numeración del original en cada vuelta del bucle.
 
-Como control cruzado, entre dos fotogramas emparejados la diferencia de PTS debe ser la de número de frame por 1500 ticks; el índice cuenta los que no cuadran (`pts_mismatch`, `not_consecutive`), que deben ser 0. El último fotograma de cada calidad se descarta: el grabador lo corta y el decodificador lo completa con el anterior.
+El índice cuenta lo que no cuadra y debe ser 0: PTS fuera de la rejilla (`pts_off_grid`), números no consecutivos (`not_consecutive`) y timecodes a más de 100 ms de su propia marca (`timecode_disagree`). Si no es 0, el VMAF se niega. El último fotograma de cada calidad se descarta: el grabador lo corta y el decodificador lo completa con el anterior.
+
+**El timecode quemado no es exactamente la marca.** Cada uno de sus 20 bits lee el reloj por separado y la marca se escribe con el último. Con la máquina cargada pasa tiempo entre unos y otros, y el valor quemado se queda por detrás de la marca. El índice lo anota (`timecode_lag_ms`). Medido el 21-10-2026: en local, 0-1 ms; en el servidor, de 5 a 12 ms en los fotogramas que no cuadraban con una calidad, y de 5 a 44 ms con tres. Por eso el número de frame sale del PTS: con 44 ms de desfase, el timecode cae más cerca de la marca del fotograma anterior que de la suya. **Esto afecta también a la medida glass-to-glass**, que lee ese mismo timecode: en el servidor, la latencia de algunos fotogramas sale unas decenas de ms mayor de lo que es. No lo he medido en el navegador; sale de comparar timecode y marca en las grabaciones.
 
 `POST /api/qoe/recordings/{id}/check` comprueba el emparejamiento por PSNR: para 20 fotogramas por calidad, escalados a 1080p, compara con su original y con los dos anteriores y posteriores. Se compara sin lo que la fuente dibuja encima (reloj, etiqueta de calidad y franja del timecode: filas 136 a 927 en la escalera por defecto). Medido en local el 20-10-2026:
 
@@ -523,6 +525,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/qoe/recordings` | Grabaciones guardadas, de la más reciente a la más antigua |
 | `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
 | `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
+| `POST /api/qoe/recordings/{id}/index` | Rehace el índice con las marcas guardadas y vuelve a encolar el VMAF |
 | `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior). Solo con la emisión parada |
 | `POST /api/qoe/recordings/{id}/vmaf` | Pone en la cola el cálculo de VMAF (se encola solo al indexar). Se calcula en cuanto la emisión esté parada |
 | `GET /api/qoe/recordings/{id}/vmaf` | VMAF y PSNR de luma de cada fotograma grabado, por calidad, con la versión de vmaf, el modelo y la zona comparada |

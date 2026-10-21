@@ -4,8 +4,9 @@ Para calcular VMAF sin grabar nada en el navegador ni recodificar, el servidor g
 el flujo que sale del codificador (el mismo que reparten las tres ramas, que no recodifican) y lo indexa:
 
 1. Lee el timecode quemado en cada fotograma grabado, con la misma lectura que hace el navegador.
-2. Pasa de timecode a número de frame con las marcas que FFmpeg escribe en su log al quemarlo (trace.py).
-   Se copian mientras dura la grabación, porque trace.py solo recuerda el último minuto.
+2. Saca el número de frame del PTS, que la fuente pone exacto. La correspondencia entre PTS y número de
+   frame la fija el timecode, por mayoría, con las marcas que FFmpeg escribe en su log al quemarlo
+   (trace.py; se copian mientras dura la grabación, porque trace.py solo recuerda el último minuto).
 3. El número de frame, módulo los frames del vídeo original, es el fotograma de Big Buck Bunny del que
    viene: la fuente lo numera en orden de decodificación, sin saltos ni repeticiones (setpts=N), y vuelve
    a empezar en cada vuelta del bucle.
@@ -31,6 +32,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import Counter
 from typing import Callable, Optional
 
 from pydantic import BaseModel, Field
@@ -286,6 +288,18 @@ class Recordings:
 
     # --- índice ---
 
+    def reindex(self, rec_id: str) -> list[dict]:
+        """Rehace el índice con las marcas guardadas (p. ej. tras cambiar el método) y vuelve a encolar el VMAF."""
+        meta = self.read(rec_id, "meta.json")
+        stamps = self.read(rec_id, "stamps.json")
+        if not meta or meta.get("state") not in ("ready", "error") or stamps is None:
+            raise RuntimeError("La grabación no ha terminado o no tiene marcas guardadas")
+        if self.computing == rec_id or rec_id in self.checking:
+            raise RuntimeError("La grabación se está comparando")
+        summary = self._build_index(rec_id, stamps)
+        self.update_meta(rec_id, state="ready", error=None, streams=summary, vmaf=self._queued())
+        return summary
+
     def _build_index(self, rec_id: str, stamps: dict) -> list[dict]:
         meta = self.read(rec_id, "meta.json")
         src = source_info()
@@ -314,53 +328,71 @@ class Recordings:
             # anterior (repite su timecode): no se usa
             pts = pts[:-1]
 
-            # Timecode -> (marca, número de frame) de esta calidad, por ms módulo 2^bits
+            # PTS sin la vuelta de los 33 bits (cada 26,5 h de emisión)
+            unwrapped, carry = [], 0
+            for p in pts:
+                if unwrapped and p + carry < unwrapped[-1] - 2 ** 32:
+                    carry += 2 ** 33
+                unwrapped.append(p + carry)
+            pts = unwrapped
+
+            # El número de frame sale del PTS, que la fuente pone exacto (n por la duración de un frame más
+            # una base). El timecode solo fija la base, por mayoría: cada fotograma cuyo timecode cae a
+            # menos de STAMP_TOLERANCE_MS de una marca vota por la base que resulta. No basta con el
+            # timecode solo: cada bit lee el reloj por separado y, con la máquina cargada, el valor quemado
+            # se queda hasta decenas de ms por detrás de la marca (medido: hasta 44 ms con tres calidades),
+            # más cerca a veces de la marca del frame anterior que de la suya.
             span = 2 ** layout["bits"]
+            stamp_of = {int(number): mark for number, mark in stamps.get(str(i), [])}
             by_code: dict[int, list] = {}
-            for number, mark in stamps.get(str(i), []):
-                by_code.setdefault(int(mark) % span, []).append((mark, number))
+            for number, mark in stamp_of.items():
+                by_code.setdefault(int(mark) % span, []).append(number)
+            codes = [decode_strip(data[j * size:(j + 1) * size], width, layout) for j in range(len(pts))]
+            votes: Counter = Counter()
+            for p, code in zip(pts, codes):
+                if code is None:
+                    continue
+                near = {n for d in range(-STAMP_TOLERANCE_MS, STAMP_TOLERANCE_MS + 1) for n in by_code.get((code + d) % span, [])}
+                for n in near:
+                    votes[p - n * ticks] += 1
+            if not votes:
+                raise RuntimeError(f"Calidad {i}: ningún timecode coincide con las marcas de la fuente")
+            base, base_votes = votes.most_common(1)[0]
+            numbers = [(p - base) // ticks if (p - base) % ticks == 0 else None for p in pts]
 
-            codes, numbers = [], []
-            for j in range(len(pts)):
-                code = decode_strip(data[j * size:(j + 1) * size], width, layout)
-                codes.append(code)
-                best = None
-                if code is not None:
-                    for d in range(-STAMP_TOLERANCE_MS, STAMP_TOLERANCE_MS + 1):
-                        for mark, number in by_code.get((code + d) % span, []):
-                            if best is None or abs(d) < best[0]:
-                                best = (abs(d), number)
-                numbers.append(best[1] if best else None)
-
-            # Comprobación cruzada: la fuente pone PTS = n / fps exactos, así que entre dos frames
-            # emparejados la diferencia de PTS debe ser la de número de frame por la duración de uno
-            matched = [(j, pts[j], numbers[j]) for j in range(len(pts)) if numbers[j] is not None]
-            pts_mismatch = not_consecutive = 0
-            if matched:
-                j0, p0, n0 = matched[0]
-                for (ja, pa, na), (jb, pb, nb) in zip(matched, matched[1:]):
-                    if nb - na != jb - ja:
-                        not_consecutive += 1
-                for j, p, n in matched:
-                    if p - p0 != (n - n0) * ticks:
-                        pts_mismatch += 1
-            first_n = matched[0][2] if matched else None
-            last_n = matched[-1][2] if matched else None
+            # Comprobaciones: con la base buena, todos los PTS caen en la rejilla, los números son
+            # consecutivos y el timecode leído de cada frame queda unos ms por detrás de su propia marca
+            lags = []
+            for n, code in zip(numbers, codes):
+                if n is not None and code is not None and n in stamp_of:
+                    lag = (int(stamp_of[n]) - code) % span
+                    lags.append(lag - span if lag > span // 2 else lag)
+            assigned = [n for n in numbers if n is not None]
+            not_consecutive = sum(1 for a, b in zip(numbers, numbers[1:]) if a is None or b is None or b - a != 1)
+            first_n = assigned[0] if assigned else None
+            last_n = assigned[-1] if assigned else None
             stream_summary = {
                 "index": i,
                 "width": layout["width"],
                 "height": layout["height"],
                 "frames": len(pts),
                 "timecode_read": sum(c is not None for c in codes),
-                "matched": len(matched),
-                # Deberían ser 0: frames emparejados con un número que no encaja con su PTS o con su posición
-                "pts_mismatch": pts_mismatch,
+                "base_votes": base_votes,  # fotogramas cuyo timecode confirma la base
+                "assigned": len(assigned),
+                # Deberían ser 0: PTS fuera de la rejilla, números no consecutivos y timecodes que no
+                # cuadran con su propia marca (más de 100 ms: lectura errónea o base equivocada)
+                "pts_off_grid": len(numbers) - len(assigned),
                 "not_consecutive": not_consecutive,
+                "timecode_disagree": sum(1 for lag in lags if abs(lag) > 100),
+                # Marca escrita por FFmpeg menos timecode quemado, en ms
+                "timecode_lag_ms": {
+                    "p50": percentile(lags, 0.5), "p95": percentile(lags, 0.95), "max": max(lags), "min": min(lags),
+                } if lags else None,
                 "first_n": first_n,
                 "last_n": last_n,
                 "source_first": first_n % src["frames"] if first_n is not None else None,
                 "source_last": last_n % src["frames"] if last_n is not None else None,
-                "loop_wraps": (last_n // src["frames"] - first_n // src["frames"]) if matched else 0,
+                "loop_wraps": (last_n // src["frames"] - first_n // src["frames"]) if assigned else 0,
             }
             summary.append(stream_summary)
             streams.append({**stream_summary, "pts": pts, "timecode": codes, "n": numbers})
@@ -553,8 +585,8 @@ class Recordings:
         el original es un tramo continuo del vídeo fuente, partido en dos si cruza el final del bucle:
         con -stream_loop, FFmpeg no vuelve al frame 0 después de un -ss.
         """
-        if stream["matched"] != stream["frames"] or stream["not_consecutive"] or stream["pts_mismatch"]:
-            raise RuntimeError(f"Calidad {stream['index']}: hay fotogramas sin emparejar o no consecutivos")
+        if stream["pts_off_grid"] or stream["not_consecutive"] or stream["timecode_disagree"]:
+            raise RuntimeError(f"Calidad {stream['index']}: el índice no es fiable (ver pts_off_grid, not_consecutive y timecode_disagree)")
         src = source_info()
         w, h, cx, cy = compare_region(self.read(rec_id, "meta.json")["timecodes"], src["width"], src["height"])
         crop = f"crop={w}:{h}:{cx}:{cy},format=yuv420p"
