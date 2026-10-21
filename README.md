@@ -386,6 +386,8 @@ Grabar e indexar no se notan; la comprobación sí. Por eso lo que compara imág
 
 Medido en local (10 núcleos) con la grabación que cruza el final del bucle, 20 s y tres calidades: 55 s de cálculo. VMAF medio 89,9 (1080p), 82,0 (720p) y 58,2 (360p); p5 72,5, 58,4 y 25,5. Los fotogramas en negro del final y del principio del vídeo dan 97,4 en las tres calidades.
 
+En el servidor (8 vCPU), el 21-10-2026, con 30 s grabados: 51-59 s de cálculo con una calidad y 138 s con tres (27 s grabados). VMAF medio a 1080p y 4000 kbps entre 69 y 78 según el tramo de la película (p5 57-62); con la escalera, 68,8 (1080p), 56,4 (720p) y 32,1 (360p). La prueba de principio a fin (grabar con la emisión en marcha, `POST /api/stop`, cálculo automático) funciona: empieza a los pocos segundos de la parada.
+
 ---
 
 ## 5. Emulación de red
