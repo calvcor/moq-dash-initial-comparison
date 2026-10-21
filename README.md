@@ -268,7 +268,9 @@ Medido el 21-10-2026 con Chrome headless en el Mac del usuario contra el servido
    - **DASH** pinta 57-60: el `<video>` con MSE presenta al ritmo del reloj de reproducción.
 3. **El propio medidor.** La lectura del timecode (`VideoFrame.copyTo`) ocupa el 21,5 % del hilo principal con los tres reproductores, unos 1,3 ms síncronos por lectura. Apagándola en tramos alternos de 8 s, el hilo principal pasa del 40 % al 10 % ocupado y MoQ pinta 47,3 fps en vez de 44,9; DASH y WebRTC no cambian. El medidor le cuesta a MoQ unos 2-3 fps.
 
-Lo que marca el medidor coincide con lo que pinta cada reproductor (diferencias de menos de 1 fps): la caída es real, no un error de cuenta. Con una pantalla de 120 Hz la causa 2 debería pesar menos; no se ha medido. Aparte, en el servidor la entrada del publicador de MoQ tuvo esperas de hasta 665 ms con una sola calidad (`forwarded_ms` de `POST /api/trace`), que dejan a MoQ solo sin frames durante unos segundos.
+Lo que marca el medidor coincide con lo que pinta cada reproductor (diferencias de menos de 1 fps): la caída es real, no un error de cuenta. Con una pantalla de 120 Hz la causa 2 debería pesar menos; no se ha medido. Aparte, en el servidor la entrada del publicador de MoQ tuvo esperas de hasta 665 ms con una sola calidad (`forwarded_ms` de `POST /api/trace`), que dejan a MoQ solo sin frames durante unos segundos. Vienen de los keyframes: `moq-cli` 0.14.7 no procesa más de ~2 MB/s de entrada, y cada keyframe (~100 kB) lo frena unos 50 ms en local y mucho más con la máquina cargada (detalle en `PROTOCOLOS.md`, sección 4.14).
+
+Por la red local (21-10-2026, el testbed en el mismo Mac que el navegador, una calidad), la llegada fue de 60 fps en todos los segundos y los frames pintados, 59,8-59,9 en DASH, 56,4-59,8 en MoQ y 58,8-59,8 en WebRTC con los tres a la vez. El codificador local entrega los frames con una desviación de 1,3 ms (p99 20 ms), frente a 5,7 ms (p99 35 ms) en el servidor: el jitter de la fuente depende de la máquina que codifica.
 
 ### 4.3. Indicadores de validez
 

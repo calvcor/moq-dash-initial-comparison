@@ -935,7 +935,16 @@ concreto que se cite.
 
 ### 4.14. De dónde sale su latencia
 
-- **Ingesta**: del orden de milisegundos. El importador envía cada frame al salir del codificador.
+- **Ingesta**: del orden de milisegundos para un frame normal, pero **no para los keyframes**
+  (corregido el 21-10-2026; antes se decía sin matiz). `moq-cli` 0.14.7 procesa su entrada a unos
+  2 MB/s como máximo, con unos 0,3 µs de CPU por byte, casi todos en el núcleo (sincronización entre
+  hilos: 467.000 `futex` para 11 MB). Un keyframe de ~100 kB (12 veces un frame normal a 1080p y
+  4 Mbit/s) tarda así unos 50 ms en entrar, y el frame siguiente espera detrás. En local, con un
+  espectador: el keyframe espera 25 ms en la compuerta, el siguiente 14, y la entrega tiene un hueco
+  de ~45 ms una vez por grupo; con más carga en la máquina, 60-170 ms, y en el servidor hasta 665 ms.
+  Ocurre igual sin espectadores, con control de congestión `loss` o BBRv3, con 1 o 2 hilos de tokio
+  y con H.264 crudo (`import avc3`) en vez de MPEG-TS, así que no es la red ni el demultiplexor TS.
+  El vídeo llega al relay con un tirón por grupo, que solo se ve si el búfer del reproductor es menor.
 - **Red**: QUIC. Una pérdida retrasa solo los frames siguientes de ese grupo.
 - **Búfer**: `delay` + *jitter* de la rendition (más lo que retenga `buffer`, aquí 0). Es la mayor
   partida: unos 200 ms de ~300 ms en las medidas del testbed.

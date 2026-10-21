@@ -115,8 +115,11 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 ## Problemas abiertos conocidos
 
 - El publicador de MoQ deja de leer su entrada a ratos con varias calidades (picos de hasta 1-2 s, con
-  0.14.3 y con 0.14.7; con una sola calidad, apenas). Provoca las
-  marcas `stalled` del catálogo y los cambios continuos de calidad con varias calidades. Sin localizar
-  dentro de moq-cli.
+  0.14.3 y con 0.14.7). Provoca las marcas `stalled` del catálogo y los cambios continuos de calidad
+  con varias calidades. Localizado en parte (21-10-2026): `moq-cli` 0.14.7 no pasa de ~2 MB/s de
+  entrada (0,3 µs de CPU por byte, casi todo en el núcleo), igual con `import ts` que con `import avc3`
+  y sin espectadores, así que cada keyframe (~100 kB) lo frena unos 50 ms y con la máquina cargada
+  mucho más. Con una calidad hay un hueco por grupo (45 ms en local, hasta 665 ms en el servidor).
+  Dentro de `moq-cli` no se ha llegado a la función: el binario no trae símbolos.
 - En WebRTC, el reparto del desglose entre "transporte" y "búfer" no es fiable (`receiveTime`).
 - La configuración de la emisión no persiste entre reinicios del orquestador.
