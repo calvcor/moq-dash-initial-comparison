@@ -442,6 +442,18 @@ QUIC (RFC 9002) da un paquete por perdido cuando se confirma otro 3 números pos
 
 Con el mismo 150 ± 50 ms pero conservando el orden (`netem ... rate 1gbit`: cada paquete sale como pronto cuando sale el anterior), MoQ recibe 60 fps y pinta 52-58, sin congelados. Esa variante estrecha el reparto de retardos (p5-p95 de 44-79 ms frente a 6-95 ms), así que hay un control con el mismo reparto y con desorden, 150 ± 20 ms: MoQ sufre (45-59 fps pintados, 2-10 s de congelados) pero no se hunde. El daño crece con la profundidad del desorden. Con la escalera de calidades MoQ sí baja, a 360p, porque la estimación del relay cae a 0,2-0,9 Mbit/s, pero ni esa calidad cabe.
 
+**La latencia objetivo de DASH no se adapta al retardo de la red (medido el 21-10-2026, en local).** El slider fija `liveDelay` (por defecto 0,3 s) y dash.js lo persigue tal cual: con la red lenta acelera la reproducción (modo `LoLP`) para alcanzarlo, vacía el búfer, se para y, si se aleja más de `maxDrift`, salta al directo. WebRTC calcula su búfer a partir del jitter que mide y MoQ en `auto` a partir del RTT que le comunica el relay, así que los dos suben su latencia solos. DASH solo, 150 ms por sentido sin jitter, 45 s descontando los 15 primeros:
+
+| Objetivo DASH | Frames pintados | Congelados | Saltos al directo | Velocidad media | Latencia real |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 0,3 s | 42,3 fps | 17 (14,2 s) | 3 | 1,3× | 564 ms |
+| 0,5 s | 53,2 | 3 (0,9 s) | 0 | 1,0× | 556 ms |
+| 0,7 s | 59,8 | 2 (0,6 s) | 0 | 1,0× | 757 ms |
+| 1,0 s | 59,8 | 0 | 0 | 1,0× | 1.048 ms |
+| 0,3 s sin retardo de red | 59,8 | 0 | 0 | 1,0× | 339 ms |
+
+(Los congelados se cuentan desde la carga de la página e incluyen el arranque.) Con un objetivo inalcanzable no se queda en la latencia que puede sostener: la persigue acelerando y se para. Comparar DASH con los otros dos a igual perfil de red exige elegir su objetivo para ese perfil, y declararlo; una alternativa es medir, por perfil, el objetivo mínimo sin congelados.
+
 **Consecuencia para las medidas:** el parámetro jitter del testbed mezcla dos cosas, variación de retardo y desorden profundo, y la segunda castiga casi solo a QUIC. En redes reales el retardo varía sobre todo en las colas, que no desordenan. Cualquier resultado de MoQ con jitter hay que leerlo así. Sin desorden, DASH tuvo problemas por encima de TCP (cero retransmisiones, pero el reproductor no llegó a pintar); no investigado.
 
 Comportamiento observado en Chrome headless (45 s por caso, vídeo a 4 Mbit, objetivos de 3 s en DASH y 200 ms en MoQ):
