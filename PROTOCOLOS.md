@@ -835,6 +835,24 @@ Los tres modos de la opción `delay`:
 | Una duración | Valor fijo. **Es lo que hace el slider del testbed** al moverlo; al abrir la página está en `auto`, su extremo izquierdo. |
 | `"instant"` | Sin búfer ni espera: cada frame se pinta en cuanto se decodifica. Desactiva el audio. |
 
+**En `auto`, el búfer no sube durante la sesión** (comprobado en el código de `@moq/watch` 0.6.3 y
+medido el 21-10-2026). El RTT mínimo se guarda como mínimo acumulado (`Math.min`), así que solo puede
+bajar; y la referencia de sincronización solo se mueve hacia atrás, cuando un frame llega antes de lo
+previsto. Si la red se vuelve más lenta con la página abierta, los frames llegan "tarde" respecto a
+la referencia y se pintan en cuanto se decodifican: la latencia sube lo que añade la red, pero ya sin
+búfer frente al jitter. Al recargar, la conexión nueva mide el RTT con el retardo puesto y el búfer
+sale mucho mayor. Medido en local, sin jitter:
+
+| | `delay` de la librería | RTT del relay | Latencia real |
+| :--- | :--- | :--- | :--- |
+| Sin retardo de red | 88 ms | 1 ms | 119 ms |
+| Misma sesión tras aplicar 150 ms por sentido | 88 ms | 301 ms | 268 ms |
+| Sesión nueva con 150 ms por sentido | 444 ms | 301 ms | 625 ms |
+
+Con la misma red, MoQ mide 268 o 625 ms según se haya cambiado el perfil en caliente o se haya
+recargado, y en el primer caso no le queda margen para el jitter. En `auto` el búfer crece con el
+RTT, no con el jitter medido: con 150 ms por sentido y sin jitter reserva 444 ms.
+
 **La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
 "adelantada" se tolera antes de recolocar la referencia:
 
