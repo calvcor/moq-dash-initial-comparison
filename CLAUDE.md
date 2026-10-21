@@ -120,6 +120,9 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   entrada (0,3 µs de CPU por byte, casi todo en el núcleo), igual con `import ts` que con `import avc3`
   y sin espectadores, así que cada keyframe (~100 kB) lo frena unos 50 ms y con la máquina cargada
   mucho más. Con una calidad hay un hueco por grupo (45 ms en local, hasta 665 ms en el servidor).
+  Con la escalera de tres calidades se satura (espera p95 de 0,6-0,7 s en local) y es la causa de la
+  mayoría de las marcas `stalled` y de los cambios de calidad: con la mitad de bitrate caen dos tercios
+  (PROTOCOLOS, final de 4.10).
   Dentro de `moq-cli` no se ha llegado a la función: el binario no trae símbolos.
 - En WebRTC, el reparto del desglose entre "transporte" y "búfer" no es fiable (`receiveTime`).
 - La configuración de la emisión no persiste entre reinicios del orquestador.

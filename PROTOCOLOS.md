@@ -741,7 +741,27 @@ servidor de 8 núcleos, un espectador en automático):
 El arreglo quita aproximadamente un tercio de las marcas. Las que quedan se deben a la segunda
 causa, y por tanto **los cambios de calidad de MoQ con varias calidades siguen sin medir adaptación a
 la red**. Es comportamiento real de esta versión del publicador ante su propia cadencia de lectura,
-y no se ha modificado. No se ha investigado por qué lee así.
+y no se ha modificado.
+
+**Por qué lee así (investigado el 21-10-2026, en local).** `moq-cli` 0.14.7 no procesa más de unos
+2 MB/s de entrada (ver 4.14): cada byte le cuesta unos 0,3 µs de CPU, casi todo en el núcleo. Con tres
+calidades los keyframes llegan a la vez (unos 100 + 50 + 18 kB) y la escalera completa ronda 1 MB/s
+con picos, así que el publicador se queda atrás: en local, con un espectador de MoQ en automático,
+los frames esperaron en su entrada 572-705 ms en el percentil 95 (con una sola calidad, 0,1 ms salvo
+el keyframe). El 90 % de las marcas `stalled` llegó con un hueco de entrega al publicador en los
+150 ms anteriores, frente a un 31-33 % de instantes al azar. Y la prueba causal, sin tocar el
+publicador: la misma escalera con la mitad de bitrate, alternada dos veces con la normal.
+
+| Escalera, 40 s, un espectador | Marcas `stalled` | Cambios de calidad pintada | Espera p95 en la entrada |
+| :--- | :--- | :--- | :--- |
+| 4000/2000/700 kbit/s | 188 y 190 | 200 y 202 | 705 y 572 ms |
+| 2000/1000/350 kbit/s | 66 y 68 | 64 y 60 | 6 y 6 ms |
+
+Con la mitad de bytes desaparece la cola del publicador y caen dos tercios de las marcas y de los
+cambios de calidad. Las que quedan no van tan ligadas a los huecos de entrega (42-44 %, frente a un
+6-7 % al azar): hay una parte que no se explica con esto. Además, la cola del publicador suma
+cientos de ms a la latencia de MoQ con la escalera completa: esa comparación entre calidades y
+protocolos hay que hacerla sabiendo que el publicador va saturado.
 
 Fuera de esa comparación, en pruebas sueltas con el arreglo aplicado hubo dos sesiones en las que la
 rama MoQ se degradó mucho (latencia de varios segundos, pérdidas en su compuerta). En las once
