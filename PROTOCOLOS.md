@@ -21,6 +21,11 @@ comprobación directa, se dice.
 > medidas de MoQ anteriores y posteriores a ese día no son comparables. Lo que este documento describe se observó con las
 > de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
 
+> **Audio:** desde el 22 de octubre de 2026 la fuente codifica el audio en **Opus** (antes, AAC-LC), para
+> que las tres ramas lleven el mismo: en MoQ la pista pasa de `1.aac` a `1.opus` y en el MPD de
+> `mp4a.40.2` a `opus`. Los ejemplos de MPD, catálogo y MPEG-TS de los anexos se capturaron con AAC y se
+> dejan así; la estructura es la misma.
+
 | Componente                                                | Versión comprobada    |
 | :-------------------------------------------------------- | :-------------------- |
 | Relay MoQ (`moqdev/moq-relay`)                            | 0.17.2                |
@@ -603,7 +608,11 @@ codificador.
 
 El publicador (`moq import ts`) lee el MPEG-TS y hace lo siguiente:
 
-- Cada pista elemental del TS se convierte en una pista de MoQ (`0.avc3`, `1.aac`).
+- Cada pista elemental del TS se convierte en una pista de MoQ (`0.avc3`, `1.aac`; con el audio Opus
+  de la fuente desde el 22-10-2026, `1.opus`).
+- `@moq/watch` solo se suscribe a la pista de audio con el sonido activado: con el reproductor
+  silenciado, el audio no viaja (comprobado el 22-10-2026: `audio.out.stats` sin bytes hasta quitar el
+  silencio).
 - Cada **keyframe abre un grupo nuevo**. Por tanto **grupo = GOP**.
 - Cada frame se escribe en el grupo abierto y se envía de inmediato.
 
@@ -1159,7 +1168,10 @@ WebRTC no tiene adaptación de calidad**, las otras dos sí.
 ### 5.7. El recorrido en este testbed
 
 1. **Ingesta.** `ffmpeg -c:v copy -an -f rtsp` publica el vídeo por RTSP (sobre TCP) en MediaMTX.
-   Sin audio: el AAC de la fuente no es un códec admitido por WebRTC en navegadores.
+   Sin audio por defecto. Con la opción `rtc_audio`, también el audio Opus de la fuente, sin recodificar
+   (`-c:a copy`). Entonces el navegador sincroniza audio y vídeo, y el vídeo llega más tarde: 414-418 ms
+   frente a 232-303 sin audio en la medida del 22-10-2026 (README, sección 3.4b). Hasta ese día la fuente
+   codificaba en AAC, que WebRTC no admite.
 2. **Servidor.** MediaMTX reparte el H.264 en paquetes RTP y los envía a cada navegador conectado.
 3. **Navegador.** `RTCPeerConnection` recibe, reordena, decodifica y pinta en un `<video>`. Todo lo
    hace el navegador; la aplicación solo lee estadísticas con `getStats()`. Se explica en 5.9.

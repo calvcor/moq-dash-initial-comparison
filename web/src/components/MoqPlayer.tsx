@@ -13,6 +13,7 @@ interface MoqPlayerProps {
   isStreaming: boolean;
   timecodes?: TimecodeLayout[];
   renditions?: Rendition[];
+  audible: boolean; // sonido activado (selector de sonido del dashboard)
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
 
@@ -22,6 +23,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   isStreaming,
   timecodes,
   renditions,
+  audible,
   onMetricsUpdate,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -37,6 +39,11 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   const playerRef = useRef<Watch.Player | null>(null);
   const connectionRef = useRef<Net.Connection | null>(null);
   const delaySignalRef = useRef<Signal<any> | null>(null);
+  // Silencio de @moq/watch: el reproductor lo sigue en vivo, sin reconectar
+  const mutedSignalRef = useRef(new Signal<boolean>(!audible));
+  useEffect(() => {
+    mutedSignalRef.current.set(!audible);
+  }, [audible]);
 
   const handleLatencyChange = (newMs: number) => {
     setTargetLatencyMs(newMs);
@@ -180,7 +187,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           // o la medida se interrumpe cada vez que se mira otra parte de la página.
           visible: 'always',
           canvas: canvasRef.current || undefined,
-          muted: new Signal(true),
+          muted: mutedSignalRef.current,
           // `buffer` se deja en su valor por defecto (0): tolera media adelantada sin recolocarse hacia el
           // directo, y con un valor mayor la latencia real queda por encima de la que marca el slider.
           delay: delaySignal,

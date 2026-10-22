@@ -11,6 +11,7 @@ export interface StreamConfig {
   source: SourceKind;
   gop_size: number;
   fps: number; // con el bucle, 60; con la cámara la fija el servidor (la de la cámara)
+  rtc_audio: boolean; // audio Opus en la rama WebRTC (recodificado en el servidor); desactivado por defecto
   renditions: Rendition[]; // de mayor a menor; una sola = sin adaptación
   seg_duration: number;
   frag_duration: number;
@@ -141,6 +142,8 @@ export interface SampleRow {
   epoch: number; // se incrementa en cada reconfiguración del pipeline o de la red, o al activar o apagar un reproductor
   players: string; // reproductores activos en esa muestra, p. ej. dash|moq
   fullscreen: string | null; // reproductor a pantalla completa en ese momento (dash, moq o rtc), o vacío
+  audio: string | null; // reproductor con el sonido activado (dash, moq o rtc), o vacío si todos van silenciados
+  rtc_audio: boolean | null; // la rama WebRTC lleva audio (opción del servidor)
   elapsed_s: number; // segundos desde el inicio del epoch
   source: SourceKind | null; // fuente de la emisión: file (bucle) o camera
   fps: number | null; // cadencia de la emisión

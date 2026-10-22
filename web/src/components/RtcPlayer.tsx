@@ -6,6 +6,8 @@ import type { PlayerMetrics, TimecodeLayout } from '../types';
 
 interface RtcPlayerProps {
   isStreaming: boolean;
+  withAudio: boolean; // la rama lleva audio (opción rtc_audio del servidor): se pide también la pista de audio
+  audible: boolean; // sonido activado (selector de sonido del dashboard)
   timecodes?: TimecodeLayout[];
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
@@ -13,9 +15,14 @@ interface RtcPlayerProps {
 // Señalización WHEP de MediaMTX, a través del punto de entrada. El vídeo va después directo por UDP.
 const WHEP_URL = '/rtc/live/whep';
 
-export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, timecodes, onMetricsUpdate }) => {
+export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, audible, timecodes, onMetricsUpdate }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
+
+  // El atributo muted del <video> solo vale al montarlo: después se cambia la propiedad
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = !audible;
+  }, [audible]);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   // Búfer de jitter que se le pide al navegador (RTCRtpReceiver.jitterBufferTarget). 0 = no pedir nada
   // y dejar el comportamiento por defecto del navegador, que lo ajusta solo.
@@ -72,9 +79,19 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, timecodes, on
     const transceiver = connection.addTransceiver('video', { direction: 'recvonly' });
     receiverRef.current = transceiver.receiver;
     applyTarget(transceiver.receiver, targetRef.current);
+    // Con audio, el navegador sincroniza las dos pistas (mismo MediaStream) y puede retrasar el vídeo
+    if (withAudio) connection.addTransceiver('audio', { direction: 'recvonly' });
 
+    // Las dos pistas en el mismo MediaStream del <video>, lleguen en el orden que lleguen
     connection.ontrack = (event) => {
-      video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+      const stream = event.streams[0];
+      if (stream) {
+        if (video.srcObject !== stream) video.srcObject = stream;
+      } else {
+        const current = video.srcObject instanceof MediaStream ? video.srcObject : new MediaStream();
+        current.addTrack(event.track);
+        video.srcObject = current;
+      }
       video.play().catch(() => {});
     };
     connection.onconnectionstatechange = () => {
@@ -184,7 +201,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, timecodes, on
       connection.close();
       video.srcObject = null;
     };
-  }, [isStreaming, attempt]);
+  }, [isStreaming, attempt, withAudio]);
 
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">

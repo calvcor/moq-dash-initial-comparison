@@ -169,13 +169,21 @@ ffmpeg -re -stream_loop -1 -i <vídeo> -re -stream_loop -1 -i <vídeo> \
   -map [v0] ... -map [vN] -map [a] \
   -c:v libx264 -preset ultrafast -tune zerolatency -threads 4 -x264opts repeat-headers=1 \
   -b:v:0 <kbps>k -maxrate:v:0 <1,2 x kbps>k -bufsize:v:0 <kbps>k ... \
-  -g <gop> -keyint_min <gop> -sc_threshold 0 -r 60 -c:a aac -ac 2 -b:a 128k -max_interleave_delta 1 \
+  -g <gop> -keyint_min <gop> -sc_threshold 0 -r 60 -c:a libopus -ac 2 -b:a 128k -max_interleave_delta 1 \
   -f tee "[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316"
 ```
 
 - **Dos entradas del mismo fichero**, una para vídeo y otra para audio. El MP4 intercala ambos en bloques de 0,5 s; con una sola entrada a ritmo real el audio llega a ráfagas y el multiplexor retiene el vídeo.
 - **El audio en su propio grafo de filtros y `-max_interleave_delta 1`.** Sin ellos el vídeo salía a ráfagas: en el mismo grafo, FFmpeg hace avanzar el vídeo al compás de los frames de audio del fichero (24 ms), y el multiplexor retiene cada frame de vídeo hasta tener audio posterior. Con los dos cambios la separación entre frames a la salida queda igual que sin audio (p95 de 24 ms, ningún hueco de más de 50 ms; antes, p95 de 45 ms y un hueco de más de 50 ms por segundo), y la etapa de codificación baja de unos 30 a unos 10 ms. Detalle en el Anexo C de `PROTOCOLOS.md`.
 - **`pes_payload_size=0`**: un PES por frame de audio. Por defecto MPEG-TS agrupa ~180 ms de audio y eso retrasa el vídeo aguas abajo.
+- **Audio en Opus** (desde el 22-10-2026; antes AAC-LC). Es el único códec que admiten las tres ramas: DASH lo lleva en CMAF (`audio/mp4`, `codecs="opus"`), MoQ en su pista `1.opus` y WebRTC lo copia tal cual si se le activa el audio (sección 3.4b). Con AAC, WebRTC tendría que recodificarlo. Cambiar de códec no se nota en el resto, medido alternando AAC y Opus con la cámara a 15 fps y sin sonido en ningún reproductor, dos rondas de 60 s:
+
+  | Audio de la fuente | Retraso del codificador p50 / p95 | Glass-to-glass MoQ | Glass-to-glass WebRTC | Glass-to-glass DASH |
+  | :--- | :--- | :--- | :--- | :--- |
+  | AAC | 5,0-5,3 / 6,3-6,9 ms | 51-57 ms | 60-68 ms | 347 ms (y 1027 en la primera ventana, arrancando) |
+  | Opus | 5,2-5,3 / 6,7-7,6 ms | 47-66 ms | 64-66 ms | 347-350 ms |
+
+  Un frame Opus dura 20 ms y uno AAC 21,3 ms. Las medidas anteriores a ese día se hicieron con AAC; los ejemplos de MPD y de catálogo de los anexos de `PROTOCOLOS.md` también.
 - **Escalera de calidades**: la fuente codifica en vivo de 1 a 5 calidades (por defecto 1080p@4000, 720p@2000 y 360p@700 kbps), todas a 60 fps y con el mismo GOP para que sus keyframes coincidan. Viajan como varios vídeos de un mismo MPEG-TS.
 - **Tope de tasa**: cada calidad lleva `-maxrate` al 120 % y un VBV de 1 s, para que el bitrate nominal sea una referencia fiable para la adaptación y la emulación de red.
 - **Etiqueta de calidad**: cada calidad lleva quemado arriba a la derecha su nombre (`720p 2000 kbps`), para ver de un vistazo cuál se reproduce.
@@ -192,17 +200,17 @@ Con **Fuente: Cámara RTSP** (`"source": "camera"` en `POST /api/config`), la fu
 ffmpeg -rtsp_transport tcp -timeout 5000000 -fflags nobuffer -flags low_delay -i <cámara> \
   -filter_complex "[0:v]fps=<fps>,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2, \
                    setsar=1,setpts=N/(<fps>*TB),split=2[reference][base];[base]drawtext=<reloj>,split=N[s0]..[sN]; ..." \
-  -filter_complex "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[a]" \
+  -filter_complex "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo[a]" \
   -filter_complex "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[reference_audio]" \
   <escalera, igual que con el bucle> -f tee "...5001|...5002|...5003|...5004" \
   -map [reference] -map [reference_audio] -c:v libx264 -preset ultrafast -tune zerolatency -qp 10 -threads 4 \
-  -g <gop> -keyint_min <gop> -sc_threshold 0 -c:a aac -muxdelay 0 -muxpreload 0 -f mpegts udp://127.0.0.1:5005
+  -g <gop> -keyint_min <gop> -sc_threshold 0 -c:a libopus -muxdelay 0 -muxpreload 0 -f mpegts udp://127.0.0.1:5005
 ```
 
 - **Sin `-re`**: la cámara ya entrega a su ritmo.
 - **Cadencia**: la emisión va a los fps que anuncia la cámara, redondeados. El servidor la sondea con `ffprobe` al arrancar con ella y sustituye el valor de `fps` de la configuración; el panel lo muestra junto al selector. El filtro `fps` deja una cadencia constante con las marcas de tiempo de la propia cámara: si la cámara pierde un frame, se repite el anterior. El GOP sigue yendo en frames, así que su duración depende de los fps; el panel ofrece las mismas duraciones (0,25 a 2 s) en frames de la cadencia en curso.
 - **1920x1080**: cada frame se lleva a 1080p (con bandas si la cámara no es 16:9) antes de la escalera, como el vídeo del bucle.
-- **Audio**: silencio generado. Las ramas llevan la misma pista AAC que con el bucle, tenga o no micrófono la cámara. El audio de la cámara se ignora.
+- **Audio**: el de la cámara (en la de pruebas, G.711 a 8 kHz mono), pasado a 48 kHz estéreo y codificado en Opus como el del bucle. Usa las marcas de tiempo de la cámara, como el vídeo (`aresample=async=1`). Si la cámara no tiene micrófono, silencio generado. No frena a la escalera, medido alternando con el silencio dos rondas: retraso del codificador p50 5,6-6,2 ms con el audio de la cámara frente a 5,6-7,0 con silencio (p95 10-11 ms en ambos), y audio y vídeo alineados a menos de 13 ms en el flujo grabado.
 - **Referencia para el VMAF (UDP 5005)**: no hay original guardado, así que la fuente emite cada frame tal como entra en la escalera, antes de dibujar nada encima, codificado casi sin pérdidas. Solo se graba durante las pruebas de QoE (sección 4.7); el resto del tiempo nadie escucha y el kernel descarta los paquetes, sin tocar el disco.
 - **Caídas**: si la cámara deja de responder 5 s, FFmpeg termina y el supervisor relanza la fuente, con al menos 3 s entre intentos.
 
@@ -235,8 +243,8 @@ Los dos empaquetadores leen su puerto UDP a través de `server/app/tsgate.py`, q
 
 ```bash
 python3 tsgate.py 5001 | ffmpeg -analyzeduration 1000000 -i pipe:0 \
-  -map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 -tag:a mp4a -b:v:0 <kbps>k ... \
-  -f dash -adaptation_sets "id=0,streams=v id=1,streams=a" -seg_duration <seg> -frag_type duration -frag_duration <frag> \
+  -map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 -b:v:0 <kbps>k ... \
+  -f dash -dash_segment_type mp4 -adaptation_sets "id=0,streams=v id=1,streams=a" -seg_duration <seg> -frag_type duration -frag_duration <frag> \
   -streaming 1 -ldash 1 -use_template 1 -use_timeline 0 \
   -utc_timing_url /api/utc \
   -window_size <30 s en segmentos> -extra_window_size <ídem> \
@@ -246,6 +254,7 @@ python3 tsgate.py 5001 | ffmpeg -analyzeduration 1000000 -i pipe:0 \
 - **Publicación por HTTP PUT al origen en memoria** (`server/app/origin.py`). Cada segmento se sirve a los clientes mientras FFmpeg aún lo está escribiendo, fragmento a fragmento. Escribiendo a disco FFmpeg solo expone el segmento completo.
 - **`-use_timeline 0`** hace que el manifiesto anuncie `availabilityTimeOffset`, que es lo que permite a dash.js pedir el segmento en curso.
 - **`-frag_type duration`** es necesario para que `-frag_duration` tenga efecto.
+- **`-dash_segment_type mp4`**: con audio Opus, FFmpeg metería esa pista en WebM; así va en CMAF como el vídeo.
 - **`availabilityStartTime` calibrado**: el origen sustituye el que escribe FFmpeg (retrasado por su sondeo de entrada) por el deducido del instante real en que se abre un segmento. El manifiesto no se publica hasta tenerlo, unos segundos tras cada arranque.
 
 El segmento no puede ser más corto que el GOP; backend y frontend lo validan.
@@ -258,7 +267,7 @@ python3 tsgate.py 5003 rtc | ffmpeg -fflags nobuffer -analyzeduration 1000000 -i
 ```
 
 - **MediaMTX** recibe por RTSP la calidad más alta, sin recodificar, y la sirve por WebRTC. El navegador negocia por WHEP (`/rtc/live/whep`, a través del punto de entrada) y recibe el vídeo directo por UDP 8189, pasando por el router de emulación.
-- **Una sola calidad y sin audio.** WebRTC no admite el AAC de la fuente, y no hay adaptación: esta rama sirve siempre la calidad más alta de la escalera.
+- **Una sola calidad y, por defecto, sin audio.** No hay adaptación: esta rama sirve siempre la calidad más alta de la escalera. El audio Opus de la fuente se le añade, sin recodificar, con **Audio en WebRTC** en el panel (`rtc_audio` en `POST /api/config`; `-map 0:a:0 -c:a copy` en vez de `-an`). Viene desactivado porque cambia lo que se mide: el navegador sincroniza las dos pistas y **el vídeo llega más tarde**. Medido el 22-10-2026 con la cámara a 15 fps, alternando, dos rondas de 60 s y sin sonido en ningún reproductor: glass-to-glass de WebRTC 303 y 232 ms sin audio, 414 y 418 ms con él (MoQ, de control, 84-90 ms en todas). En el CSV, `rtc_audio`.
 - **El reproductor** es un `RTCPeerConnection` sobre un `<video>`, sin ajustes: el búfer de jitter lo decide el navegador. Un slider permite pedirle un búfer concreto (`jitterBufferTarget`); en "auto" no se pide nada.
 - **Métricas propias** de las estadísticas del navegador (`getStats`): bitrate, búfer de jitter y paquetes perdidos. No declara una latencia respecto al directo, así que esa tarjeta queda vacía.
 
@@ -432,7 +441,7 @@ El índice cuenta lo que no cuadra y debe ser 0: PTS fuera de la rejilla (`pts_o
 
 Para que los PTS coincidan hubo que corregir dos cosas, cada una de las cuales desplazaba la referencia sin que la rejilla lo delatara:
 - FFmpeg suma `muxdelay` y `muxpreload` (0,7 + 0,5 s) a los PTS de una salida MPEG-TS, pero no a las de dentro del `tee`. Con ellos, la referencia iba 36 frames por delante a 30 fps.
-- FFmpeg desplaza cada salida para que nada empiece en negativo, y el AAC empieza 1024 muestras antes (1920 ticks). La referencia lleva una pista de silencio propia solo para desplazarse igual que la escalera.
+- FFmpeg desplaza cada salida para que nada empiece en negativo, y el codificador de audio empieza unas muestras antes: 312 con Opus (585 ticks), 1024 con el AAC de antes (1920 ticks, más de un frame a 60 fps). La referencia lleva una pista de silencio propia, en el mismo códec, solo para desplazarse igual que la escalera.
 
 Para la referencia se usa x264 con `qp` 10. Medido sobre 5 s de Big Buck Bunny el 22-10-2026, frente al original:
 
@@ -622,6 +631,8 @@ Desde el panel de control:
 | Escalera de calidades | 1 a 5; altura 1080/720/540/480/360/240 y bitrate libre | Lo que codifica la fuente. Con una sola no hay adaptación |
 | Calidad (por reproductor) | Auto o una calidad fija | Auto usa la adaptación de cada reproductor; fijar una la desactiva |
 | Reproductores activos | Cualquier combinación de LL-DASH, MoQ y WebRTC, con al menos uno | Un reproductor apagado se desmonta: cierra su conexión y no descarga nada, así que no compite con los demás por la red ni por el navegador. Se recuerda en el navegador; cada cambio abre un tramo de medida nuevo. En el CSV, `players` lista los activos y las métricas de los apagados quedan vacías |
+| Sonido | Ninguno (al abrir), LL-DASH, MoQ o WebRTC: uno a la vez | Quita el silencio a ese reproductor. En DASH y WebRTC el audio ya se descargaba; **en MoQ no**: `@moq/watch` solo se suscribe a la pista de audio con el sonido activado. Efecto medido el 22-10-2026 con la cámara a 15 fps, alternando con "Ninguno" (cinco ventanas de 45-90 s por rama): en WebRTC y DASH, ninguno visible (WebRTC 331-430 ms con sonido frente a 344-451 sin él; DASH varía más que cualquier diferencia, 523-847 frente a 509-852); en MoQ, igual en tres ventanas (85-91 ms frente a 83-89) y más alto en dos (127 y 157 ms). En headless no hay altavoz: el navegador reproduce hacia una salida nula. En el CSV, `audio` |
+| Audio en WebRTC | Desactivado (por defecto) o activado | El Opus de la fuente, sin recodificar. Sube la latencia de WebRTC (sección 3.4b). En el CSV, `rtc_audio` |
 | Pantalla completa (por reproductor) | Botón arriba a la derecha del vídeo (aparece al pasar el ratón) o doble clic; Esc para salir | Amplía la zona de vídeo, con sus avisos. Solo escala la imagen: el timecode se lee del frame decodificado y el reproductor de MoQ sigue dibujando aunque su canvas quede tapado (`visible: 'always'`). Los otros reproductores siguen midiendo detrás (comprobado en Chrome headless el 22-10-2026). En el CSV, `fullscreen` dice cuál está a pantalla completa |
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
@@ -643,7 +654,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/status` | Estado, configuración, `stream_ids`, reinicios del supervisor, disposición del timecode, anomalías de ingesta, deriva DASH y red (perfil y contadores del router) |
 | `POST /api/start` | Arranca los empaquetadores (cuerpo opcional: configuración) |
 | `POST /api/stop` | Detiene todo, incluida la codificación de la fuente. La parada se recuerda entre reinicios: no vuelve a emitir hasta `POST /api/start` |
-| `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p. `source`: `file` (bucle, por defecto) o `camera`; con la cámara, `fps` lo fija el servidor y, si no la alcanza, responde 502 con el motivo |
+| `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p. `source`: `file` (bucle, por defecto) o `camera`; con la cámara, `fps` lo fija el servidor y, si no la alcanza, responde 502 con el motivo. `rtc_audio`: audio en la rama WebRTC (por defecto, no) |
 | `GET /api/camera` | Sondea la cámara: host (sin credenciales), códec, resolución, fps, audio y último error. Con la cámara emitiendo, devuelve lo último que se supo sin abrir otra sesión |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |

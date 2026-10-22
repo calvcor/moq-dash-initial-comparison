@@ -30,7 +30,9 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
    invalidadas. Cualquier instrumentación nueva en el navegador debe ser barata y asíncrona.
 3. **No rellenes con valores supuestos.** Sin medida se muestra `--` y en el CSV queda vacío.
 4. **Declara las variables de confusión** en vez de ocultarlas: BBRv3 (relay) frente a CUBIC (DASH),
-   WebRTC sin adaptación ni audio y sin codificador que atienda sus peticiones de keyframe, bitrate del catálogo de MoQ (máximo medido) frente al del MPD
+   WebRTC sin adaptación, sin audio salvo con `rtc_audio` (que le sube la latencia ~100-180 ms) y sin
+   codificador que atienda sus peticiones de keyframe, qué reproductor tiene el sonido (MoQ solo baja el
+   audio con él), bitrate del catálogo de MoQ (máximo medido) frente al del MPD
    (nominal), sliders de latencia que significan cosas distintas en cada rama, red del cliente, y que
    el jitter de netem desordena los paquetes (castiga casi solo a QUIC: README, sección 5), y con la
    cámara como fuente, que el contenido no se repite y la latencia no incluye el tramo cámara → servidor.

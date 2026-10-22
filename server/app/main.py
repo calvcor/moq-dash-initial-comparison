@@ -114,6 +114,9 @@ class StreamConfig(BaseModel):
     gop_size: int = 60           # 1 segundo a 60 fps
     # Con el bucle, siempre 60 (el del vídeo). Con la cámara la fija el servidor al arrancar: la de la cámara.
     fps: int = Field(60, ge=1, le=60)
+    # Audio en la rama WebRTC (el Opus de la fuente, sin recodificar). Desactivado por defecto: el navegador
+    # sincroniza audio y vídeo y retrasa el vídeo (README, sección 3.4b)
+    rtc_audio: bool = False
     seg_duration: float = 2.0    # Segundos por segmento DASH
     frag_duration: float = 0.1   # Chunks CMAF de 100ms para LL-DASH
     # Escalera de calidades que se codifica en vivo, de mayor a menor. Una sola entrada = sin adaptación.
@@ -340,9 +343,14 @@ def ensure_master_source(force_restart: bool = False):
                 f"fps={fps},scale=1920:1080:force_original_aspect_ratio=decrease,"
                 f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=N/({fps}*TB)"
             )
-            # Audio en silencio, generado en su propio grafo: las ramas llevan la misma pista que con el
-            # bucle y no depende de que la cámara tenga micrófono. La referencia lleva otro igual (ver abajo).
-            audio_graph = "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[a]"
+            # Audio de la cámara, en su propio grafo, pasado a 48 kHz estéreo para el Opus de siempre. Con las
+            # marcas de tiempo de la cámara (async rellena o recorta si se desvían), como el vídeo, que pasa
+            # por el filtro fps con las suyas. Si la cámara no tiene micrófono, silencio. La referencia lleva
+            # su propio silencio (ver abajo).
+            if (camera_state["probe"] or {}).get("audio"):
+                audio_graph = "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+            else:
+                audio_graph = "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[a]"
         else:
             # Vídeo y audio se leen por entradas separadas: el fichero los intercala en bloques de 0,5 s y con
             # una sola entrada a ritmo real el audio llega a ráfagas, el muxer retiene el vídeo hasta tenerlo
@@ -389,14 +397,14 @@ def ensure_master_source(force_restart: bool = False):
         master_cmd = (
             f"ffmpeg {inputs}"
             f"-filter_complex \"{graph}\" -filter_complex \"{audio_graph}\" "
-            # Silencio aparte para la referencia: sacarlo del mismo generador con asplit ataría el audio de
-            # la escalera al ritmo de la referencia
+            # Silencio aparte para la referencia: solo sirve para que sus PTS se desplacen como los de la
+            # escalera (ver abajo), y así no depende del micrófono de la cámara
             + ("-filter_complex \"anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[reference_audio]\" " if camera else "")
             + f"{maps}-map '[a]' "
             f"-c:v libx264 -preset ultrafast -tune zerolatency -threads 4 "
             f"-x264opts \"repeat-headers=1\" "
             f"{rates}-g {current_config.gop_size} -keyint_min {current_config.gop_size} -sc_threshold 0 "
-            f"-r {fps} -c:a aac -ac 2 -b:a 128k "
+            f"-r {fps} -c:a libopus -ac 2 -b:a 128k "
             # Sin esto el multiplexor retiene cada frame de vídeo hasta tener un paquete de audio posterior,
             # para escribirlos en orden estricto de tiempo, y los frames salen a ráfagas: uno de cada ocho
             # con el doble de separación y huecos de más de 50 ms cada segundo. Con 1 µs escribe cada
@@ -414,16 +422,17 @@ def ensure_master_source(force_restart: bool = False):
             # escalera a su ritmo. Medido el 22-10-2026 con la cámara a 15 fps (marca quemada -> compuerta):
             # p50 76-106 ms y p95 207-245 ms con la referencia sin zerolatency; 5,4-5,7 y 9,7-9,9 ms con él,
             # lo mismo que sin referencia (5,8-5,9 y 9,8-11,0 ms).
-            # Lleva un audio AAC como el de la escalera solo para que sus PTS coincidan: FFmpeg desplaza cada
-            # salida para que nada empiece en negativo, y el AAC empieza 1024 muestras antes (1920 ticks, más
-            # de un frame a 60 fps). Sin audio, la referencia quedaba desplazada respecto al flujo.
+            # Lleva un audio Opus como el de la escalera solo para que sus PTS coincidan: FFmpeg desplaza cada
+            # salida para que nada empiece en negativo, y el codificador de audio empieza unas muestras antes
+            # (Opus, 312; con AAC eran 1024, 1920 ticks, más de un frame a 60 fps). Sin audio, la referencia
+            # quedaba desplazada respecto al flujo.
             # Por lo mismo, sin muxdelay ni muxpreload: FFmpeg los suma a los PTS de una salida MPEG-TS
             # (0,7 + 0,5 s), pero no a las del tee. Con ellos la referencia iba 36 frames por delante a 30 fps.
             master_cmd += (
                 f" -map '[reference]' -map '[reference_audio]' "
                 f"-c:v libx264 -preset ultrafast -tune zerolatency -qp {REFERENCE_QP} -threads 4 "
                 f"-x264opts \"repeat-headers=1\" -g {current_config.gop_size} -keyint_min {current_config.gop_size} "
-                f"-sc_threshold 0 -r {fps} -c:a aac -ac 2 -b:a 128k -max_interleave_delta 1 "
+                f"-sc_threshold 0 -r {fps} -c:a libopus -ac 2 -b:a 128k -max_interleave_delta 1 "
                 f"-muxdelay 0 -muxpreload 0 -f mpegts -pes_payload_size 0 "
                 f"'udp://127.0.0.1:{qoe.REFERENCE_PORT}?pkt_size={188 * 348}'"
             )
@@ -547,8 +556,9 @@ def start_dash():
     dash_cmd = (
         f"python3 -u {TSGATE} 5001 dash | "
         f"ffmpeg -y -analyzeduration {int(PROBE_S * 1_000_000)} -i pipe:0 "
-        f"-map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 -tag:a mp4a {declared}"
-        f"-f dash -adaptation_sets 'id=0,streams=v id=1,streams=a' -seg_duration {current_config.seg_duration} "
+        f"-map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 {declared}"
+        # MP4 (CMAF) también para el audio: con Opus, FFmpeg elegiría WebM para esa pista
+        f"-f dash -dash_segment_type mp4 -adaptation_sets 'id=0,streams=v id=1,streams=a' -seg_duration {current_config.seg_duration} "
         f"-frag_type duration -frag_duration {current_config.frag_duration} "
         f"-streaming 1 -ldash 1 -use_template 1 -use_timeline 0 "
         f"-utc_timing_url '{UTC_TIMING_URL}' "
@@ -576,14 +586,16 @@ def start_moq():
 def start_rtc():
     """Empaquetador WebRTC: lee de UDP 5003 y publica por RTSP en MediaMTX la calidad más alta, sin recodificar.
 
-    Solo vídeo: WebRTC no admite el audio AAC de la fuente y los reproductores van silenciados.
+    El vídeo va tal cual. El audio, el Opus de la fuente, también tal cual, pero solo con rtc_audio; sin él,
+    solo vídeo.
     """
     kill_proc(processes.get("rtc_pipeline"))
     trace.frame_log.reset("rtc")
+    audio = "-map 0:a:0 -c:a copy " if current_config.rtc_audio else "-an "
     rtc_cmd = (
         f"python3 -u {TSGATE} 5003 rtc | "
         f"ffmpeg -y -fflags nobuffer -analyzeduration {int(PROBE_S * 1_000_000)} -i pipe:0 "
-        f"-map 0:v:0 -c:v copy -an -f rtsp -rtsp_transport tcp '{RTC_PUBLISH_URL}'"
+        f"-map 0:v:0 -c:v copy {audio}-f rtsp -rtsp_transport tcp '{RTC_PUBLISH_URL}'"
     )
     logger.info("Iniciando Empaquetador WebRTC hacia MediaMTX...")
     launch("rtc_pipeline", rtc_cmd, "/tmp/ffmpeg_rtc.log")

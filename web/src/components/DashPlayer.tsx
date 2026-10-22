@@ -10,6 +10,7 @@ interface DashPlayerProps {
   isStreaming: boolean;
   timecodes?: TimecodeLayout[];
   renditions?: Rendition[];
+  audible: boolean; // sonido activado (selector de sonido del dashboard); el audio se descarga igual
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
 
@@ -18,6 +19,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   isStreaming,
   timecodes,
   renditions,
+  audible,
   onMetricsUpdate,
 }) => {
   // El servidor da la ruta del manifiesto relativa al punto de entrada; dash.js la necesita absoluta
@@ -27,6 +29,11 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   const direct = new URL(url).host !== window.location.host;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
+
+  // El atributo muted del <video> solo vale al montarlo: después se cambia la propiedad
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = !audible;
+  }, [audible]);
   const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [playerStatus, setPlayerStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');

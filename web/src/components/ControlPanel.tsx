@@ -42,6 +42,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const hasChanges = Boolean(
     status?.config &&
     (config.source !== status.config.source ||
+      config.rtc_audio !== status.config.rtc_audio ||
       config.gop_size !== status.config.gop_size ||
       JSON.stringify(config.renditions) !== JSON.stringify(status.config.renditions) ||
       config.seg_duration !== status.config.seg_duration ||
@@ -297,6 +298,22 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
         <span className="text-[10px] text-slate-500 mt-1.5 block">
           Todas a {config.fps} fps y con el mismo GOP. Cambiar la escalera reinicia la fuente; el servidor las ordena de mayor a menor.
+        </span>
+      </div>
+
+      {/* Audio en la rama WebRTC */}
+      <div className="mt-3 pt-3 border-t border-slate-800">
+        <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer w-fit">
+          <input
+            type="checkbox"
+            checked={config.rtc_audio}
+            onChange={(e) => onConfigChange({ ...config, rtc_audio: e.target.checked })}
+            className="accent-indigo-500"
+          />
+          <span>Audio en WebRTC (Opus, recodificado en el servidor)</span>
+        </label>
+        <span className="text-[10px] text-slate-500 mt-1 block">
+          Desactivado por defecto. Con audio, el navegador sincroniza las dos pistas y puede retrasar el vídeo: es otra condición de medida (queda en el CSV, rtc_audio).
         </span>
       </div>
     </div>

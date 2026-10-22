@@ -112,6 +112,7 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [config, setConfig] = useState<StreamConfig>({
     source: 'file',
+    rtc_audio: false,
     gop_size: 60,
     fps: 60,
     renditions: [
@@ -218,10 +219,21 @@ export function App() {
   const playersRef = useRef(players);
   playersRef.current = players;
   const resetters: Record<PlayerId, (m: PlayerMetrics) => void> = { dash: setDashMetrics, moq: setMoqMetrics, rtc: setRtcMetrics };
+  // Reproductor con el sonido activado; los demás van silenciados. Al cargar, ninguno: el navegador solo
+  // deja reproducir con sonido después de un gesto del usuario, y elegirlo aquí lo es.
+  const [audioPlayer, setAudioPlayer] = useState<PlayerId | null>(null);
+  const audioPlayerRef = useRef<PlayerId | null>(null);
+  audioPlayerRef.current = audioPlayer;
+  const rtcAudio = serverStatus?.config.rtc_audio ?? false;
+  useEffect(() => {
+    if (audioPlayer === 'rtc' && !rtcAudio) setAudioPlayer(null);
+  }, [audioPlayer, rtcAudio]);
+
   const togglePlayer = (id: PlayerId) => {
     const next = { ...players, [id]: !players[id] };
     if (!PLAYER_IDS.some((p) => next[p])) return; // siempre queda al menos uno
     setPlayers(next);
+    if (!next[id] && audioPlayer === id) setAudioPlayer(null);
     try {
       localStorage.setItem(PLAYERS_KEY, JSON.stringify(next));
     } catch (_) {}
@@ -267,6 +279,8 @@ export function App() {
         epoch: epochRef.current.epoch,
         players: PLAYER_IDS.filter((id) => active[id]).join('|'),
         fullscreen: (document.fullscreenElement as HTMLElement | null)?.dataset.player ?? null,
+        audio: audioPlayerRef.current,
+        rtc_audio: status?.config.rtc_audio ?? null,
         elapsed_s: Math.round((performance.now() - epochRef.current.startedAt) / 1000),
         source: status?.config.source ?? null,
         fps: status?.config.fps ?? null,
@@ -568,6 +582,32 @@ export function App() {
             );
           })}
           <span className="text-slate-500 ml-2">Activar o apagar uno empieza un tramo de medida nuevo.</span>
+
+          {/* Sonido: un solo reproductor a la vez, para no mezclarlos */}
+          <span className="text-slate-400 font-medium ml-auto mr-1">Sonido:</span>
+          {([null, ...PLAYER_IDS] as (PlayerId | null)[]).map((id) => {
+            const unavailable = id !== null && (!players[id] || (id === 'rtc' && !rtcAudio));
+            const selected = audioPlayer === id;
+            return (
+              <button
+                key={id ?? 'none'}
+                onClick={() => setAudioPlayer(id)}
+                disabled={unavailable}
+                title={
+                  id === 'rtc' && !rtcAudio
+                    ? 'La rama WebRTC va sin audio: actívalo en el panel de control (Audio en WebRTC)'
+                    : id !== null && !players[id]
+                      ? 'Reproductor apagado'
+                      : undefined
+                }
+                className={`px-2.5 py-1 rounded-lg border transition-colors ${
+                  selected ? 'border-indigo-500 bg-indigo-900/50 text-indigo-200' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'
+                } ${unavailable ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                {id === null ? 'Ninguno' : { dash: 'LL-DASH', moq: 'MoQ', rtc: 'WebRTC' }[id]}
+              </button>
+            );
+          })}
         </div>
 
         {/* Reproductores lado a lado */}
@@ -578,6 +618,7 @@ export function App() {
             timecodes={serverStatus?.timecodes}
             renditions={serverStatus?.config.renditions}
             isStreaming={isStreaming}
+            audible={audioPlayer === 'dash'}
             onMetricsUpdate={(m) => setDashMetrics((prev) => ({ ...prev, ...m }))}
           />}
 
@@ -588,6 +629,7 @@ export function App() {
             timecodes={serverStatus?.timecodes}
             renditions={serverStatus?.config.renditions}
             isStreaming={isStreaming}
+            audible={audioPlayer === 'moq'}
             onMetricsUpdate={(m) => setMoqMetrics((prev) => ({ ...prev, ...m }))}
           />}
 
@@ -595,6 +637,8 @@ export function App() {
             key={`rtc-${rtcStreamId}`}
             timecodes={serverStatus?.timecodes}
             isStreaming={isStreaming}
+            withAudio={rtcAudio}
+            audible={audioPlayer === 'rtc'}
             onMetricsUpdate={(m) => setRtcMetrics((prev) => ({ ...prev, ...m }))}
           />}
         </div>
