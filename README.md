@@ -229,7 +229,7 @@ Quitar el audio o los ajustes del multiplexor de la referencia no cambiaba nada;
 **Lo que cambia frente al bucle** (variables de confusión, a declarar):
 - **La latencia medida empieza igual**, al quemar el timecode, que es después de recibir y decodificar la cámara. No incluye el tramo cámara → servidor (sensor, codificador de la cámara, red); medir de cristal a cristal exigiría apuntar la cámara a un reloj.
 - **El contenido no se repite.** Una escena casi quieta se codifica con mucho menos que el bitrate nominal, con keyframes distintos, y da VMAF más altos. Las pruebas con la cámara no son comparables con las del bucle ni entre sí. Dentro de una prueba, las tres ramas sí ven exactamente lo mismo.
-- **La entrada no es regular.** Lo que la red de la cámara haga con los frames llega igual a las tres ramas, pero pasa por el filtro `fps`.
+- **La entrada no es regular.** Lo que la red de la cámara haga con los frames llega igual a las tres ramas, pero pasa por el filtro `fps`. Se nota en WebRTC, que lo ve como jitter de llegada: 19-27 ms en el vídeo y 27-28 ms en el audio con la cámara de pruebas, frente a 0-2 y 5-7 ms con el bucle (`getStats()`, 22-10-2026). Su búfer de jitter crece en consecuencia, y la latencia de WebRTC sin audio pasa de 59-71 ms con el bucle a 244-329 ms con la cámara.
 - **Deriva de reloj**: la cadencia sale de las marcas de tiempo de la cámara. Si su reloj se separa del del servidor, se verá en `dash_availability_drift_ms`.
 
 ### 3.2. Compuerta `tsgate.py`
@@ -267,7 +267,21 @@ python3 tsgate.py 5003 rtc | ffmpeg -fflags nobuffer -analyzeduration 1000000 -i
 ```
 
 - **MediaMTX** recibe por RTSP la calidad más alta, sin recodificar, y la sirve por WebRTC. El navegador negocia por WHEP (`/rtc/live/whep`, a través del punto de entrada) y recibe el vídeo directo por UDP 8189, pasando por el router de emulación.
-- **Una sola calidad y, por defecto, sin audio.** No hay adaptación: esta rama sirve siempre la calidad más alta de la escalera. El audio Opus de la fuente se le añade, sin recodificar, con **Audio en WebRTC** en el panel (`rtc_audio` en `POST /api/config`; `-map 0:a:0 -c:a copy` en vez de `-an`). Viene desactivado porque cambia lo que se mide: el navegador sincroniza las dos pistas y **el vídeo llega más tarde**. Medido el 22-10-2026 con la cámara a 15 fps, alternando, dos rondas de 60 s y sin sonido en ningún reproductor: glass-to-glass de WebRTC 303 y 232 ms sin audio, 414 y 418 ms con él (MoQ, de control, 84-90 ms en todas). En el CSV, `rtc_audio`.
+- **Una sola calidad y, por defecto, sin audio.** No hay adaptación: esta rama sirve siempre la calidad más alta de la escalera. El audio Opus de la fuente se le añade, sin recodificar, con **Audio en WebRTC** en el panel (`rtc_audio` en `POST /api/config`; `-map 0:a:0 -c:a copy` en vez de `-an`). Viene desactivado porque cambia lo que se mide: el navegador sincroniza las dos pistas y **retrasa el vídeo hasta el búfer de jitter del audio**. Medido el 22-10-2026 en Chrome headless, con `getStats()` de la conexión (`jitterBufferTargetDelay` medio de cada pista) y sin sonido en ningún reproductor:
+
+  | Fuente y momento de la conexión | Glass-to-glass WebRTC | Búfer objetivo vídeo | Búfer objetivo audio |
+  | :--- | :--- | :--- | :--- |
+  | Bucle, sin audio | 59-71 ms | 15-20 ms | — |
+  | Bucle, con audio, conectando justo al arrancar la emisión | 142-151 ms | 76-134 ms | 40-51 ms |
+  | Bucle, con audio, conectando con la emisión ya en marcha | 79-120 ms (226 en una conexión con el audio a 105 ms) | 34-57 ms (128) | 40-44 ms (105) |
+  | Cámara, sin audio | 244-329 ms | 130-143 ms | — |
+  | Cámara, con audio (cualquier momento) | 330-557 ms | 154-336 ms | 225-315 ms |
+
+  - **El vídeo sigue al búfer del audio.** Con audio, su búfer objetivo sube hasta el del audio, en todas las conexiones medidas. Sin audio, el vídeo se queda con el suyo.
+  - **Cuánto sube depende del audio.** Con el bucle, el audio llega regular (jitter 5-7 ms) y pide ~40 ms: la subida es pequeña. Con la cámara llega irregular (jitter 27-28 ms, y el vídeo 19-27 ms frente a 0-2 con el bucle) y pide 225-315 ms: la subida es de 100-200 ms.
+  - **Conectar justo al arrancar la emisión** (aplicar un cambio de configuración sin recargar la página: el reproductor se reconecta en cuanto se reinicia el empaquetador) deja el vídeo además 30-85 ms por encima del audio. Recargar la página o reconectar solo WebRTC más tarde suele quitarlo, pero no siempre. La causa de ese exceso no está localizada.
+
+  Antes de esta medida se había atribuido al audio una subida de 110-180 ms a partir de dos rondas que reconectaban todo en cada cambio; la variación entre sesiones era del mismo orden, así que aquella cifra no valía como medida del efecto. En el CSV, `rtc_audio`.
 - **El reproductor** es un `RTCPeerConnection` sobre un `<video>`, sin ajustes: el búfer de jitter lo decide el navegador. Un slider permite pedirle un búfer concreto (`jitterBufferTarget`); en "auto" no se pide nada.
 - **Métricas propias** de las estadísticas del navegador (`getStats`): bitrate, búfer de jitter y paquetes perdidos. No declara una latencia respecto al directo, así que esa tarjeta queda vacía.
 
@@ -632,7 +646,7 @@ Desde el panel de control:
 | Calidad (por reproductor) | Auto o una calidad fija | Auto usa la adaptación de cada reproductor; fijar una la desactiva |
 | Reproductores activos | Cualquier combinación de LL-DASH, MoQ y WebRTC, con al menos uno | Un reproductor apagado se desmonta: cierra su conexión y no descarga nada, así que no compite con los demás por la red ni por el navegador. Se recuerda en el navegador; cada cambio abre un tramo de medida nuevo. En el CSV, `players` lista los activos y las métricas de los apagados quedan vacías |
 | Sonido | Ninguno (al abrir), LL-DASH, MoQ o WebRTC: uno a la vez | Quita el silencio a ese reproductor. En DASH y WebRTC el audio ya se descargaba; **en MoQ no**: `@moq/watch` solo se suscribe a la pista de audio con el sonido activado. Efecto medido el 22-10-2026 con la cámara a 15 fps, alternando con "Ninguno" (cinco ventanas de 45-90 s por rama): en WebRTC y DASH, ninguno visible (WebRTC 331-430 ms con sonido frente a 344-451 sin él; DASH varía más que cualquier diferencia, 523-847 frente a 509-852); en MoQ, igual en tres ventanas (85-91 ms frente a 83-89) y más alto en dos (127 y 157 ms). En headless no hay altavoz: el navegador reproduce hacia una salida nula. En el CSV, `audio` |
-| Audio en WebRTC | Desactivado (por defecto) o activado | El Opus de la fuente, sin recodificar. Sube la latencia de WebRTC (sección 3.4b). En el CSV, `rtc_audio` |
+| Audio en WebRTC | Desactivado (por defecto) o activado | El Opus de la fuente, sin recodificar. Sube la latencia de WebRTC hasta el búfer del audio: poco con el bucle, 100-200 ms con la cámara (sección 3.4b). En el CSV, `rtc_audio` |
 | Pantalla completa (por reproductor) | Botón arriba a la derecha del vídeo (aparece al pasar el ratón) o doble clic; Esc para salir | Amplía la zona de vídeo, con sus avisos. Solo escala la imagen: el timecode se lee del frame decodificado y el reproductor de MoQ sigue dibujando aunque su canvas quede tapado (`visible: 'always'`). Los otros reproductores siguen midiendo detrás (comprobado en Chrome headless el 22-10-2026). En el CSV, `fullscreen` dice cuál está a pantalla completa |
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
