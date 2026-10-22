@@ -1172,7 +1172,9 @@ WebRTC no tiene adaptación de calidad**, las otras dos sí.
    (`-c:a copy`). Entonces el navegador sincroniza audio y vídeo: el búfer de jitter objetivo del vídeo
    sube hasta el del audio (comprobado con `getStats()` el 22-10-2026). Con el bucle el audio pide ~40 ms
    y la latencia sube poco (de 59-71 a 79-120 ms); con la cámara, cuyo audio llega con más jitter, pide
-   225-315 ms y la latencia sube 100-200 ms (README, sección 3.4b). Hasta ese día la fuente codificaba en
+   225-315 ms y la latencia sube 100-200 ms (README, sección 3.4b). Una conexión abierta en los primeros
+   segundos de la emisión queda además 45-55 ms por encima toda la sesión; por eso el dashboard espera a
+   que la emisión lleve unos segundos publicada antes de conectar. Hasta ese día la fuente codificaba en
    AAC, que WebRTC no admite.
 2. **Servidor.** MediaMTX reparte el H.264 en paquetes RTP y los envía a cada navegador conectado.
 3. **Navegador.** `RTCPeerConnection` recibe, reordena, decodifica y pinta en un `<video>`. Todo lo

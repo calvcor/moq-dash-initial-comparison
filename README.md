@@ -272,14 +272,15 @@ python3 tsgate.py 5003 rtc | ffmpeg -fflags nobuffer -analyzeduration 1000000 -i
   | Fuente y momento de la conexión | Glass-to-glass WebRTC | Búfer objetivo vídeo | Búfer objetivo audio |
   | :--- | :--- | :--- | :--- |
   | Bucle, sin audio | 59-71 ms | 15-20 ms | — |
-  | Bucle, con audio, conectando justo al arrancar la emisión | 142-151 ms | 76-134 ms | 40-51 ms |
-  | Bucle, con audio, conectando con la emisión ya en marcha | 79-120 ms (226 en una conexión con el audio a 105 ms) | 34-57 ms (128) | 40-44 ms (105) |
+  | Bucle, con audio, conectando justo al arrancar la emisión (antes de la espera de abajo) | 142-151 ms | 76-134 ms | 40-51 ms |
+  | Bucle, con audio, conectando con la emisión ya en marcha | 79-149 ms (226 en una conexión con el audio a 105 ms) | 34-92 ms (128) | 40-48 ms (105) |
   | Cámara, sin audio | 244-329 ms | 130-143 ms | — |
   | Cámara, con audio (cualquier momento) | 330-557 ms | 154-336 ms | 225-315 ms |
 
   - **El vídeo sigue al búfer del audio.** Con audio, su búfer objetivo sube hasta el del audio, en todas las conexiones medidas. Sin audio, el vídeo se queda con el suyo.
   - **Cuánto sube depende del audio.** Con el bucle, el audio llega regular (jitter 5-7 ms) y pide ~40 ms: la subida es pequeña. Con la cámara llega irregular (jitter 27-28 ms, y el vídeo 19-27 ms frente a 0-2 con el bucle) y pide 225-315 ms: la subida es de 100-200 ms.
-  - **Conectar justo al arrancar la emisión** (aplicar un cambio de configuración sin recargar la página: el reproductor se reconecta en cuanto se reinicia el empaquetador) deja el vídeo además 30-85 ms por encima del audio. Recargar la página o reconectar solo WebRTC más tarde suele quitarlo, pero no siempre. La causa de ese exceso no está localizada.
+  - **Conectar en los primeros segundos de la emisión** deja el vídeo además 45-55 ms por encima, durante toda la sesión. Medido con dos clientes WHEP mínimos en la misma página, uno al publicarse la emisión y otro 30 s después (búfer objetivo de vídeo 120 y 82 ms frente a 74 y 28; con el audio en 40 ms en todos). Conectando 3 s después de publicarse, mixto; 6 s después, ya no. Ese cliente recibe de golpe el último segundo de media (unos 50 paquetes de audio en el primer cuarto de segundo, frente a 12-13). No es el sondeo de 1 s del empaquetador: con 0,1 s pasa lo mismo. Qué lo envía de golpe no está localizado.
+  - **Por eso el reproductor del dashboard espera** a que la emisión lleve unos segundos publicada antes de conectar (8 s desde que arranca el empaquetador, con el reloj sincronizado con el servidor; muestra "Esperando a que la emisión lleve unos segundos publicada"). Antes, aplicar un cambio sin recargar reconectaba justo al arrancar y medía ese caso, y recargar medía el otro: con el bucle y audio, 142-151 ms frente a 79-114. Con la espera, 100 y 119 ms sin recargar frente a 113 y 149 recargando, y sin audio 61-72 ms. Es lo que le pasa a cualquier espectador que se une a un directo ya en marcha; no cambia nada del protocolo.
 
   Antes de esta medida se había atribuido al audio una subida de 110-180 ms a partir de dos rondas que reconectaban todo en cada cambio; la variación entre sesiones era del mismo orden, así que aquella cifra no valía como medida del efecto. En el CSV, `rtc_audio`.
 - **El reproductor** es un `RTCPeerConnection` sobre un `<video>`, sin ajustes: el búfer de jitter lo decide el navegador. Un slider permite pedirle un búfer concreto (`jitterBufferTarget`); en "auto" no se pide nada.
@@ -613,7 +614,7 @@ Son observaciones de una prueba por caso, no resultados contrastados.
 
 La plataforma se recupera sola de reinicios y caídas, sin recargar la pestaña:
 
-- **Identificador de emisión.** Cada vez que arranca un empaquetador, su `stream_id` en `/api/status` cambia. Cualquier dashboard abierto remonta ese reproductor al verlo, lo haya reiniciado esa pestaña, otra, la API o el supervisor. Sin esto, el reproductor MoQ quedaba anclado al reloj de la emisión anterior y pintaba a trompicones.
+- **Identificador de emisión.** Cada vez que arranca un empaquetador, su `stream_id` en `/api/status` cambia. Cualquier dashboard abierto remonta ese reproductor al verlo, lo haya reiniciado esa pestaña, otra, la API o el supervisor. Sin esto, el reproductor MoQ quedaba anclado al reloj de la emisión anterior y pintaba a trompicones. El de WebRTC no conecta hasta 8 s después de arrancar su empaquetador: conectar en los primeros segundos de la emisión le deja más latencia toda la sesión (sección 3.4b).
 - **Supervisor en el orquestador.** Cada segundo comprueba la fuente y los dos empaquetadores y relanza lo que haya muerto, o el de DASH si lleva varios segmentos sin publicar. Cada rama se relanza por separado para no interrumpir la otra.
 - **Vigilancia en cada reproductor.** Si pasan 10 s sin imagen nueva (con la pestaña visible y tras 20 s de margen desde el arranque), el reproductor se recrea. Los contadores de congelados se conservan.
 - **Backend caído.** Tras tres consultas de estado fallidas el dashboard pasa a "desconectado" y reconecta al volver.

@@ -2,12 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { RtcTracer } from '../lib/trace';
+import { serverNowMs } from '../lib/clock';
 import type { PlayerMetrics, TimecodeLayout } from '../types';
 
 interface RtcPlayerProps {
   isStreaming: boolean;
   withAudio: boolean; // la rama lleva audio (opción rtc_audio del servidor): se pide también la pista de audio
   audible: boolean; // sonido activado (selector de sonido del dashboard)
+  streamStartedMs: number; // hora del servidor (ms epoch) a la que arrancó el empaquetador WebRTC (stream_ids.rtc)
   timecodes?: TimecodeLayout[];
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
@@ -15,7 +17,15 @@ interface RtcPlayerProps {
 // Señalización WHEP de MediaMTX, a través del punto de entrada. El vídeo va después directo por UDP.
 const WHEP_URL = '/rtc/live/whep';
 
-export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, audible, timecodes, onMetricsUpdate }) => {
+// Tras un reinicio de la emisión no se conecta hasta que esta lleva unos segundos publicada. Una conexión
+// abierta en los primeros segundos recibe de golpe el último segundo de media y, con audio, el navegador
+// deja el vídeo sincronizado 45-55 ms por encima de lo que queda una conexión abierta más tarde, durante
+// toda la sesión (medido el 22-10-2026: README, sección 3.4b). Sin esta espera, aplicar un cambio sin
+// recargar la página medía ese caso y recargarla, el otro. El empaquetador tarda 1-2 s en publicar
+// (keyframe y sondeo de la entrada); desde ahí, 6 s bastan.
+const JOIN_AFTER_START_MS = 8000;
+
+export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, audible, streamStartedMs, timecodes, onMetricsUpdate }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
 
@@ -37,6 +47,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
   if (timecodes?.length) timecodesRef.current = timecodes;
   const restartsRef = useRef(0);
   const [attempt, setAttempt] = useState(0);
+  const [joinWaitS, setJoinWaitS] = useState<number | null>(null); // espera antes de conectar tras un reinicio
 
   const applyTarget = (receiver: RTCRtpReceiver | null, ms: number) => {
     if (receiver && 'jitterBufferTarget' in receiver) (receiver as any).jitterBufferTarget = ms > 0 ? ms : null;
@@ -72,6 +83,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
     setStatus('connecting');
     let isAborted = false;
     let retryTimer: any = null;
+    let joinTimer: any = null;
     const meter = meterRef.current!;
     const rate = new RateWindow();
     const networkRate = new RateWindow();
@@ -127,11 +139,17 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
         retryTimer = setTimeout(() => !isAborted && setAttempt((a) => a + 1), 1500);
       }
     }
-    negotiate();
+    const now = serverNowMs() ?? Date.now();
+    const joinWait = Math.max(0, streamStartedMs + JOIN_AFTER_START_MS - now);
+    setJoinWaitS(joinWait > 0 ? Math.ceil(joinWait / 1000) : null);
+    joinTimer = setTimeout(() => {
+      setJoinWaitS(null);
+      negotiate();
+    }, joinWait);
 
     // Vigilancia: si no hay imagen nueva durante WATCHDOG_MS (emisión reiniciada, conexión muerta),
     // se recrea la conexión en vez de esperar a que alguien recargue la pestaña.
-    const startedAt = performance.now();
+    const startedAt = performance.now() + joinWait;
     const watchdog = setInterval(() => {
       const frozen = meter.frozenMs();
       if (frozen !== null && frozen > WATCHDOG_MS && performance.now() - startedAt > WATCHDOG_GRACE_MS) {
@@ -194,6 +212,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
     return () => {
       isAborted = true;
       clearTimeout(retryTimer);
+      clearTimeout(joinTimer);
       clearInterval(interval);
       clearInterval(watchdog);
       tracer.close();
@@ -201,7 +220,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
       connection.close();
       video.srcObject = null;
     };
-  }, [isStreaming, attempt, withAudio]);
+  }, [isStreaming, attempt, withAudio, streamStartedMs]);
 
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
@@ -225,7 +244,9 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
         {status === 'connecting' && (
           <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center space-y-2">
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs text-slate-400">Negociando sesión WebRTC...</span>
+            <span className="text-xs text-slate-400">
+              {joinWaitS !== null ? `Esperando a que la emisión lleve unos segundos publicada (~${joinWaitS} s)...` : 'Negociando sesión WebRTC...'}
+            </span>
           </div>
         )}
 

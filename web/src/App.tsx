@@ -638,6 +638,7 @@ export function App() {
             timecodes={serverStatus?.timecodes}
             isStreaming={isStreaming}
             withAudio={rtcAudio}
+            streamStartedMs={rtcStreamId}
             audible={audioPlayer === 'rtc'}
             onMetricsUpdate={(m) => setRtcMetrics((prev) => ({ ...prev, ...m }))}
           />}
