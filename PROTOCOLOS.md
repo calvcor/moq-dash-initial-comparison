@@ -864,6 +864,23 @@ congelados nuevos; la sesión recargada (444 ms) pintó 60 fps con 2 congelados,
 frente a 277. La latencia alta tras recargar es el precio de aguantar pérdidas; la baja sin
 recargar solo se sostiene en una red sin pérdidas ni jitter.
 
+**En la rama principal de moq el modo `auto` ya se adapta durante la sesión** (medido el 22-10-2026,
+`@moq/watch` y sus dependencias compilados desde el commit `bc64b9c`, aún sin publicar). Sustituye el
+cálculo con el RTT por un estimador copiado de NetEq (el búfer de audio de WebRTC): mide lo tarde que
+llega cada frame y toma el percentil 95 de un histograma de cubos de 20 ms, que sube enseguida y baja
+con una vida media de 20 s, con techo de unos 2 s (`doc/concept/audio-jitter.md` de moq). Un frame
+retransmitido cuenta como tardío, así que las pérdidas también lo suben. En local, misma sesión sin
+recargar, alternando con la 0.6.3 dos veces:
+
+| | 0.6.3: objetivo / latencia / pintados | `main`: objetivo / latencia / pintados |
+| :--- | :--- | :--- |
+| Sin restricciones | 88 ms / 116-123 ms / 60 fps | 20 ms / 49-59 ms / 54-60 fps |
+| 150 ms por sentido | 88 ms / 189-265 ms / 60 fps | 160 ms / 342-348 ms / 58-60 fps |
+| 150 ms y 1 % de pérdida | 88 ms / 264-271 ms / 24-28 fps | 340 ms / 514-524 ms / 47-60 fps |
+
+Con la pérdida, la primera pasada tardó en subir (15 de 20 s por debajo de 50 fps) y la segunda no
+(1 de 20). No se ha medido cuánto tarda en bajar cuando la red mejora.
+
 **La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
 "adelantada" se tolera antes de recolocar la referencia:
 
