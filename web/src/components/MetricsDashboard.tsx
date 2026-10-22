@@ -50,7 +50,8 @@ const FRAME_TIME_HINT = (
   <p>
     Tiempo que cada frame estuvo en pantalla en el último segundo: desviación típica y p95, del pintado de uno al
     del siguiente. Va en refrescos de pantalla (16,7 ms a 60 Hz), así que depende de la pantalla y del navegador
-    además del protocolo. Un frame que el medidor no llega a leer cuenta como uno de doble duración.
+    además del protocolo. Un frame que el medidor no llega a leer cuenta como uno de doble duración. Los parones
+    de 150 ms o más no entran: se cuentan en Congelados.
   </p>
 );
 

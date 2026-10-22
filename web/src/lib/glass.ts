@@ -164,9 +164,11 @@ export class GlassMeter {
       this.#stallMs += t - this.#lastChange;
       this.#inStall = false;
     }
-    // Lo que estuvo en pantalla el frame anterior, parones incluidos. Va en refrescos de pantalla: t es la
-    // hora del requestAnimationFrame en que se vio el frame nuevo
-    if (this.#changeValid) this.#frameTimes.push({ t, dt: t - this.#lastChange });
+    // Lo que estuvo en pantalla el frame anterior. Va en refrescos de pantalla: t es la hora del
+    // requestAnimationFrame en que se vio el frame nuevo. Los parones (STALL_MS o más) no entran: ya se
+    // cuentan como congelados, y uno solo dispararía la desviación típica y el máximo
+    const dt = t - this.#lastChange;
+    if (this.#changeValid && dt < STALL_MS) this.#frameTimes.push({ t, dt });
     this.#lastCode = code;
     this.#lastChange = t;
     this.#changeValid = true;
