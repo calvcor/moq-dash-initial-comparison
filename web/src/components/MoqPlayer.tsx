@@ -350,7 +350,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
       {/* Control de Latencia Objetivo en Vivo */}
       <div
         className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs"
-        title="Búfer de jitter de @moq/watch (opción delay). En auto, que es el valor por defecto de la librería, lo calcula con el RTT que le comunica el relay: 1,25 veces el RTT mínimo, con un suelo de 20 ms. En ambos casos la librería le suma el jitter que el catálogo declara para las pistas; el valor resultante es el que se muestra entre paréntesis. En auto no sube durante la sesión: el RTT mínimo solo puede bajar, así que tras empeorar la red el valor no cambia hasta recargar, y los frames que llegan más tarde se pintan sin búfer."
+        title="Búfer de jitter de @moq/watch (opción delay), no la latencia total: un retardo de red constante se suma aparte. Con un valor fijo, ese valor. En auto depende de la versión: la 0.6.3 publicada lo calcula como 1,25 veces el RTT mínimo (suelo de 20 ms) y no lo sube durante la sesión hasta recargar; la compilada desde main (git@…) lo estima de lo tarde que llegan los frames respecto al más rápido de los últimos 2 s (percentil 95, techo de unos 2 s): sube al empeorar la red y baja al estabilizarse, aunque la red siga lenta. En ambos casos se suma el jitter que declara el catálogo; el resultado es el que se muestra entre paréntesis."
       >
         <div className="flex items-center space-x-2">
           <span className="text-slate-400 font-medium">Latencia objetivo:</span>

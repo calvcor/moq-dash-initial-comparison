@@ -879,7 +879,18 @@ recargar, alternando con la 0.6.3 dos veces:
 | 150 ms y 1 % de pérdida | 88 ms / 264-271 ms / 24-28 fps | 340 ms / 514-524 ms / 47-60 fps |
 
 Con la pérdida, la primera pasada tardó en subir (15 de 20 s por debajo de 50 fps) y la segunda no
-(1 de 20). No se ha medido cuánto tarda en bajar cuando la red mejora.
+(1 de 20).
+
+**Mide jitter, no latencia.** El retraso de cada frame se cuenta respecto al más rápido de los últimos
+2 s de media, así que un retardo constante, aunque sea grande, no necesita búfer. Ante un salto de 0 a
+1.000 ms en la bajada (medido el 22-10-2026, misma sesión): durante unos 2 s la referencia es anterior
+al salto y los frames parecen llegar 1 s tarde, así que el objetivo sube a 1.020 ms (2 congelados,
+3,5 s parado, en la transición); se mantiene unos 20 s con la latencia en ~2,04 s (1 s de red y 1 s de
+búfer), y a los ~27 s del salto cae de golpe a 80 ms y la latencia a ~1,1 s, sin bajar de 60 fps
+pintados (es decir, saltando ese tramo); después oscila entre 20 y 40 ms con la latencia en
+~1,05 s. La caída es de golpe, no gradual: el percentil 95 no se mueve hasta que el peso de las
+observaciones altas baja del 5 %. El usuario observó un pico de 2.000 ms con el mismo salto; en esta
+medida fue de 1.020.
 
 **La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
 "adelantada" se tolera antes de recolocar la referencia:
