@@ -155,6 +155,11 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      # @moq/watch y sus @moq/*: "release" (npm, por defecto) o "git" (compilados desde MOQ_WATCH_COMMIT).
+      # Los valores por defecto repiten los de web/Dockerfile.
+      args:
+        MOQ_WATCH_FROM: ${MOQ_WATCH_FROM:-release}
+        MOQ_WATCH_COMMIT: ${MOQ_WATCH_COMMIT:-bc64b9c52561209322dcb8dec9992bf867f499f7}
     container_name: testbed-web
     depends_on:
       - orchestrator

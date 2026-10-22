@@ -29,7 +29,9 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   // 0 = auto: no se fija nada y @moq/watch dimensiona el búfer con el RTT que le comunica el relay
   const [targetLatencyMs, setTargetLatencyMs] = useState<number>(0);
   const [resolvedDelayMs, setResolvedDelayMs] = useState<number | null>(null);
-  const toDelay = (ms: number) => (ms > 0 ? Net.Time.Milli(ms) : 'auto');
+  // Milisegundos como el tipo de la librería. Vale para la versión publicada (Net.Time.Milli) y para la de main,
+  // donde Milli pasó a @moq/clock: en las dos es un número con otro nombre de tipo.
+  const toDelay = (ms: number): Watch.Delay => (ms > 0 ? (ms as Extract<Watch.Delay, number>) : 'auto');
   const playerRef = useRef<Watch.Player | null>(null);
   const connectionRef = useRef<Net.Connection | null>(null);
   const delaySignalRef = useRef<Signal<any> | null>(null);

@@ -1,0 +1,4 @@
+# Lo instala y lo construye la imagen; copiar el del anfitrión pisaría lo instalado dentro
+node_modules
+dist
+moq-pkgs

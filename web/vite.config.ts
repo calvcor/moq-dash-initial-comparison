@@ -1,10 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 // Versión instalada de cada reproductor, leída de node_modules al construir, para mostrarla en el dashboard
 const installed = (name: string): string => JSON.parse(readFileSync(new URL(`./node_modules/${name}/package.json`, import.meta.url), 'utf8')).version
+// Con MOQ_WATCH_FROM=git (web/Dockerfile) los @moq/* vienen de un commit y su versión no lo identifica: git@<commit>
+const gitLabel = existsSync(new URL('./moq-pkgs/label', import.meta.url))
+  ? readFileSync(new URL('./moq-pkgs/label', import.meta.url), 'utf8').trim()
+  : ''
+const moq = (name: string): string => gitLabel || installed(name)
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -12,9 +17,9 @@ export default defineConfig({
     // @moq/net y @moq/hang son dependencias de @moq/watch, pero contienen la parte de red y el catálogo: también
     // condicionan las medidas, y pueden cambiar sin que cambie @moq/watch
     __PLAYER_VERSIONS__: JSON.stringify({
-      moq_watch: installed('@moq/watch'),
-      moq_net: installed('@moq/net'),
-      moq_hang: installed('@moq/hang'),
+      moq_watch: moq('@moq/watch'),
+      moq_net: moq('@moq/net'),
+      moq_hang: moq('@moq/hang'),
       dashjs: installed('dashjs'),
     }),
   },
