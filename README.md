@@ -337,7 +337,35 @@ Medido el 21-10-2026 con Chrome headless en el Mac del usuario contra el servido
 1. **La red, cuando reproducen los tres a la vez por la VPN.** Los tres flujos suman unos 12,5 Mbit/s, más las ráfagas de DASH al arrancar, y el túnel da unos 21 Mbit/s en una conexión TCP. En los colapsos el RTT HTTP al servidor pasa de unos 50 ms a 1,2-5,9 s y la llegada cae a la vez en las tres ramas (de 0 a 30 fps durante varios segundos, y después llega todo de golpe), mientras la traza del servidor muestra el codificador a 60 fps sin huecos. Sin reproductores, en 71 s el RTT no pasó de 138 ms. Por la red local no se ha medido.
 2. **Pintar 60 fps en una pantalla de 60 Hz sin acompasar los frames al refresco.** Con la llegada y la decodificación a 60 fps:
    - **WebRTC** pinta unos 52-53: el navegador descarta unos 7 frames por segundo ya decodificados cuando dos caen en el mismo refresco. Con `--disable-frame-rate-limit` pinta 59 y descarta 1 por segundo; no depende de la carga ni del medidor.
-   - **MoQ** pinta 45-56 según la pasada: `@moq/watch` libera cada frame a su hora de presentación y, si llegan dos antes del siguiente refresco, dibuja solo el último. Con `delay: auto` el búfer queda en unos 75 ms para un jitter medido de 27 ms, y los frames que llegan tarde se liberan nada más decodificarse y se amontonan. Alternando en la misma sesión: con `auto` (76 ms), 53,6 fps pintados; con 500 ms (546 ms), 59,5. Es el comportamiento por defecto de la librería, y así se mide.
+   - **MoQ** pinta 45-56 según la pasada: `@moq/watch` libera cada frame a su hora de presentación y, si llegan dos antes del siguiente refresco, dibuja solo el último. Con `delay: auto` el búfer queda en unos 75 ms para un jitter medido de 27 ms, y los frames que llegan tarde se liberan nada más decodificarse y se amontonan. Alternando en la misma sesión: con `auto` (76 ms), 53,6 fps pintados; con 500 ms (546 ms), 59,5. Es el comportamiento por defecto de la librería, y así se mide. El mecanismo exacto y por qué un búfer grande no basta, en "Por qué el tiempo en pantalla de MoQ es irregular", más abajo.
+
+#### Por qué el tiempo en pantalla de MoQ es irregular
+
+Medido el 22-10-2026 con Chrome headless en el Mac del usuario, solo con el reproductor MoQ, una calidad 1080p fijada a mano y una sonda que anota, sin cambiar el reproductor, cuándo llega cada frame (`sync.received`), cuándo lo libera `@moq/watch` (`video.out.frame`), cuándo se pinta (`renderer.out.frame`) y a qué hora se ejecuta cada `requestAnimationFrame`. Contra el servidor por Wi-Fi (`@moq/watch` 0.6.3) y en local (compilado desde `main`, `git@bc64b9c`), en pasadas de 25-30 s alternando el búfer.
+
+**El mecanismo** (está en el código de las dos versiones y lo confirman los datos): cada frame decodificado espera con un `setTimeout` a su hora de presentación (marca de tiempo + una referencia que fija el frame que antes llegó + el búfer) y se publica. El renderizador pide entonces un `requestAnimationFrame` para dibujarlo, y si se publica otro antes de que ese `requestAnimationFrame` se ejecute, lo cancela y dibuja solo el nuevo. **Un frame se pierde exactamente cuando el siguiente se libera antes del `requestAnimationFrame` que debía pintarlo**: así se predijeron, uno a uno, todos los frames sin pintar de cada pasada (p. ej. 305 de 305, 434 de 434). Cada frame perdido deja al anterior dos refrescos en pantalla. El `<video>` de DASH y WebRTC, en cambio, elige el frame en el compositor, alineado con el refresco.
+
+Hay dos razones por las que el siguiente se adelanta:
+
+1. **Llega tarde y sale sin esperar.** Si llega con más retraso que el búfer, se libera nada más decodificarse y se junta con el siguiente. Contra el servidor por Wi-Fi, el retraso de llegada respecto al frame más rápido tuvo p95 de 85-390 ms (el ping al servidor variaba de 2,6 a 73 ms), frente a 5-9 ms en local. Con `auto` el búfer era de 43 ms (0.6.3): el 18-37 % de los frames salían sin esperar y hubo refrescos con hasta 8 frames liberados.
+2. **La fase del reloj de liberación respecto al refresco.** El reloj de liberación no está atado al refresco de pantalla y su fase la fija cada sesión al anclar la referencia: cambia de una carga de página a otra. Si las liberaciones caen justo donde se ejecuta el `requestAnimationFrame` (1-3 ms después de la marca del refresco), el retraso variable de `setTimeout` basta para que dos frames seguidos caigan en el mismo refresco. Ocurre aunque todos lleguen a tiempo.
+
+Con un búfer fijo de 300 ms (sin frames tardíos, salvo una pasada):
+
+| Fase de las liberaciones en el refresco | Frames pintados | Perdidos por fase | Perdidos por llegada tardía |
+| :--- | :--- | :--- | :--- |
+| 0,6-0,8 (servidor y local) | 60,0 fps | 0-1 | 0 |
+| 0,3-0,4 (servidor) | 59,7 fps | 21 en 25 s | 0 |
+| 0,0-0,2 (servidor y local) | 47,8-50,5 fps | 234-301 en 25 s | 0-4 |
+| 0,8-0,9, con llegadas de hasta 509 ms (servidor) | 56,7 fps | 13 | 87 |
+
+Con `auto` contra el servidor se suman las dos: 45,7 fps, con 181 frames perdidos por llegada tardía y 253 por fase en 30 s. En local, con `auto` (20 ms en `main`) y sin Wi-Fi, 59,7-59,9 fps.
+
+Consecuencias para la medida:
+- **El ritmo de MoQ cambia al recargar la página** aunque nada más cambie: es la fase de esa sesión. Para comparar el tiempo en pantalla o los frames pintados de MoQ hacen falta varias sesiones por condición, no una.
+- **Un búfer mayor solo arregla la primera causa.** El dato de 59,5 fps con 500 ms de la sección anterior fue, probablemente, una sesión con buena fase.
+- **El coste del medidor puede pesar más de lo que parece:** al retrasar el hilo principal, retrasa los temporizadores y los `requestAnimationFrame`, que es justo lo que decide qué frame se pierde. No se ha medido por separado.
+- Es el comportamiento de la librería tal como viene, y así se mide (principio 1). No se ha tocado el reproductor.
    - **DASH** pinta 57-60: el `<video>` con MSE presenta al ritmo del reloj de reproducción.
 3. **El propio medidor.** La lectura del timecode (`VideoFrame.copyTo`) ocupa el 21,5 % del hilo principal con los tres reproductores, unos 1,3 ms síncronos por lectura. Apagándola en tramos alternos de 8 s, el hilo principal pasa del 40 % al 10 % ocupado y MoQ pinta 47,3 fps en vez de 44,9; DASH y WebRTC no cambian. El medidor le cuesta a MoQ unos 2-3 fps.
 
