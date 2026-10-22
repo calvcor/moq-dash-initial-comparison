@@ -1,3 +1,5 @@
+import type { FrameTime } from './lib/glass';
+
 // Una calidad de la escalera que codifica la fuente (16:9)
 export interface Rendition {
   height: number;
@@ -109,6 +111,11 @@ export interface PlayerMetrics {
   // De dónde sale networkKbps en MoQ: contadores del transporte, o carga útil si el navegador no los ofrece
   networkSource?: 'transport' | 'payload';
   fps: number | null; // frames distintos presentados en el último segundo
+  // Tiempo en pantalla de cada frame (del pintado de uno al del siguiente), último segundo; va en refrescos
+  frameTimeSdMs: number | null;
+  frameTimeP95Ms: number | null;
+  frameTimeMaxMs: number | null;
+  frameTimes: FrameTime[]; // los de los últimos 2 s, para la gráfica
   bufferLengthSec: number | null;
   stalls: number;
   stallMs: number;
@@ -157,6 +164,9 @@ export interface SampleRow {
   dash_kbps: number | null;
   dash_net_kbps: number | null;
   dash_fps: number | null;
+  dash_frametime_sd_ms: number | null; // tiempo en pantalla de cada frame, último segundo
+  dash_frametime_p95_ms: number | null;
+  dash_frametime_max_ms: number | null;
   dash_buffer_s: number | null;
   dash_stalls: number;
   dash_stall_ms: number;
@@ -174,6 +184,9 @@ export interface SampleRow {
   moq_kbps: number | null;
   moq_net_kbps: number | null;
   moq_fps: number | null;
+  moq_frametime_sd_ms: number | null; // tiempo en pantalla de cada frame, último segundo
+  moq_frametime_p95_ms: number | null;
+  moq_frametime_max_ms: number | null;
   moq_jitter_buffer_s: number | null; // tiempo medio retenido en el reproductor, como rtc_jitter_buffer_s
   moq_stalls: number;
   moq_stall_ms: number;
@@ -199,6 +212,9 @@ export interface SampleRow {
   rtc_kbps: number | null;
   rtc_net_kbps: number | null;
   rtc_fps: number | null;
+  rtc_frametime_sd_ms: number | null; // tiempo en pantalla de cada frame, último segundo
+  rtc_frametime_p95_ms: number | null;
+  rtc_frametime_max_ms: number | null;
   rtc_jitter_buffer_s: number | null;
   rtc_stalls: number;
   rtc_stall_ms: number;

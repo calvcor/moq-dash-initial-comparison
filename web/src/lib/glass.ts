@@ -36,11 +36,22 @@ const SAMPLER_GAP_MS = 250; // el propio muestreo se detuvo (pestaña oculta, hi
 export const WATCHDOG_MS = 10000;
 export const WATCHDOG_GRACE_MS = 20000;
 
+/** Tiempo que un frame estuvo en pantalla: de su pintado (t) al del siguiente, en ms. */
+export interface FrameTime {
+  t: number; // hora de pintado del frame siguiente (performance.now)
+  dt: number;
+}
+
 export interface GlassSnapshot {
   latencyMs: number | null; // mediana de los frames presentados en el último segundo
   fps: number | null; // frames distintos presentados por segundo, media de los últimos 2 s
   stalls: number;
   stallMs: number;
+  // Tiempo en pantalla de los frames del último segundo: desviación típica, p95 y máximo
+  frameTimeSdMs: number | null;
+  frameTimeP95Ms: number | null;
+  frameTimeMaxMs: number | null;
+  frameTimes: FrameTime[]; // los de los últimos 2 s, para la gráfica
 }
 
 export class GlassMeter {
@@ -58,6 +69,8 @@ export class GlassMeter {
   #stalls = 0;
   #stallMs = 0;
   #samples: { t: number; latency: number }[] = [];
+  #frameTimes: FrameTime[] = [];
+  #changeValid = false; // #lastChange es el pintado de un frame, no el reinicio tras un parón del muestreo
 
   constructor(grab: FrameGrabber, getLayouts: () => TimecodeLayout[] = () => [DEFAULT_TIMECODE]) {
     this.#grab = grab;
@@ -88,12 +101,18 @@ export class GlassMeter {
   snapshot(): GlassSnapshot {
     const counters = { stalls: this.#stalls, stallMs: Math.round(this.#stallMs) };
     // Con el muestreo parado (pestaña oculta) no hay medida actual
-    if (performance.now() - this.#lastTick > SAMPLER_GAP_MS) return { latencyMs: null, fps: null, ...counters };
+    if (performance.now() - this.#lastTick > SAMPLER_GAP_MS) {
+      return { latencyMs: null, fps: null, frameTimeSdMs: null, frameTimeP95Ms: null, frameTimeMaxMs: null, frameTimes: [], ...counters };
+    }
 
     // Las ventanas se anclan al último frame muestreado, no al instante de la consulta: las muestras
     // llevan la hora de su frame y contarlas hasta "ahora" deja fuera de media un frame por ventana.
     const end = this.#lastTick;
     this.#samples = this.#samples.filter((s) => s.t > end - FPS_WINDOW_MS);
+    this.#frameTimes = this.#frameTimes.filter((f) => f.t > end - FPS_WINDOW_MS);
+    const times = this.#frameTimes.filter((f) => f.t > end - WINDOW_MS).map((f) => f.dt).sort((a, b) => a - b);
+    const mean = times.reduce((a, b) => a + b, 0) / times.length;
+    const round = (v: number) => Math.round(v * 10) / 10;
     const sorted = this.#samples
       .filter((s) => s.t > end - WINDOW_MS)
       .map((s) => s.latency)
@@ -102,6 +121,10 @@ export class GlassMeter {
       latencyMs: sorted.length ? Math.round(sorted[sorted.length >> 1]) : null,
       // Intervalos entre frames, no frames por ventana: contar en una ventana fija oscila ±1 según la fase
       fps: sorted.length > 1 ? Math.round(((this.#samples.length - 1) * 10000) / (end - this.#samples[0].t)) / 10 : null,
+      frameTimeSdMs: times.length > 1 ? round(Math.sqrt(times.reduce((a, b) => a + (b - mean) ** 2, 0) / (times.length - 1))) : null,
+      frameTimeP95Ms: times.length ? round(times[Math.min(times.length - 1, Math.floor(0.95 * times.length))]) : null,
+      frameTimeMaxMs: times.length ? round(times[times.length - 1]) : null,
+      frameTimes: [...this.#frameTimes],
       ...counters,
     };
   }
@@ -111,6 +134,7 @@ export class GlassMeter {
     if (t - this.#lastTick > SAMPLER_GAP_MS) {
       this.#lastChange = t;
       this.#inStall = false;
+      this.#changeValid = false;
     }
     this.#lastTick = t;
 
@@ -140,8 +164,12 @@ export class GlassMeter {
       this.#stallMs += t - this.#lastChange;
       this.#inStall = false;
     }
+    // Lo que estuvo en pantalla el frame anterior, parones incluidos. Va en refrescos de pantalla: t es la
+    // hora del requestAnimationFrame en que se vio el frame nuevo
+    if (this.#changeValid) this.#frameTimes.push({ t, dt: t - this.#lastChange });
     this.#lastCode = code;
     this.#lastChange = t;
+    this.#changeValid = true;
 
     const now = serverNowMs(t);
     if (now === null) return;

@@ -14,6 +14,7 @@ import { Line } from 'react-chartjs-2';
 import { Info } from 'lucide-react';
 import { getClockSync } from '../lib/clock';
 import type { PlayerMetrics, SampleRow } from '../types';
+import type { FrameTime } from '../lib/glass';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -30,6 +31,10 @@ interface MetricsDashboardProps {
     moqBitrate: (number | null)[];
     rtcLatency: (number | null)[];
     rtcBitrate: (number | null)[];
+    dashFrames: FrameTime[];
+    moqFrames: FrameTime[];
+    rtcFrames: FrameTime[];
+    framesAt: number;
   };
   samples: SampleRow[];
   anomalies?: { master: number; dash: number; moq: number; rtc: number };
@@ -40,6 +45,14 @@ interface MetricsDashboardProps {
 }
 
 const WARMUP_S = 10; // arranque y catch-up inicial, fuera de los estadísticos
+
+const FRAME_TIME_HINT = (
+  <p>
+    Tiempo que cada frame estuvo en pantalla en el último segundo: desviación típica y p95, del pintado de uno al
+    del siguiente. Va en refrescos de pantalla (16,7 ms a 60 Hz), así que depende de la pantalla y del navegador
+    además del protocolo. Un frame que el medidor no llega a leer cuenta como uno de doble duración.
+  </p>
+);
 
 const fmt = (value: number | null, unit: string) => (value === null ? '--' : `${value} ${unit}`);
 
@@ -171,6 +184,12 @@ const Telemetry: React.FC<{
       <Stat label="Latencia según reproductor" value={fmt(metrics.reportedLatencyMs, 'ms')} hint={reportedHint} />
       <Stat label="Frames presentados" value={fmt(metrics.fps, 'fps')} />
       <Stat
+        label="Tiempo en pantalla σ · p95"
+        value={metrics.frameTimeSdMs === null ? '--' : `${metrics.frameTimeSdMs} · ${metrics.frameTimeP95Ms} ms`}
+        wide
+        hint={FRAME_TIME_HINT}
+      />
+      <Stat
         label={`Calidad (${metrics.qualityMode === 'auto' ? 'auto' : 'fijada'})`}
         value={
           metrics.renditionHeight === null
@@ -209,7 +228,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   onExport,
   onReset,
 }) => {
-  const [metricTab, setMetricTab] = useState<'latency' | 'bitrate'>('latency');
+  const [metricTab, setMetricTab] = useState<'latency' | 'bitrate' | 'frametime'>('latency');
 
   const steady = samples.filter((r) => r.elapsed_s >= WARMUP_S && !r.tab_hidden);
   const dashStats = summarize(steady.map((r) => r.dash_g2g_ms));
@@ -280,6 +299,16 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     ],
   };
 
+  // Un punto por frame pintado: x en segundos respecto a la última actualización, y su tiempo en pantalla
+  const framePoints = (frames: FrameTime[]) => frames.map((f) => ({ x: (f.t - history.framesAt) / 1000, y: Math.round(f.dt * 10) / 10 }));
+  const frameTimeChartData = {
+    datasets: [
+      { label: 'LL-DASH', hidden: !players.dash, data: framePoints(history.dashFrames), borderColor: '#3b82f6', backgroundColor: '#3b82f6' },
+      { label: 'MoQ', hidden: !players.moq, data: framePoints(history.moqFrames), borderColor: '#10b981', backgroundColor: '#10b981' },
+      { label: 'WebRTC', hidden: !players.rtc, data: framePoints(history.rtcFrames), borderColor: '#f59e0b', backgroundColor: '#f59e0b' },
+    ].map((d) => ({ ...d, borderWidth: 1, pointRadius: 1.5, tension: 0 })),
+  };
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -297,6 +326,21 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     plugins: {
       legend: {
         labels: { color: '#cbd5e1', font: { size: 12 } },
+      },
+    },
+  };
+
+  const frameTimeChartOptions = {
+    ...chartOptions,
+    parsing: false as const,
+    scales: {
+      y: { ...chartOptions.scales.y, min: 0, title: { display: true, text: 'ms en pantalla', color: '#94a3b8' } },
+      x: {
+        ...chartOptions.scales.x,
+        type: 'linear' as const,
+        min: -10,
+        max: 0,
+        title: { display: true, text: 'segundos', color: '#94a3b8' },
       },
     },
   };
@@ -437,7 +481,9 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           <h4 className="text-sm font-semibold text-slate-300">
             {metricTab === 'latency'
               ? 'Evolución de Latencia Glass-to-Glass (ms)'
-              : 'Evolución de Bitrate Recibido (kbps)'}
+              : metricTab === 'bitrate'
+                ? 'Evolución de Bitrate Recibido (kbps)'
+                : 'Tiempo en pantalla de cada frame, últimos 10 s (ms)'}
           </h4>
           <div className="flex space-x-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
             <button
@@ -460,6 +506,16 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
             >
               Bitrate (kbps)
             </button>
+            <button
+              onClick={() => setMetricTab('frametime')}
+              className={`px-3 py-1 rounded transition-colors ${
+                metricTab === 'frametime'
+                  ? 'bg-blue-600 text-white font-medium'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Tiempo en pantalla (ms)
+            </button>
           </div>
         </div>
 
@@ -469,10 +525,11 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
               Recolectando datos de telemetría en tiempo real...
             </div>
           ) : (
-            <Line
-              data={metricTab === 'latency' ? latencyChartData : bitrateChartData}
-              options={chartOptions}
-            />
+            metricTab === 'frametime' ? (
+              <Line data={frameTimeChartData} options={frameTimeChartOptions} />
+            ) : (
+              <Line data={metricTab === 'latency' ? latencyChartData : bitrateChartData} options={chartOptions} />
+            )
           )}
         </div>
       </div>

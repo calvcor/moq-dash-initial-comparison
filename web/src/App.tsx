@@ -8,6 +8,7 @@ import { NetworkPanel } from './components/NetworkPanel';
 import { PipelineDiagram } from './components/PipelineDiagram';
 import { VersionsPanel, versionsLabel } from './components/VersionsPanel';
 import { RateWindow } from './lib/glass';
+import type { FrameTime } from './lib/glass';
 import { gridCols } from './lib/layout';
 import { syncClock, getClockSync } from './lib/clock';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile, VersionReport } from './types';
@@ -38,6 +39,10 @@ const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
       bitrateKbps: null,
       networkKbps: null,
       fps: null,
+      frameTimeSdMs: null,
+      frameTimeP95Ms: null,
+      frameTimeMaxMs: null,
+      frameTimes: [],
       bufferLengthSec: null,
       stalls: 0,
       stallMs: 0,
@@ -57,6 +62,10 @@ const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
       bitrateKbps: null,
       networkKbps: null,
       fps: null,
+      frameTimeSdMs: null,
+      frameTimeP95Ms: null,
+      frameTimeMaxMs: null,
+      frameTimes: [],
       bufferLengthSec: null,
       stalls: 0,
       stallMs: 0,
@@ -76,6 +85,10 @@ const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
       bitrateKbps: null,
       networkKbps: null,
       fps: null,
+      frameTimeSdMs: null,
+      frameTimeP95Ms: null,
+      frameTimeMaxMs: null,
+      frameTimes: [],
       bufferLengthSec: null,
       stalls: 0,
       stallMs: 0,
@@ -88,6 +101,13 @@ const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
       qualityMode: 'manual',
       status: 'idle',
   },
+};
+
+// Gráfica del tiempo en pantalla de cada frame: últimos 10 s
+const FRAME_HISTORY_MS = 10000;
+const appendFrames = (kept: FrameTime[], fresh: FrameTime[], now: number) => {
+  const last = kept.length ? kept[kept.length - 1].t : -Infinity;
+  return [...kept, ...fresh.filter((f) => f.t > last)].filter((f) => f.t > now - FRAME_HISTORY_MS);
 };
 
 const stage = (metrics: PlayerMetrics, key: string) => metrics.stages?.stages.find((s) => s.key === key)?.ms ?? null;
@@ -138,6 +158,11 @@ export function App() {
     moqBitrate: (number | null)[];
     rtcLatency: (number | null)[];
     rtcBitrate: (number | null)[];
+    // Tiempo en pantalla de cada frame, de los últimos FRAME_HISTORY_MS
+    dashFrames: FrameTime[];
+    moqFrames: FrameTime[];
+    rtcFrames: FrameTime[];
+    framesAt: number; // performance.now() de la última actualización, para el eje "segundos atrás"
   }>({
     labels: [],
     dashLatency: [],
@@ -146,6 +171,10 @@ export function App() {
     moqBitrate: [],
     rtcLatency: [],
     rtcBitrate: [],
+    dashFrames: [],
+    moqFrames: [],
+    rtcFrames: [],
+    framesAt: 0,
   });
 
   const hasInitializedConfig = useRef(false);
@@ -294,6 +323,9 @@ export function App() {
         dash_kbps: currentDash.bitrateKbps,
         dash_net_kbps: currentDash.networkKbps,
         dash_fps: currentDash.fps,
+        dash_frametime_sd_ms: currentDash.frameTimeSdMs,
+        dash_frametime_p95_ms: currentDash.frameTimeP95Ms,
+        dash_frametime_max_ms: currentDash.frameTimeMaxMs,
         dash_buffer_s: currentDash.bufferLengthSec,
         dash_stalls: currentDash.stalls,
         dash_stall_ms: currentDash.stallMs,
@@ -311,6 +343,9 @@ export function App() {
         moq_kbps: currentMoq.bitrateKbps,
         moq_net_kbps: currentMoq.networkKbps,
         moq_fps: currentMoq.fps,
+        moq_frametime_sd_ms: currentMoq.frameTimeSdMs,
+        moq_frametime_p95_ms: currentMoq.frameTimeP95Ms,
+        moq_frametime_max_ms: currentMoq.frameTimeMaxMs,
         moq_jitter_buffer_s: currentMoq.bufferLengthSec,
         moq_stalls: currentMoq.stalls,
         moq_stall_ms: currentMoq.stallMs,
@@ -334,6 +369,9 @@ export function App() {
         rtc_kbps: currentRtc.bitrateKbps,
         rtc_net_kbps: currentRtc.networkKbps,
         rtc_fps: currentRtc.fps,
+        rtc_frametime_sd_ms: currentRtc.frameTimeSdMs,
+        rtc_frametime_p95_ms: currentRtc.frameTimeP95Ms,
+        rtc_frametime_max_ms: currentRtc.frameTimeMaxMs,
         rtc_jitter_buffer_s: currentRtc.bufferLengthSec,
         rtc_stalls: currentRtc.stalls,
         rtc_stall_ms: currentRtc.stallMs,
@@ -378,6 +416,7 @@ export function App() {
         versions: versionsLabel(versionsRef.current),
       });
 
+      const now = performance.now();
       setHistory((prev) => {
         const newLabels = [...prev.labels, timeStr].slice(-25);
         const newDashLat = [...prev.dashLatency, currentDash.latencyMs].slice(-25);
@@ -393,6 +432,11 @@ export function App() {
           moqBitrate: newMoqBit,
           rtcLatency: [...prev.rtcLatency, currentRtc.latencyMs].slice(-25),
           rtcBitrate: [...prev.rtcBitrate, currentRtc.bitrateKbps].slice(-25),
+          // Cada informe trae los frames de sus últimos 2 s: se añaden los posteriores al último guardado
+          dashFrames: appendFrames(prev.dashFrames, currentDash.frameTimes, now),
+          moqFrames: appendFrames(prev.moqFrames, currentMoq.frameTimes, now),
+          rtcFrames: appendFrames(prev.rtcFrames, currentRtc.frameTimes, now),
+          framesAt: now,
         };
       });
     }, 1000);

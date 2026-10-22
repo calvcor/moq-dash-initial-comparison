@@ -260,6 +260,10 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
               networkKbps: networkRate.kbps(),
               networkSource,
               fps: glass.fps,
+              frameTimeSdMs: glass.frameTimeSdMs,
+              frameTimeP95Ms: glass.frameTimeP95Ms,
+              frameTimeMaxMs: glass.frameTimeMaxMs,
+              frameTimes: glass.frameTimes,
               // Tiempo medio que los frames entregados desde la última muestra pasaron retenidos en el reproductor
               bufferLengthSec: held === null ? null : Number(held.toFixed(3)),
               stalls: glass.stalls,
