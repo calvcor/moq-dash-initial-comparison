@@ -105,7 +105,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   del navegador en `web/package-lock.json`. Nada se actualiza solo.
 - moq-cli se puede compilar desde un commit con `MOQ_CLI_FROM=git` y `MOQ_CLI_COMMIT` en el `.env`
   (README, 4.4b); el panel y el CSV lo muestran como `git@<commit>`. Compilar necesita varios GB de RAM.
-  Igual `@moq/watch` y sus `@moq/*` con `MOQ_WATCH_FROM=git` y `MOQ_WATCH_COMMIT` (de momento solo en local).
+  Igual `@moq/watch` y sus `@moq/*` con `MOQ_WATCH_FROM=git` y `MOQ_WATCH_COMMIT`; desde el 22-10-2026,
+  también en el servidor (`git@bc64b9c`, construir la web tarda unos 2 min).
 - **Antes de dar por buena una actualización de moq-cli, mide la entrada del publicador con un
   espectador conectado.** La 0.14.4 acumula retraso sin parar y la 0.14.5 se queda atrás con un
   espectador; la 0.14.7 (desplegada del 19 al 21-10-2026) no tiene ese problema. Desde el 21-10-2026 el

@@ -18,7 +18,10 @@ comprobación directa, se dice.
 > principal de moq (`git@bc64b9c`, `MOQ_CLI_FROM=git`; su `--version` dice 0.14.2), que no tiene el límite
 > de ~2 MB/s de entrada de la 0.14.7: con la escalera 2000/1000/350 y un espectador, espera p95 en su
 > entrada de 1 ms frente a 1,2-3,5 s y ningún cambio de calidad en 40 s frente a 34-54 (ver 4.14). Las
-> medidas de MoQ anteriores y posteriores a ese día no son comparables. Lo que este documento describe se observó con las
+> medidas de MoQ anteriores y posteriores a ese día no son comparables. Desde el 22 de octubre, el
+> dashboard del servidor usa también `@moq/watch` y sus `@moq/*` compilados desde ese mismo commit
+> (`git@bc64b9c`, `MOQ_WATCH_FROM=git`), como ya se hacía en local: el reproductor de MoQ cambia, así que
+> las medidas de MoQ del servidor anteriores y posteriores tampoco son comparables entre sí. Lo que este documento describe se observó con las
 > de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
 
 > **Audio:** desde el 22 de octubre de 2026 la fuente codifica el audio en **Opus** (antes, AAC-LC), para
