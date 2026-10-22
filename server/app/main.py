@@ -1,13 +1,16 @@
+import json
 import math
 import os
 import re
+import shlex
 import signal
 import subprocess
 import threading
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
+from urllib.parse import urlsplit
 import requests
 from pydantic import BaseModel, Field, model_validator
 from fastapi import FastAPI, HTTPException
@@ -55,6 +58,15 @@ CERTS_DIR = "/certs"
 DASH_HOST = os.getenv("DASH_HOST", "").strip()
 DASH_PORT = int(os.getenv("DASH_PORT", "8443"))
 
+# Cámara RTSP como fuente alternativa al bucle. La URL suele llevar usuario y contraseña: solo vive en el
+# .env y nunca sale por la API ni al CSV. CAMERA_FPS fuerza la cadencia si la cámara no la anuncia bien.
+CAMERA_RTSP_URL = os.getenv("CAMERA_RTSP_URL", "").strip()
+CAMERA_FPS = os.getenv("CAMERA_FPS", "").strip()
+# Calidad de la referencia que se emite con la cámara para el VMAF (qoe.py). Medido sobre 5 s de Big Buck
+# Bunny el 22-10-2026: qp 10 da 99 Mbit/s y VMAF 98,8 frente a 99,3 de la copia sin pérdidas (qp 0,
+# 238 Mbit/s), con PSNR de luma de 51,5 dB.
+REFERENCE_QP = 10
+
 def dash_url() -> str:
     path = "/media/dash/manifest.mpd"
     return f"https://{DASH_HOST}:{DASH_PORT}{path}" if DASH_HOST else path
@@ -97,8 +109,11 @@ def default_ladder() -> list[Rendition]:
     return [Rendition(height=1080, bitrate_kbps=4000), Rendition(height=720, bitrate_kbps=2000), Rendition(height=360, bitrate_kbps=700)]
 
 class StreamConfig(BaseModel):
+    # Fuente: Big Buck Bunny en bucle ("file") o la cámara RTSP de CAMERA_RTSP_URL ("camera")
+    source: Literal["file", "camera"] = "file"
     gop_size: int = 60           # 1 segundo a 60 fps
-    fps: int = 60
+    # Con el bucle, siempre 60 (el del vídeo). Con la cámara la fija el servidor al arrancar: la de la cámara.
+    fps: int = Field(60, ge=1, le=60)
     seg_duration: float = 2.0    # Segundos por segmento DASH
     frag_duration: float = 0.1   # Chunks CMAF de 100ms para LL-DASH
     # Escalera de calidades que se codifica en vivo, de mayor a menor. Una sola entrada = sin adaptación.
@@ -116,6 +131,8 @@ class StreamConfig(BaseModel):
 
     @model_validator(mode="after")
     def sort_ladder(self):
+        if self.source == "file":
+            self.fps = 60
         # El primer stream es siempre la calidad más alta; no se admiten dos calidades idénticas
         self.renditions = sorted(self.renditions, key=lambda r: (r.height, r.bitrate_kbps), reverse=True)
         if len({(r.height, r.bitrate_kbps) for r in self.renditions}) != len(self.renditions):
@@ -248,16 +265,95 @@ def kill_proc(proc: Optional[subprocess.Popen]):
         except Exception as e:
             logger.warning(f"No se pudo terminar el proceso {proc.pid}: {e}")
 
+# Lo que se sabe de la cámara, sin la URL: si está configurada, a qué host apunta y qué anunció al sondearla
+camera_state = {
+    "configured": bool(CAMERA_RTSP_URL),
+    "host": urlsplit(CAMERA_RTSP_URL).hostname if CAMERA_RTSP_URL else None,
+    "probe": None,
+    "error": None,
+}
+
+def frame_rate(value: Optional[str]) -> Optional[float]:
+    try:
+        num, den = (value or "").split("/")
+        rate = int(num) / int(den)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return rate if 1 <= rate <= 120 else None
+
+def probe_camera() -> dict:
+    """Resolución, cadencia y audio que anuncia la cámara. Abre una sesión RTSP propia, con tiempo máximo."""
+    if not CAMERA_RTSP_URL:
+        raise RuntimeError("No hay cámara configurada (CAMERA_RTSP_URL en el .env)")
+    try:
+        done = subprocess.run(
+            ["ffprobe", "-v", "error", "-rtsp_transport", "tcp", "-timeout", "5000000",
+             "-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate",
+             "-of", "json", CAMERA_RTSP_URL],
+            capture_output=True, text=True, timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        done = None
+    # Los mensajes de FFmpeg repiten la URL, con la contraseña: no salen de aquí
+    if done is None or done.returncode != 0:
+        detail = (done.stderr if done else "sin respuesta en 20 s").replace(CAMERA_RTSP_URL, "<cámara>").strip()
+        camera_state.update(probe=None, error=f"No se pudo abrir la cámara: {detail[-300:]}")
+        raise RuntimeError(camera_state["error"])
+    streams = json.loads(done.stdout).get("streams", [])
+    video = next((st for st in streams if st.get("codec_type") == "video"), None)
+    if video is None:
+        camera_state.update(probe=None, error="La cámara no ofrece vídeo")
+        raise RuntimeError(camera_state["error"])
+    fps = float(CAMERA_FPS) if CAMERA_FPS else frame_rate(video.get("avg_frame_rate")) or frame_rate(video.get("r_frame_rate"))
+    if fps is None:
+        camera_state.update(probe=None, error="La cámara no anuncia su cadencia: fíjala con CAMERA_FPS en el .env")
+        raise RuntimeError(camera_state["error"])
+    probe = {
+        "codec": video.get("codec_name"),
+        "width": video.get("width"),
+        "height": video.get("height"),
+        "fps": round(fps, 3),
+        "audio": any(st.get("codec_type") == "audio" for st in streams),
+    }
+    camera_state.update(probe=probe, error=None)
+    return probe
+
 def ensure_master_source(force_restart: bool = False):
-    """Mantiene la fuente FFmpeg maestra emitiendo Big Buck Bunny en bucle continuo sin parar."""
+    """Mantiene la fuente FFmpeg maestra emitiendo sin parar: Big Buck Bunny en bucle o la cámara RTSP."""
     global master_start_time
     if force_restart or processes["master_source"] is None or processes["master_source"].poll() is not None:
         kill_proc(processes.get("master_source"))
         master_start_time = time.time()
         start_epoch_sec = int(master_start_time)
         font_path = get_font_path()
-        vf_text = (
-            f"setpts=N/(60*TB),"
+        fps = current_config.fps
+        camera = current_config.source == "camera"
+        if camera:
+            # Cámara: sin -re (ya llega a su ritmo). El filtro fps deja una cadencia constante con las marcas
+            # de tiempo de la propia cámara, duplicando o descartando frames si faltan o sobran; después
+            # todo se lleva a 1920x1080 (16:9, con bandas si hace falta), como el vídeo del bucle.
+            inputs = (
+                f"-rtsp_transport tcp -timeout 5000000 -fflags nobuffer -flags low_delay "
+                f"-i {shlex.quote(CAMERA_RTSP_URL)} "
+            )
+            prepare = (
+                f"fps={fps},scale=1920:1080:force_original_aspect_ratio=decrease,"
+                f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=N/({fps}*TB)"
+            )
+            # Audio en silencio, generado en su propio grafo: las ramas llevan la misma pista que con el
+            # bucle y no depende de que la cámara tenga micrófono. La referencia lleva otro igual (ver abajo).
+            audio_graph = "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[a]"
+        else:
+            # Vídeo y audio se leen por entradas separadas: el fichero los intercala en bloques de 0,5 s y con
+            # una sola entrada a ritmo real el audio llega a ráfagas, el muxer retiene el vídeo hasta tenerlo
+            # y las ramas reciben los frames a trompicones y con retardo añadido.
+            inputs = f"-re -stream_loop -1 -i '{VIDEO_FILE}' -re -stream_loop -1 -i '{VIDEO_FILE}' "
+            prepare = "setpts=N/(60*TB)"
+            # El audio va en un grafo de filtros propio. En el mismo grafo que el vídeo, FFmpeg pide frames a
+            # las dos entradas por turnos según sus marcas de tiempo, y el vídeo avanza al compás de los
+            # frames de audio de la fuente (24 ms) en vez de al suyo (16,7 ms).
+            audio_graph = "[1:a:0]asetpts=N/(SR*TB)[a]"
+        clock = (
             f"drawtext=fontfile={font_path}:text='%{{pts\\:hms}}.%{{eif\\:mod(t*1000\\,1000)\\:d\\:3}}':"
             f"fontsize=48:fontcolor=white:box=1:boxcolor=black@0.8:x=60:y=60"
         )
@@ -265,7 +361,13 @@ def ensure_master_source(force_restart: bool = False):
         # Escalera de calidades: cada una se escala y recibe su propio timecode. Mismo GOP y sin cortes
         # de escena en todas, para que sus keyframes coincidan y se pueda conmutar entre ellas.
         ladder = current_config.renditions
-        graph = f"[0:v]{vf_text},split={len(ladder)}" + "".join(f"[s{i}]" for i in range(len(ladder)))
+        if camera:
+            # Con la cámara no hay original guardado: se aparta una copia de cada frame tal como entra en
+            # la escalera, antes de dibujar nada encima, para el VMAF (salida "reference", más abajo)
+            graph = f"[0:v]{prepare},split=2[reference][base];[base]{clock},split={len(ladder)}"
+        else:
+            graph = f"[0:v]{prepare},{clock},split={len(ladder)}"
+        graph += "".join(f"[s{i}]" for i in range(len(ladder)))
         maps, rates = "", ""
         for i, r in enumerate(ladder):
             # Etiqueta con la calidad, arriba a la derecha: deja ver de un vistazo cuál se está reproduciendo
@@ -279,25 +381,22 @@ def ensure_master_source(force_restart: bool = False):
             # Tope de tasa (VBV de 1 s): sin él los picos de x264 superan con mucho el bitrate nominal
             # y ni la emulación de red ni la adaptación de calidad tendrían una referencia fiable.
             rates += f"-b:v:{i} {r.bitrate_kbps}k -maxrate:v:{i} {int(r.bitrate_kbps * 1.2)}k -bufsize:v:{i} {r.bitrate_kbps}k "
-        # El audio va en un grafo de filtros propio. En el mismo grafo que el vídeo, FFmpeg pide frames a
-        # las dos entradas por turnos según sus marcas de tiempo, y el vídeo avanza al compás de los frames
-        # de audio de la fuente (24 ms) en vez de al suyo (16,7 ms).
-        audio_graph = "[1:a:0]asetpts=N/(SR*TB)[a]"
 
         # pes_payload_size=0: un PES por frame de audio. Por defecto MPEG-TS agrupa ~180 ms de audio y los
         # empaquetadores retienen el vídeo ese tiempo al intercalar.
         # Emite continuamente por UDP 5001 (DASH), 5002 (MoQ) y 5003 (WebRTC) con cabeceras repetidas para sincronización en caliente
         # y por 5004 al grabador de las pruebas de QoE (qoe.py), que solo escucha mientras graba
-        # Vídeo y audio se leen por entradas separadas: el fichero los intercala en bloques de 0,5 s y con
-        # una sola entrada a ritmo real el audio llega a ráfagas, el muxer retiene el vídeo hasta tenerlo
-        # y ambas ramas reciben los frames a trompicones y con retardo añadido.
         master_cmd = (
-            f"ffmpeg -re -stream_loop -1 -i '{VIDEO_FILE}' -re -stream_loop -1 -i '{VIDEO_FILE}' "
-            f"-filter_complex \"{graph}\" -filter_complex \"{audio_graph}\" {maps}-map '[a]' "
+            f"ffmpeg {inputs}"
+            f"-filter_complex \"{graph}\" -filter_complex \"{audio_graph}\" "
+            # Silencio aparte para la referencia: sacarlo del mismo generador con asplit ataría el audio de
+            # la escalera al ritmo de la referencia
+            + ("-filter_complex \"anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[reference_audio]\" " if camera else "")
+            + f"{maps}-map '[a]' "
             f"-c:v libx264 -preset ultrafast -tune zerolatency -threads 4 "
             f"-x264opts \"repeat-headers=1\" "
             f"{rates}-g {current_config.gop_size} -keyint_min {current_config.gop_size} -sc_threshold 0 "
-            f"-r {current_config.fps} -c:a aac -ac 2 -b:a 128k "
+            f"-r {fps} -c:a aac -ac 2 -b:a 128k "
             # Sin esto el multiplexor retiene cada frame de vídeo hasta tener un paquete de audio posterior,
             # para escribirlos en orden estricto de tiempo, y los frames salen a ráfagas: uno de cada ocho
             # con el doble de separación y huecos de más de 50 ms cada segundo. Con 1 µs escribe cada
@@ -305,6 +404,29 @@ def ensure_master_source(force_restart: bool = False):
             f"-max_interleave_delta 1 "
             f"-f tee \"[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5001?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5002?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5003?pkt_size=1316|[f=mpegts:pes_payload_size=0]udp://127.0.0.1:5004?pkt_size=1316\""
         )
+        if camera:
+            # Referencia para el VMAF: casi sin pérdidas (REFERENCE_QP), mismo GOP y mismos PTS que la
+            # escalera, así que su frame n es el frame n de cada calidad. Va a UDP 5005 y solo la escucha el
+            # grabador mientras dura una prueba; el resto del tiempo se descarta sin tocar el disco.
+            # Datagramas grandes (348 paquetes TS): pueden ser ~100 Mbit/s por loopback.
+            # -tune zerolatency, como la escalera: sin él, x264 reparte los frames entre hilos y entrega cada
+            # uno varios frames después, y FFmpeg, que hace avanzar todas las salidas a la par, retenía la
+            # escalera a su ritmo. Medido el 22-10-2026 con la cámara a 15 fps (marca quemada -> compuerta):
+            # p50 76-106 ms y p95 207-245 ms con la referencia sin zerolatency; 5,4-5,7 y 9,7-9,9 ms con él,
+            # lo mismo que sin referencia (5,8-5,9 y 9,8-11,0 ms).
+            # Lleva un audio AAC como el de la escalera solo para que sus PTS coincidan: FFmpeg desplaza cada
+            # salida para que nada empiece en negativo, y el AAC empieza 1024 muestras antes (1920 ticks, más
+            # de un frame a 60 fps). Sin audio, la referencia quedaba desplazada respecto al flujo.
+            # Por lo mismo, sin muxdelay ni muxpreload: FFmpeg los suma a los PTS de una salida MPEG-TS
+            # (0,7 + 0,5 s), pero no a las del tee. Con ellos la referencia iba 36 frames por delante a 30 fps.
+            master_cmd += (
+                f" -map '[reference]' -map '[reference_audio]' "
+                f"-c:v libx264 -preset ultrafast -tune zerolatency -qp {REFERENCE_QP} -threads 4 "
+                f"-x264opts \"repeat-headers=1\" -g {current_config.gop_size} -keyint_min {current_config.gop_size} "
+                f"-sc_threshold 0 -r {fps} -c:a aac -ac 2 -b:a 128k -max_interleave_delta 1 "
+                f"-muxdelay 0 -muxpreload 0 -f mpegts -pes_payload_size 0 "
+                f"'udp://127.0.0.1:{qoe.REFERENCE_PORT}?pkt_size={188 * 348}'"
+            )
         logger.info(f"Iniciando Fuente Maestra Continua FFmpeg con reloj en vivo (epoch {start_epoch_sec})...")
         processes["master_source"] = subprocess.Popen(
             master_cmd,
@@ -373,6 +495,7 @@ def get_status():
         },
         "stream_ids": stream_ids,
         "source": source.state,
+        "camera": camera_state,
         "restarts": restarts,
         # Con DASH_HOST, el navegador pide DASH directamente a este servidor por el router; sin él, a
         # través del punto de entrada, que es un proxy. MoQ va siempre directo por UDP al puerto indicado.
@@ -538,17 +661,47 @@ def start_all(restart_master: bool):
         time.sleep(0.4)
         ensure_master_source()
 
+@app.get("/api/camera")
+def get_camera():
+    """Sondea la cámara (resolución, cadencia, audio). Con ella emitiendo, devuelve lo último que se supo."""
+    with lifecycle:
+        if current_config.source == "camera" and alive("master_source"):
+            return camera_state
+        try:
+            probe_camera()
+        except RuntimeError:
+            pass
+        return camera_state
+
 @app.post("/api/start")
 def start_pipeline(config: Optional[StreamConfig] = None):
     global current_config, desired_running
-    if source.state["state"] != "ready":
+    wanted = config.source if config else current_config.source
+    if wanted == "file" and source.state["state"] != "ready":
         raise HTTPException(status_code=409, detail="El vídeo fuente todavía se está descargando")
     with lifecycle:
         need_restart_master = False
         if config:
-            if config.renditions != current_config.renditions or config.gop_size != current_config.gop_size:
+            if (config.renditions != current_config.renditions or config.gop_size != current_config.gop_size
+                    or config.source != current_config.source):
                 need_restart_master = True
-            current_config = config
+            if config.source == "camera" and config.source == current_config.source:
+                config.fps = current_config.fps  # la cadencia de la cámara la fija el servidor
+            new_config = config
+        else:
+            new_config = current_config.model_copy()
+        if new_config.source == "camera" and (need_restart_master or not alive("master_source")):
+            # La cadencia de la emisión es la de la cámara (redondeada), para no duplicar ni descartar frames
+            try:
+                probe = probe_camera()
+            except RuntimeError as e:
+                raise HTTPException(status_code=502, detail=str(e))
+            fps = min(60, max(1, round(probe["fps"])))
+            if fps != new_config.fps:
+                logger.info(f"Cámara a {probe['fps']} fps: la emisión pasa a {fps} fps")
+                new_config.fps = fps
+                need_restart_master = True
+        current_config = new_config
 
         # Asegurar que el segmento DASH no sea inferior a la duración del GOP cuando usamos -c copy
         min_seg = current_config.gop_size / current_config.fps
@@ -588,6 +741,7 @@ def start_qoe_recording(req: qoe.RecordingRequest):
     if not desired_running or not alive("master_source"):
         raise HTTPException(status_code=409, detail="La emisión no está en marcha")
     context = {
+        "source": current_config.source,
         "fps": current_config.fps,
         "renditions": [r.model_dump() for r in current_config.renditions],
         "timecodes": [timecode_layout(r.width, r.height) for r in current_config.renditions],
@@ -677,10 +831,12 @@ def supervise():
                 if not desired_running:
                     continue
                 now = time.time()
+                # Con un respiro: si la cámara no responde, la fuente cae enseguida y no conviene reintentar sin pausa
                 if not alive("master_source"):
-                    logger.warning("Supervisor: la fuente maestra ha caído; se relanza todo el pipeline")
-                    restarts["master"] += 1
-                    start_all(restart_master=True)
+                    if now - master_start_time > BACKOFF_S:
+                        logger.warning("Supervisor: la fuente maestra ha caído; se relanza todo el pipeline")
+                        restarts["master"] += 1
+                        start_all(restart_master=True)
                     continue
                 # DASH colgado: el proceso vive pero lleva varios segmentos sin publicar nada en el origen
                 dash_silence = max(10.0, 3 * current_config.seg_duration)

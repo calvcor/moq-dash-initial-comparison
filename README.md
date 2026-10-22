@@ -30,6 +30,14 @@ El vídeo fuente (Big Buck Bunny 1080p60, 355 MB) no va en el repositorio. La pr
 
 Abrir <http://localhost> en Chrome o Edge (hace falta WebTransport y WebCodecs). La emisión arranca sola.
 
+**Cámara RTSP como fuente (opcional).** En lugar del bucle se puede emitir el directo de una cámara IP. Su URL va en el `.env`, que no se sube al repositorio, porque suele llevar usuario y contraseña:
+
+```bash
+CAMERA_RTSP_URL=rtsp://usuario:contraseña@10.0.5.10:554/stream1
+```
+
+Después, `docker compose up -d --no-deps orchestrator` y elegir **Cámara RTSP** en el selector **Fuente** del panel. La cadencia la anuncia la cámara; si no la anuncia bien, se fija con `CAMERA_FPS=15` en el mismo `.env`. El orquestador debe alcanzar la cámara por la red. Detalles en la sección 3.1b.
+
 ```bash
 docker compose logs -f orchestrator
 ```
@@ -75,7 +83,7 @@ La emulación de red necesita en el kernel los módulos `sch_prio`, `sch_tbf`, `
 ```
                     ┌──────────────────────────────────────────────┐
                     │  Fuente maestra (FFmpeg, x264 zerolatency)   │
-                    │  Big Buck Bunny 1080p60 en bucle             │
+                    │  Big Buck Bunny 1080p60 en bucle o cámara    │
                     │  + reloj de texto + timecode binario quemado │
                     └────────────┬───────────────────┬─────────────┘
                      MPEG-TS/UDP │ :5001             │ :5002  MPEG-TS/UDP
@@ -172,9 +180,49 @@ ffmpeg -re -stream_loop -1 -i <vídeo> -re -stream_loop -1 -i <vídeo> \
 - **Tope de tasa**: cada calidad lleva `-maxrate` al 120 % y un VBV de 1 s, para que el bitrate nominal sea una referencia fiable para la adaptación y la emulación de red.
 - **Etiqueta de calidad**: cada calidad lleva quemado arriba a la derecha su nombre (`720p 2000 kbps`), para ver de un vistazo cuál se reproduce.
 - **Timecode binario**: se quema en cada calidad después de escalarla. Ver sección 4.
-- **Cuatro salidas**: UDP 5001 (DASH), 5002 (MoQ), 5003 (WebRTC) y 5004, que solo se escucha mientras se graba una prueba de QoE (sección 4.7). Sin nadie escuchando, los paquetes de 5004 se descartan en el kernel.
+- **Cuatro salidas**: UDP 5001 (DASH), 5002 (MoQ), 5003 (WebRTC) y 5004, que solo se escucha mientras se graba una prueba de QoE (sección 4.7). Sin nadie escuchando, los paquetes de 5004 se descartan en el kernel. Con la cámara como fuente hay una quinta, 5005, con la referencia para el VMAF (sección 3.1b).
 
-Cambiar el GOP o la escalera reinicia la fuente; cambiar segmento o fragmento solo reinicia los empaquetadores. **Detener Pipeline** para también la fuente, que es la que consume CPU, y el servidor queda en reposo; la parada se conserva aunque se reinicie el contenedor o la máquina.
+Cambiar el GOP, la escalera o la fuente reinicia la fuente; cambiar segmento o fragmento solo reinicia los empaquetadores. **Detener Pipeline** para también la fuente, que es la que consume CPU, y el servidor queda en reposo; la parada se conserva aunque se reinicie el contenedor o la máquina.
+
+### 3.1b. Fuente alternativa: cámara RTSP
+
+Con **Fuente: Cámara RTSP** (`"source": "camera"` en `POST /api/config`), la fuente maestra lee la cámara de `CAMERA_RTSP_URL` en vez del fichero. Todo lo que va después es igual: escalera, reloj, timecode, x264 con el mismo GOP y las mismas salidas UDP. Cambia la entrada:
+
+```bash
+ffmpeg -rtsp_transport tcp -timeout 5000000 -fflags nobuffer -flags low_delay -i <cámara> \
+  -filter_complex "[0:v]fps=<fps>,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2, \
+                   setsar=1,setpts=N/(<fps>*TB),split=2[reference][base];[base]drawtext=<reloj>,split=N[s0]..[sN]; ..." \
+  -filter_complex "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[a]" \
+  -filter_complex "anullsrc=r=48000:cl=stereo,asetpts=N/(SR*TB)[reference_audio]" \
+  <escalera, igual que con el bucle> -f tee "...5001|...5002|...5003|...5004" \
+  -map [reference] -map [reference_audio] -c:v libx264 -preset ultrafast -tune zerolatency -qp 10 -threads 4 \
+  -g <gop> -keyint_min <gop> -sc_threshold 0 -c:a aac -muxdelay 0 -muxpreload 0 -f mpegts udp://127.0.0.1:5005
+```
+
+- **Sin `-re`**: la cámara ya entrega a su ritmo.
+- **Cadencia**: la emisión va a los fps que anuncia la cámara, redondeados. El servidor la sondea con `ffprobe` al arrancar con ella y sustituye el valor de `fps` de la configuración; el panel lo muestra junto al selector. El filtro `fps` deja una cadencia constante con las marcas de tiempo de la propia cámara: si la cámara pierde un frame, se repite el anterior. El GOP sigue yendo en frames, así que su duración depende de los fps; el panel ofrece las mismas duraciones (0,25 a 2 s) en frames de la cadencia en curso.
+- **1920x1080**: cada frame se lleva a 1080p (con bandas si la cámara no es 16:9) antes de la escalera, como el vídeo del bucle.
+- **Audio**: silencio generado. Las ramas llevan la misma pista AAC que con el bucle, tenga o no micrófono la cámara. El audio de la cámara se ignora.
+- **Referencia para el VMAF (UDP 5005)**: no hay original guardado, así que la fuente emite cada frame tal como entra en la escalera, antes de dibujar nada encima, codificado casi sin pérdidas. Solo se graba durante las pruebas de QoE (sección 4.7); el resto del tiempo nadie escucha y el kernel descarta los paquetes, sin tocar el disco.
+- **Caídas**: si la cámara deja de responder 5 s, FFmpeg termina y el supervisor relanza la fuente, con al menos 3 s entre intentos.
+
+La URL no sale por la API ni al CSV: `GET /api/camera` y `/api/status` dan solo el host, lo que anunció la cámara (códec, resolución, fps, audio) y el último error. FFmpeg sí la escribe en su log, dentro del contenedor (`/tmp/ffmpeg_master.log`).
+
+**La referencia no frena a la escalera.** Comparte proceso con ella y FFmpeg hace avanzar todas las salidas a la par. Sin `-tune zerolatency`, x264 reparte los frames entre hilos y entrega cada uno varios frames después, y la escalera quedaba retenida a ese ritmo. Medido el 22-10-2026 con la cámara a 15 fps, una calidad 1080p y sin espectadores, alternando las variantes en la misma sesión (retraso del codificador: marca quemada → llegada a la compuerta de MoQ):
+
+| Referencia | p50 | p95 |
+| :--- | :--- | :--- |
+| Ninguna | 5,8-5,9 ms | 9,8-11,0 ms |
+| Sin `zerolatency` (descartada) | 76-106 ms | 207-245 ms |
+| Con `zerolatency` (la actual) | 5,4-5,7 ms | 9,7-9,9 ms |
+
+Quitar el audio o los ajustes del multiplexor de la referencia no cambiaba nada; solo `zerolatency`. La calidad de la referencia no cambia con él (ver sección 4.7).
+
+**Lo que cambia frente al bucle** (variables de confusión, a declarar):
+- **La latencia medida empieza igual**, al quemar el timecode, que es después de recibir y decodificar la cámara. No incluye el tramo cámara → servidor (sensor, codificador de la cámara, red); medir de cristal a cristal exigiría apuntar la cámara a un reloj.
+- **El contenido no se repite.** Una escena casi quieta se codifica con mucho menos que el bitrate nominal, con keyframes distintos, y da VMAF más altos. Las pruebas con la cámara no son comparables con las del bucle ni entre sí. Dentro de una prueba, las tres ramas sí ven exactamente lo mismo.
+- **La entrada no es regular.** Lo que la red de la cámara haga con los frames llega igual a las tres ramas, pero pasa por el filtro `fps`.
+- **Deriva de reloj**: la cadencia sale de las marcas de tiempo de la cámara. Si su reloj se separa del del servidor, se verá en `dash_availability_drift_ms`.
 
 ### 3.2. Compuerta `tsgate.py`
 
@@ -380,6 +428,25 @@ El índice cuenta lo que no cuadra y debe ser 0: PTS fuera de la rejilla (`pts_o
 | 720p | 29,4 · 30,6 · **32,2** · 30,2 · 28,7 dB | 13 de 20 |
 | 360p | 27,5 · 28,2 · **29,1** · 28,0 · 27,0 dB | 11 de 20 |
 
+**Con la cámara como fuente**, el original es la referencia que la fuente emite por UDP 5005 (sección 3.1b). Se graba a la vez que el flujo (`reference.ts`, junto a `stream.ts`). Su grabador arranca antes, espera a su propio keyframe y dura 5 s más, para cubrir todos los fotogramas grabados. Tiene los mismos PTS que la escalera, así que el índice numera sus frames con la base de la primera calidad, sin decodificarla. El índice comprueba que la referencia no tenga PTS fuera de la rejilla ni huecos y que cubra todas las calidades (`reference` en la grabación: `pts_off_grid`, `not_consecutive` y `uncovered_streams`); si no, el VMAF y la comprobación se niegan. La comprobación por PSNR es la que confirma que el emparejamiento es bueno: con la base desplazada un número entero de frames, la rejilla cuadraría igual.
+
+Para que los PTS coincidan hubo que corregir dos cosas, cada una de las cuales desplazaba la referencia sin que la rejilla lo delatara:
+- FFmpeg suma `muxdelay` y `muxpreload` (0,7 + 0,5 s) a los PTS de una salida MPEG-TS, pero no a las de dentro del `tee`. Con ellos, la referencia iba 36 frames por delante a 30 fps.
+- FFmpeg desplaza cada salida para que nada empiece en negativo, y el AAC empieza 1024 muestras antes (1920 ticks). La referencia lleva una pista de silencio propia solo para desplazarse igual que la escalera.
+
+Para la referencia se usa x264 con `qp` 10. Medido sobre 5 s de Big Buck Bunny el 22-10-2026, frente al original:
+
+| Referencia | Mbit/s | VMAF medio / mínimo | PSNR de luma |
+| :--- | :--- | :--- | :--- |
+| qp 0 (sin pérdidas) | 238 | 99,26 / 97,43 | 60 dB (idéntica) |
+| qp 6 | 141 | 98,98 / 96,76 | 54,1 dB |
+| **qp 10 (la usada)** | **99** | **98,79 / 96,39** | **51,5 dB** |
+| qp 14 | 61 | 98,26 / 95,29 | 48,4 dB |
+
+Con `-tune zerolatency` sale exactamente lo mismo. El VMAF de una copia idéntica no es 100 (99,26), así que la referencia cuesta ~0,5 puntos. Ocupa según la imagen: con la cámara de pruebas (1080p a 15 fps, escena casi quieta), ~9 Mbit/s, unos 27 MB por cada 20 s de prueba.
+
+Medido el 22-10-2026 en local con esa cámara, una calidad 1080p a 4000 kbps y 20 s: índice y referencia sin incidencias, VMAF medio 95,3 (p5 93,7). En la comprobación, el emparejado gana en las 20 muestras, pero con un margen mínimo de 0,1 dB (45,07 dB frente a 44,56 y 44,0 de los vecinos): con una escena casi quieta, los fotogramas vecinos se parecen mucho. Con una cámara simulada (Big Buck Bunny a 720p30 publicado en MediaMTX), 44,97 dB en el emparejado frente a 34-37 dB de los vecinos.
+
 Una grabación de 20 s que cruza el cambio de vuelta del bucle (frames 37 500 a 38 698, con el corte en 38 072) da lo mismo a ambos lados del corte: 1080p 44,7 dB en el emparejado frente a 34,3 y 34,2 en los vecinos inmediatos, 720p 43,1 frente a 35,7 y 35,6, 360p 36,5 frente a 31,9 y 32,0, sin ningún PTS ni número de frame incoherente.
 
 Las muestras en que gana un vecino tienen todas menos de 0,5 dB de diferencia, están en escenas lentas y el vecino es siempre uno anterior; con poco bitrate x264 copia bloques del fotograma de referencia y la imagen arrastra algo del anterior (deducción, no medida). Un desplazamiento del índice daría el máximo fuera de 0 también en las escenas con movimiento, y con márgenes de varios dB.
@@ -550,7 +617,8 @@ Desde el panel de control:
 
 | Parámetro | Valores | Efecto |
 | :--- | :--- | :--- |
-| GOP | 15, 30, 60, 120 frames (0,25 a 2 s) | Tamaño del grupo MoQ y límite inferior del segmento DASH |
+| Fuente | Big Buck Bunny en bucle o cámara RTSP (sección 3.1b) | Con la cámara, los fps los fija el servidor (los de la cámara) y hay una salida de referencia para el VMAF. En el CSV, `source` y `fps` |
+| GOP | 0,25, 0,5, 1 o 2 s, en frames de la cadencia en curso (15 a 120 frames a 60 fps) | Tamaño del grupo MoQ y límite inferior del segmento DASH |
 | Escalera de calidades | 1 a 5; altura 1080/720/540/480/360/240 y bitrate libre | Lo que codifica la fuente. Con una sola no hay adaptación |
 | Calidad (por reproductor) | Auto o una calidad fija | Auto usa la adaptación de cada reproductor; fijar una la desactiva |
 | Reproductores activos | Cualquier combinación de LL-DASH, MoQ y WebRTC, con al menos uno | Un reproductor apagado se desmonta: cierra su conexión y no descarga nada, así que no compite con los demás por la red ni por el navegador. Se recuerda en el navegador; cada cambio abre un tramo de medida nuevo. En el CSV, `players` lista los activos y las métricas de los apagados quedan vacías |
@@ -561,7 +629,7 @@ Desde el panel de control:
 | Salto al directo DASH | 0 (desactivado) a 10 s, por defecto 1,5 s | `liveCatchup.maxDrift` de dash.js: desvío sobre el objetivo a partir del cual salta al directo en vez de corregir con la velocidad. El salto aborta las descargas y abre conexiones TCP frías; con retardo de red alto puede encadenar saltos y paradas |
 | Latencia objetivo MoQ | auto (al abrir), o 50 a 2000 ms | `delay` de `@moq/watch`. En auto, que es su valor por defecto, la librería lo calcula del RTT que comunica el relay (1,25 × el mínimo, con suelo de 20 ms). En ambos casos le suma el jitter de pista del catálogo; el valor efectivo se muestra junto al slider. En auto, `moq_target_ms` queda vacío en el CSV. **En auto no sube durante la sesión**: tras cambiar el perfil de red hay que recargar para que lo recalcule (PROTOCOLOS, 4.11) |
 
-Los cuatro primeros requieren pulsar **Aplicar Cambios**; los sliders actúan al momento y su valor queda en el CSV (`dash_target_ms`, `dash_max_drift_s`, `moq_target_ms`).
+La fuente, el GOP, la escalera, el segmento y el fragmento requieren pulsar **Aplicar Cambios**; los sliders actúan al momento y su valor queda en el CSV (`dash_target_ms`, `dash_max_drift_s`, `moq_target_ms`).
 
 El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola del navegador para depurar.
 
@@ -574,10 +642,11 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/status` | Estado, configuración, `stream_ids`, reinicios del supervisor, disposición del timecode, anomalías de ingesta, deriva DASH y red (perfil y contadores del router) |
 | `POST /api/start` | Arranca los empaquetadores (cuerpo opcional: configuración) |
 | `POST /api/stop` | Detiene todo, incluida la codificación de la fuente. La parada se recuerda entre reinicios: no vuelve a emitir hasta `POST /api/start` |
-| `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p |
+| `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p. `source`: `file` (bucle, por defecto) o `camera`; con la cámara, `fps` lo fija el servidor y, si no la alcanza, responde 502 con el motivo |
+| `GET /api/camera` | Sondea la cámara: host (sin credenciales), códec, resolución, fps, audio y último error. Con la cámara emitiendo, devuelve lo último que se supo sin abrir otra sesión |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |
-| `POST /api/qoe/recordings` | Graba el flujo codificado `duration_s` segundos (5-300) y lo indexa al terminar. Exige la emisión en marcha |
+| `POST /api/qoe/recordings` | Graba el flujo codificado `duration_s` segundos (5-300) y lo indexa al terminar; con la cámara, también la referencia. Exige la emisión en marcha |
 | `GET /api/qoe/recordings` | Grabaciones guardadas, de la más reciente a la más antigua |
 | `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
 | `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
@@ -616,7 +685,7 @@ moq-dash-initial-comparison/
 │       ├── source.py             # Descarga del vídeo fuente si falta
 │       ├── trace.py              # Registro de por dónde pasa cada frame, para el desglose por etapas
 │       ├── qoe.py                # QoE: grabación del flujo codificado, índice y emparejamiento con el original
-│       ├── recorder.py           # Grabador MPEG-TS de la cuarta salida de la fuente (UDP 5004)
+│       ├── recorder.py           # Grabador MPEG-TS de la cuarta salida de la fuente (UDP 5004) y de la referencia de la cámara (5005)
 │       ├── origin.py             # Origen LL-DASH en memoria y calibración del AST
 │       └── tsgate.py             # Compuerta MPEG-TS: arranque en IDR y continuidad
 └── web/
@@ -650,6 +719,7 @@ Hecho:
 - [x] Medida glass-to-glass homogénea, estadísticos y exportación CSV.
 - [x] Emulación de red en los dos sentidos (ancho de banda, retardo, jitter, pérdida), idéntica para las tres ramas.
 - [x] Rama WebRTC con MediaMTX (una calidad, sin adaptación).
+- [x] Cámara RTSP como fuente alternativa al bucle, con referencia grabada para el VMAF.
 
 Pendiente:
 

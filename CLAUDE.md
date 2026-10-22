@@ -32,14 +32,15 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 4. **Declara las variables de confusión** en vez de ocultarlas: BBRv3 (relay) frente a CUBIC (DASH),
    WebRTC sin adaptación ni audio y sin codificador que atienda sus peticiones de keyframe, bitrate del catálogo de MoQ (máximo medido) frente al del MPD
    (nominal), sliders de latencia que significan cosas distintas en cada rama, red del cliente, y que
-   el jitter de netem desordena los paquetes (castiga casi solo a QUIC: README, sección 5).
+   el jitter de netem desordena los paquetes (castiga casi solo a QUIC: README, sección 5), y con la
+   cámara como fuente, que el contenido no se repite y la latencia no incluye el tramo cámara → servidor.
 5. **Distingue medida de deducción** al informar. Si algo sale del código y no de una prueba, dilo.
 
 ## Arquitectura en una línea por pieza
 
 | Pieza | Dónde | Notas |
 | :--- | :--- | :--- |
-| Fuente FFmpeg | `server/app/main.py` (`ensure_master_source`) | Una calidad o escalera de hasta 5; tee MPEG-TS a UDP 5001/5002/5003 |
+| Fuente FFmpeg | `server/app/main.py` (`ensure_master_source`) | Big Buck Bunny en bucle o cámara RTSP (`CAMERA_RTSP_URL` en el `.env`); una calidad o escalera de hasta 5; tee MPEG-TS a UDP 5001-5004 y, con la cámara, referencia para el VMAF en 5005 |
 | Compuertas | `server/app/tsgate.py` | Arrancan en un IDR, vigilan continuidad y anotan horas por PTS |
 | Origen LL-DASH | `server/app/origin.py` | En memoria; recalibra `availabilityStartTime` y reescribe `UTCTiming` al origen de la página |
 | Publicador MoQ | `moq import ts` (moq-cli) en el orquestador | El **publicador**; no confundir con el relay |
@@ -80,6 +81,9 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   - web: `docker compose up -d --build --no-deps web` (**sin `--no-deps` también recrea el
     orquestador**);
   - orquestador: `docker compose up -d --build --no-deps orchestrator`.
+- Cualquier salida nueva de la fuente maestra comparte proceso con la escalera y puede frenarla: FFmpeg
+  hace avanzar todas las salidas a la par. Mide el retraso del codificador (`POST /api/trace`) con y sin
+  ella, alternando (la referencia de la cámara sin `-tune zerolatency` lo subía de 6 a ~80 ms).
 - **Reiniciar el orquestador pierde la configuración de la emisión**: vuelve a la escalera por defecto
   de tres calidades. Restáurala después con `POST /api/config` (normalmente el usuario usa una sola
   calidad: `{"gop_size":60,"fps":60,"seg_duration":2.0,"frag_duration":0.1,"renditions":[{"height":1080,"bitrate_kbps":4000}]}`).

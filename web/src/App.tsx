@@ -111,6 +111,7 @@ export function App() {
   }, []);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [config, setConfig] = useState<StreamConfig>({
+    source: 'file',
     gop_size: 60,
     fps: 60,
     renditions: [
@@ -266,6 +267,8 @@ export function App() {
         epoch: epochRef.current.epoch,
         players: PLAYER_IDS.filter((id) => active[id]).join('|'),
         elapsed_s: Math.round((performance.now() - epochRef.current.startedAt) / 1000),
+        source: status?.config.source ?? null,
+        fps: status?.config.fps ?? null,
         gop_size: status?.config.gop_size ?? null,
         ladder: status?.config.renditions.map((r) => `${r.height}p@${r.bitrate_kbps}`).join('|') ?? null,
         dash_path: status?.dash_path ?? null,
@@ -382,14 +385,23 @@ export function App() {
     return () => clearInterval(interval);
   }, [serverStatus?.status]);
 
+  // Motivo del último arranque o cambio rechazado (p. ej. la cámara no responde)
+  const [configError, setConfigError] = useState<string | null>(null);
+  const rejection = async (res: Response) => {
+    const body = await res.json().catch(() => null);
+    const detail = body?.detail;
+    return typeof detail === 'string' ? detail : `El servidor rechazó la configuración (${res.status})`;
+  };
+
   const handleStart = async () => {
     setIsLoading(true);
     try {
-      await fetch(`${API_BASE}/api/start`, {
+      const res = await fetch(`${API_BASE}/api/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
+      setConfigError(res.ok ? null : await rejection(res));
       await fetchStatus();
     } catch (e) {
       console.error(e);
@@ -418,10 +430,10 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
-      // El servidor normaliza la configuración (ordena la escalera, ajusta el segmento al GOP)
+      // El servidor normaliza la configuración (ordena la escalera, ajusta el segmento al GOP, fija los fps)
       const applied = res.ok ? (await res.json()).config : null;
       if (applied) setConfig(applied);
-      else console.error('Configuración rechazada', res.status);
+      setConfigError(res.ok ? null : await rejection(res));
       await fetchStatus();
     } catch (e) {
       console.error(e);
@@ -491,7 +503,8 @@ export function App() {
                   Media over QUIC vs. LL-DASH Testbed
                 </h1>
                 <p className="text-xs text-slate-400">
-                  Doctorado en Streaming de Vídeo de Baja Latencia | Big Buck Bunny 1080p60
+                  Doctorado en Streaming de Vídeo de Baja Latencia |{' '}
+                  {serverStatus?.config.source === 'camera' ? `Cámara RTSP a ${serverStatus.config.fps} fps` : 'Big Buck Bunny 1080p60'}
                 </p>
               </div>
             </div>
@@ -527,6 +540,8 @@ export function App() {
           onStart={handleStart}
           onStop={handleStop}
           onApplyConfig={handleApplyConfig}
+          error={configError}
+          apiBase={API_BASE}
         />
 
         {/* Emulación de red, igual para las tres ramas */}

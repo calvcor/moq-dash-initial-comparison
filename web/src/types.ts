@@ -4,9 +4,13 @@ export interface Rendition {
   bitrate_kbps: number;
 }
 
+// Fuente de la emisión: Big Buck Bunny en bucle o la cámara RTSP del .env del servidor
+export type SourceKind = 'file' | 'camera';
+
 export interface StreamConfig {
+  source: SourceKind;
   gop_size: number;
-  fps: number;
+  fps: number; // con el bucle, 60; con la cámara la fija el servidor (la de la cámara)
   renditions: Rendition[]; // de mayor a menor; una sola = sin adaptación
   seg_duration: number;
   frag_duration: number;
@@ -75,6 +79,15 @@ export interface ServerStatus {
   restarts?: { master: number; dash: number; moq: number; rtc: number };
   // Vídeo fuente: se descarga al primer arranque si no está
   source?: { state: 'ready' | 'downloading' | 'extracting' | 'error'; progress_pct: number; error: string | null };
+  camera?: CameraState;
+}
+
+// Cámara RTSP (GET /api/camera y /api/status): nunca incluye la URL, que puede llevar credenciales
+export interface CameraState {
+  configured: boolean;
+  host: string | null;
+  probe: { codec: string | null; width: number | null; height: number | null; fps: number; audio: boolean } | null;
+  error: string | null;
 }
 
 // Versiones desplegadas en el servidor y última publicada de cada componente (GET /api/versions)
@@ -128,6 +141,8 @@ export interface SampleRow {
   epoch: number; // se incrementa en cada reconfiguración del pipeline o de la red, o al activar o apagar un reproductor
   players: string; // reproductores activos en esa muestra, p. ej. dash|moq
   elapsed_s: number; // segundos desde el inicio del epoch
+  source: SourceKind | null; // fuente de la emisión: file (bucle) o camera
+  fps: number | null; // cadencia de la emisión
   gop_size: number | null;
   ladder: string | null; // escalera codificada, p. ej. 1080p@4000|720p@2000
   dash_path: string | null; // direct o proxy: si la conexión del navegador atraviesa la red emulada

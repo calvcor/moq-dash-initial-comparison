@@ -66,6 +66,13 @@ Fichero ─▶ FFmpeg ────────┼─ UDP 5002 ─ tsgate ─ moq
 Hay una cuarta salida, UDP 5004, que no va a ninguna rama: la graba `recorder.py` durante las pruebas
 de QoE, para calcular después el VMAF con el vídeo tal como salió del codificador (README, sección 4.7).
 
+En lugar del fichero, la fuente puede leer una **cámara RTSP** (README, sección 3.1b). Lo de después no
+cambia: misma escalera, mismo timecode y mismas salidas. Hay además una quinta, UDP 5005, con cada frame
+tal como entra en la escalera, casi sin pérdidas, que hace de original para el VMAF porque no hay fichero
+con el que comparar. Con la cámara la emisión va a los fps de la cámara, el contenido no se repite entre
+pruebas y la latencia medida empieza, como siempre, al quemar el timecode: no incluye el tramo de la
+cámara al servidor.
+
 Consecuencias para la comparación:
 
 - **La codificación no es una variable.** Mismo códec (H.264 *baseline*, `ultrafast`, `zerolatency`,

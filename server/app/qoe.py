@@ -22,6 +22,10 @@ vale para la comprobación por PSNR.
 
 Indexar (decodificar dos filas por fotograma) sí se hace al terminar de grabar: no se nota en el
 codificador.
+
+Con la cámara RTSP como fuente no hay vídeo original guardado. La fuente emite entonces una referencia
+casi sin pérdidas (UDP 5005, ver main.py) con los mismos PTS que la escalera: se graba a la vez que el
+flujo codificado y hace de original, de modo que el fotograma n grabado se compara con el n de la referencia.
 """
 import json
 import logging
@@ -45,11 +49,18 @@ logger = logging.getLogger("orchestrator")
 QOE_DIR = os.path.join(os.path.dirname(VIDEO_FILE), "qoe")
 RECORDER = os.path.join(os.path.dirname(__file__), "recorder.py")
 RECORD_PORT = 5004       # cuarta salida del tee de la fuente (main.py)
+REFERENCE_PORT = 5005    # referencia que emite la fuente con la cámara (main.py)
+# La referencia empieza en su primer keyframe y debe cubrir toda la grabación: se pone en marcha antes y
+# dura algo más, lo bastante para cubrir lo que el flujo tarde en llegar a su propio keyframe (un GOP)
+REFERENCE_EXTRA_S = 5
+# Con la cámara, la fuente lleva cada frame a 1920x1080 antes de la escalera (main.py)
+CAMERA_SIZE = (1920, 1080)
 KEEP_RECORDINGS = 10     # se borran las más antiguas
 STAMP_TOLERANCE_MS = 4   # el timecode va en ms enteros y cada bit lee el reloj por separado (ver trace.py)
 NICE = ["nice", "-n", "19"]
 REC_ID = re.compile(r"^\d{8}-\d{6}$")
 SHOWINFO = re.compile(r"\bn:\s*(\d+)\s+pts:\s*(-?\d+)")
+STARTED = re.compile(r"started (\d+)")
 
 # Comprobación del emparejamiento: PSNR frente al original emparejado y a sus vecinos
 CHECK_OFFSETS = (-2, -1, 0, 1, 2)
@@ -105,6 +116,16 @@ def vmaf_version() -> str:
         done = subprocess.run(["vmaf", "--version"], capture_output=True, text=True)
         _vmaf_version = (done.stdout or done.stderr).strip()  # la escribe en stderr
     return _vmaf_version
+
+
+def unwrap(pts: list[int]) -> list[int]:
+    """PTS sin la vuelta de los 33 bits (cada 26,5 h de emisión)."""
+    unwrapped, carry = [], 0
+    for p in pts:
+        if unwrapped and p + carry < unwrapped[-1] - 2 ** 32:
+            carry += 2 ** 33
+        unwrapped.append(p + carry)
+    return unwrapped
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -255,8 +276,10 @@ class Recordings:
 
     def _record(self, rec_id: str, duration_s: float, master_start_ms: Callable[[], int]):
         master = master_start_ms()
+        camera = self.read(rec_id, "meta.json").get("source") == "camera"
         since_ms = time.time() * 1000 - 1000
         stamps: dict[str, dict[int, float]] = {}
+        procs: list[subprocess.Popen] = []
 
         def collect():
             for stream, pairs in trace.frame_log.stamps_since(since_ms).items():
@@ -264,27 +287,60 @@ class Recordings:
                 for mark, number in pairs:
                     known[number] = mark
 
-        proc = subprocess.Popen(
-            ["python3", "-u", RECORDER, str(RECORD_PORT), self.path(rec_id, "stream.ts"), str(duration_s)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        )
-        deadline = time.time() + duration_s + 15
-        while proc.poll() is None:
-            collect()
-            if master_start_ms() != master:
-                proc.kill()
-                raise RuntimeError("La fuente se reinició durante la grabación")
-            if time.time() > deadline:
-                proc.kill()
-                raise RuntimeError("No llegó el flujo de la fuente: ¿está la emisión en marcha?")
-            time.sleep(0.5)
+        def recorder(port: int, name: str, seconds: float) -> subprocess.Popen:
+            proc = subprocess.Popen(
+                ["python3", "-u", RECORDER, str(port), self.path(rec_id, name), str(seconds)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            procs.append(proc)
+            return proc
+
+        def wait(running: Callable[[], bool], deadline: float):
+            while running():
+                collect()
+                if master_start_ms() != master:
+                    raise RuntimeError("La fuente se reinició durante la grabación")
+                if time.time() > deadline:
+                    raise RuntimeError("No llegó el flujo de la fuente: ¿está la emisión en marcha?")
+                time.sleep(0.2)
+
+        def started(proc: subprocess.Popen, what: str) -> int:
+            output = proc.stdout.read()
+            found = STARTED.search(output)
+            if proc.returncode != 0 or not found:
+                raise RuntimeError(f"El grabador {what} terminó con código {proc.returncode}: {output.strip()[-300:]}")
+            return int(found.group(1))
+
+        try:
+            reference = None
+            if camera:
+                # La referencia se pone en marcha antes y espera a su propio keyframe: así su primer frame
+                # es anterior al primero del flujo grabado. Termina REFERENCE_EXTRA_S después.
+                reference = recorder(REFERENCE_PORT, "reference.ts", duration_s + REFERENCE_EXTRA_S)
+                ready = []
+                reader = threading.Thread(target=lambda: ready.append(reference.stdout.readline()), daemon=True)
+                reader.start()
+                wait(lambda: reader.is_alive() and reference.poll() is None, time.time() + 15)
+                reader.join(timeout=1)
+                if not ready or not STARTED.search(ready[0]):
+                    raise RuntimeError(f"No llegó la referencia de la cámara: {''.join(ready).strip()[-300:]}")
+            proc = recorder(RECORD_PORT, "stream.ts", duration_s)
+            wait(lambda: proc.poll() is None, time.time() + duration_s + 15)
+            if reference is not None:
+                wait(lambda: reference.poll() is None, time.time() + REFERENCE_EXTRA_S + 15)
+        finally:
+            for p in procs:
+                if p.poll() is None:
+                    p.kill()
+                    p.wait()
         collect()
-        output = proc.stdout.read()
-        found = re.search(r"started (\d+)", output)
-        if proc.returncode != 0 or not found:
-            raise RuntimeError(f"El grabador terminó con código {proc.returncode}: {output.strip()[-300:]}")
+        started_ms = started(proc, "del flujo")
+        if reference is not None:
+            output = reference.stdout.read()
+            if reference.returncode != 0:
+                raise RuntimeError(f"El grabador de la referencia terminó con código {reference.returncode}: {output.strip()[-300:]}")
         self.write(rec_id, "stamps.json", {s: sorted(d.items()) for s, d in stamps.items()})
-        return int(found.group(1)), {s: sorted(d.items()) for s, d in stamps.items()}
+        return started_ms, {s: sorted(d.items()) for s, d in stamps.items()}
 
     # --- índice ---
 
@@ -300,9 +356,18 @@ class Recordings:
         self.update_meta(rec_id, state="ready", error=None, streams=summary, vmaf=self._queued())
         return summary
 
+    def original(self, rec_id: str) -> dict:
+        """El original con el que se compara: el vídeo del bucle o la referencia grabada de la cámara."""
+        index = self.index(rec_id)
+        if index and index["source"].get("kind") == "camera":
+            return index["source"]
+        return {"kind": "file", **source_info()}
+
     def _build_index(self, rec_id: str, stamps: dict) -> list[dict]:
         meta = self.read(rec_id, "meta.json")
-        src = source_info()
+        camera = meta.get("source") == "camera"
+        # Con la cámara no hay vídeo en bucle: el número de frame es directamente el de la referencia
+        src = None if camera else source_info()
         ticks = round(90000 / meta["fps"])
         streams, summary = [], []
         for i, layout in enumerate(meta["timecodes"]):
@@ -328,13 +393,7 @@ class Recordings:
             # anterior (repite su timecode): no se usa
             pts = pts[:-1]
 
-            # PTS sin la vuelta de los 33 bits (cada 26,5 h de emisión)
-            unwrapped, carry = [], 0
-            for p in pts:
-                if unwrapped and p + carry < unwrapped[-1] - 2 ** 32:
-                    carry += 2 ** 33
-                unwrapped.append(p + carry)
-            pts = unwrapped
+            pts = unwrap(pts)
 
             # El número de frame sale del PTS, que la fuente pone exacto (n por la duración de un frame más
             # una base). El timecode solo fija la base, por mayoría: cada fotograma cuyo timecode cae a
@@ -390,14 +449,102 @@ class Recordings:
                 } if lags else None,
                 "first_n": first_n,
                 "last_n": last_n,
-                "source_first": first_n % src["frames"] if first_n is not None else None,
-                "source_last": last_n % src["frames"] if last_n is not None else None,
-                "loop_wraps": (last_n // src["frames"] - first_n // src["frames"]) if assigned else 0,
+                "pts_base": base,
             }
+            if src is not None:
+                stream_summary.update({
+                    "source_first": first_n % src["frames"] if first_n is not None else None,
+                    "source_last": last_n % src["frames"] if last_n is not None else None,
+                    "loop_wraps": (last_n // src["frames"] - first_n // src["frames"]) if assigned else 0,
+                })
             summary.append(stream_summary)
             streams.append({**stream_summary, "pts": pts, "timecode": codes, "n": numbers})
+        if camera:
+            src = self._index_reference(rec_id, summary, ticks, meta["fps"])
+            self.update_meta(rec_id, reference=src)
         self.write(rec_id, "index.json", {"source": src, "streams": streams})
         return summary
+
+    def _index_reference(self, rec_id: str, summary: list[dict], ticks: int, fps: int) -> dict:
+        """Numera los frames de la referencia de la cámara con la base de PTS de la primera calidad.
+
+        Sale del mismo proceso y del mismo setpts=N que la escalera, así que comparte sus PTS: basta con
+        leer los de los paquetes, sin decodificar. La comprobación por PSNR confirma que el emparejamiento
+        es bueno (con una base desplazada un número entero de frames, la rejilla cuadraría igual).
+        """
+        out = subprocess.run(
+            NICE + ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts",
+                    "-of", "csv=p=0", self.path(rec_id, "reference.ts")],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        # Sin frames B (preset ultrafast), el orden de los paquetes es el de presentación. El último se
+        # descarta, como en el flujo: el grabador lo corta.
+        values = (line.split(",")[0].strip() for line in out.splitlines())
+        pts = unwrap([int(v) for v in values if v.lstrip("-").isdigit()])[:-1]
+        base = summary[0]["pts_base"]
+        numbers = [(p - base) // ticks if (p - base) % ticks == 0 else None for p in pts]
+        assigned = [n for n in numbers if n is not None]
+        first_n = assigned[0] if assigned else None
+        last_n = assigned[-1] if assigned else None
+        uncovered = [
+            s["index"] for s in summary
+            if first_n is None or s["first_n"] is None or s["first_n"] < first_n or s["last_n"] > last_n
+        ]
+        return {
+            "kind": "camera",
+            "width": CAMERA_SIZE[0],
+            "height": CAMERA_SIZE[1],
+            "fps": fps,
+            "frames": len(pts),
+            # Deberían ser 0 y estar vacío: PTS fuera de la rejilla, números no consecutivos y calidades
+            # con frames fuera del tramo grabado de la referencia
+            "pts_off_grid": len(numbers) - len(assigned),
+            "not_consecutive": sum(1 for a, b in zip(numbers, numbers[1:]) if a is None or b is None or b - a != 1),
+            "uncovered_streams": uncovered,
+            "first_n": first_n,
+            "last_n": last_n,
+            "pts_base": base,
+            "ticks": ticks,
+        }
+
+    def _reference_usable(self, rec_id: str):
+        ref = self.original(rec_id)
+        if ref["kind"] == "camera" and (ref["pts_off_grid"] or ref["not_consecutive"] or ref["uncovered_streams"]):
+            raise RuntimeError("La referencia de la cámara no es fiable (ver pts_off_grid, not_consecutive y uncovered_streams)")
+        return ref
+
+    def _reference_cmd(self, rec_id: str, ref: dict, numbers: list[int], vf: str) -> list[list[str]]:
+        """Órdenes de FFmpeg que escriben en crudo, por stdout y en orden, los frames numbers del original.
+
+        numbers va en orden creciente: o un tramo consecutivo (VMAF) o varios sueltos (comprobación).
+        Con el bucle, cada tramo consecutivo se lee con un -ss propio y se parte en dos si cruza el final
+        del vídeo: con -stream_loop, FFmpeg no vuelve al frame 0 después de un -ss. Con -ss delante de -i
+        descarta lo anterior a esa hora absoluta; el frame k está en start_time + k/fps.
+        Con la cámara se decodifica la referencia desde el principio y se escogen los frames por su PTS
+        original (-copyts), sin saltar: un salto en MPEG-TS puede caer entre dos keyframes y desplazarlo todo.
+        """
+        if ref["kind"] == "camera":
+            pts = lambda n: ref["pts_base"] + n * ref["ticks"]
+            if numbers[-1] - numbers[0] + 1 == len(numbers):
+                wanted = f"between(pts\\,{pts(numbers[0])}\\,{pts(numbers[-1])})"
+            else:
+                wanted = "+".join(f"eq(pts\\,{pts(n)})" for n in numbers)
+            return [["ffmpeg", "-nostdin", "-v", "error", "-copyts", "-i", self.path(rec_id, "reference.ts"),
+                     "-map", "0:v:0", "-vf", f"select='{wanted}',{vf}",
+                     "-fps_mode", "passthrough", "-f", "rawvideo", "-"]]
+        runs: list[list[int]] = []
+        for n in numbers:
+            k = n % ref["frames"]
+            if runs and k == runs[-1][0] + runs[-1][1]:
+                runs[-1][1] += 1
+            else:
+                runs.append([k, 1])
+        cmds = []
+        for k, take in runs:
+            seek = ref["start_time"] + k / ref["fps"] - 0.25 / ref["fps"]
+            cmds.append(["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seek:.6f}", "-i", VIDEO_FILE,
+                         "-map", "0:v:0", "-frames:v", str(take), "-vf", vf, "-f", "rawvideo", "-"])
+        return cmds
 
     # --- comprobación del emparejamiento ---
 
@@ -427,15 +574,16 @@ class Recordings:
 
     def _check_stream(self, rec_id: str, stream: dict) -> dict:
         """PSNR de una muestra de fotogramas grabados frente a su original emparejado y a sus vecinos."""
-        src = source_info()
+        src = self._reference_usable(rec_id)
         layouts = self.read(rec_id, "meta.json")["timecodes"]
         w, h, cx, cy = compare_region(layouts, src["width"], src["height"])
         frame_size = w * h
         reach = max(abs(k) for k in CHECK_OFFSETS)
-        candidates = [
-            (j, n) for j, n in enumerate(stream["n"])
-            if n is not None and reach <= n % src["frames"] < src["frames"] - reach
-        ]
+        if src["kind"] == "camera":
+            inside = lambda n: src["first_n"] + reach <= n <= src["last_n"] - reach
+        else:
+            inside = lambda n: reach <= n % src["frames"] < src["frames"] - reach
+        candidates = [(j, n) for j, n in enumerate(stream["n"]) if n is not None and inside(n)]
         if not candidates:
             return {"index": stream["index"], "samples": []}
         step = max(1, len(candidates) // CHECK_SAMPLES)
@@ -457,26 +605,20 @@ class Recordings:
             if os.path.getsize(enc) != frame_size * len(samples):
                 raise RuntimeError("No se extrajeron todos los fotogramas grabados de la muestra")
 
-            # Originales: para cada muestra, los frames n-2..n+2 del vídeo fuente. Con -ss delante de
-            # -i FFmpeg descarta lo anterior a esa hora absoluta; el frame k está en start_time + k/fps.
-            refs = {k: open(os.path.join(tmp, f"ref{k}.raw"), "wb") for k in CHECK_OFFSETS}
-            try:
-                for _, n in samples:
-                    first = n % src["frames"] - reach
-                    seek = src["start_time"] + first / src["fps"] - 0.25 / src["fps"]
-                    out = subprocess.run(
-                        NICE + ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seek:.6f}", "-i", VIDEO_FILE,
-                                "-map", "0:v:0", "-frames:v", str(len(CHECK_OFFSETS)),
-                                "-vf", f"crop={w}:{h}:{cx}:{cy},format=gray", "-f", "rawvideo", "-"],
-                        check=True, capture_output=True,
-                    ).stdout
-                    if len(out) != frame_size * len(CHECK_OFFSETS):
-                        raise RuntimeError(f"No se extrajeron los originales alrededor del frame {n % src['frames']}")
-                    for pos, k in enumerate(CHECK_OFFSETS):
-                        refs[k].write(out[pos * frame_size:(pos + 1) * frame_size])
-            finally:
-                for f in refs.values():
-                    f.close()
+            # Originales: para cada muestra, los frames n-2..n+2 (las ventanas de dos muestras pueden solaparse)
+            needed = sorted({n + k for _, n in samples for k in CHECK_OFFSETS})
+            out = b"".join(
+                subprocess.run(NICE + cmd, check=True, capture_output=True).stdout
+                for cmd in self._reference_cmd(rec_id, src, needed, f"crop={w}:{h}:{cx}:{cy},format=gray")
+            )
+            if len(out) != frame_size * len(needed):
+                raise RuntimeError(f"Se extrajeron {len(out) // frame_size} de {len(needed)} originales")
+            position = {n: pos for pos, n in enumerate(needed)}
+            for k in CHECK_OFFSETS:
+                with open(os.path.join(tmp, f"ref{k}.raw"), "wb") as f:
+                    for _, n in samples:
+                        pos = position[n + k]
+                        f.write(out[pos * frame_size:(pos + 1) * frame_size])
 
             psnr = {}
             for k in CHECK_OFFSETS:
@@ -500,7 +642,7 @@ class Recordings:
             # En un empate (p. ej. un fotograma en negro entre otros iguales) gana el emparejado
             best = max(CHECK_OFFSETS, key=lambda k: (by_offset[k], k == 0))
             neighbours = max(v for k, v in by_offset.items() if k != 0)
-            rows.append({"frame": j, "n": n, "source": n % src["frames"], "psnr_db": by_offset,
+            rows.append({"frame": j, "n": n, "source": n % src["frames"] if src["kind"] == "file" else n, "psnr_db": by_offset,
                          "best_offset": best, "margin_db": round(by_offset[0] - neighbours, 2)})
         return {
             "index": stream["index"],
@@ -557,7 +699,8 @@ class Recordings:
         logger.info(f"QoE: calculando VMAF de {rec_id}")
         try:
             streams = [self._vmaf_stream(rec_id, s) for s in self.index(rec_id)["streams"]]
-            w, h, cx, cy = compare_region(self.read(rec_id, "meta.json")["timecodes"], source_info()["width"], source_info()["height"])
+            src = self.original(rec_id)
+            w, h, cx, cy = compare_region(self.read(rec_id, "meta.json")["timecodes"], src["width"], src["height"])
             self.write(rec_id, "vmaf.json", {
                 "vmaf_version": vmaf_version(),
                 "model": VMAF_MODEL,
@@ -582,21 +725,17 @@ class Recordings:
 
         Las dos entradas llegan a vmaf por tuberías con nombre, sin pasar por disco (30 s de 1080p en
         crudo son más de 5 GB). Como los fotogramas grabados son consecutivos (lo comprueba el índice),
-        el original es un tramo continuo del vídeo fuente, partido en dos si cruza el final del bucle:
-        con -stream_loop, FFmpeg no vuelve al frame 0 después de un -ss.
+        el original es un tramo continuo: del vídeo fuente (partido en dos si cruza el final del bucle) o
+        de la referencia grabada de la cámara.
         """
         if stream["pts_off_grid"] or stream["not_consecutive"] or stream["timecode_disagree"]:
             raise RuntimeError(f"Calidad {stream['index']}: el índice no es fiable (ver pts_off_grid, not_consecutive y timecode_disagree)")
-        src = source_info()
+        src = self._reference_usable(rec_id)
         w, h, cx, cy = compare_region(self.read(rec_id, "meta.json")["timecodes"], src["width"], src["height"])
         crop = f"crop={w}:{h}:{cx}:{cy},format=yuv420p"
         count = len(stream["n"])
-        segments, first, left = [], stream["n"][0] % src["frames"], count
-        while left > 0:
-            take = min(left, src["frames"] - first)
-            segments.append((first, take))
-            left -= take
-            first = 0
+        first = stream["n"][0]
+        reference_cmds = self._reference_cmd(rec_id, src, list(range(first, first + count)), crop)
 
         tmp = tempfile.mkdtemp(prefix="vmaf-")
         ref, dist, out = (os.path.join(tmp, name) for name in ("ref.yuv", "dist.yuv", "vmaf.json"))
@@ -613,11 +752,8 @@ class Recordings:
         def write_reference():
             try:
                 with open(ref, "wb") as fifo:
-                    for k, take in segments:
-                        seek = src["start_time"] + k / src["fps"] - 0.25 / src["fps"]
-                        proc = run(["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seek:.6f}", "-i", VIDEO_FILE,
-                                    "-map", "0:v:0", "-frames:v", str(take), "-vf", crop, "-f", "rawvideo", "-"],
-                                   stdout=fifo)
+                    for cmd in reference_cmds:
+                        proc = run(cmd, stdout=fifo)
                         if proc.wait() != 0:
                             errors.append(f"original: {proc.stderr.read().decode()[-300:]}")
                             return
