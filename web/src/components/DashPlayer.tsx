@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import * as dashjs from 'dashjs';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { DashTracer } from '../lib/trace';
@@ -25,6 +26,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // que sufre la red emulada. Si no, pasa por el punto de entrada, que es un proxy.
   const direct = new URL(url).host !== window.location.host;
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
   const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [playerStatus, setPlayerStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -318,7 +320,13 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
         </span>
       </div>
 
-      <div className="relative aspect-video bg-black flex items-center justify-center">
+      <div
+        ref={screenRef}
+        data-player="dash"
+        onDoubleClick={() => toggleFullscreen(screenRef.current)}
+        className="group relative aspect-video bg-black flex items-center justify-center"
+      >
+        <FullscreenButton target={screenRef} />
         <video
           ref={videoRef}
           className="w-full h-full object-contain"

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import * as Watch from '@moq/watch';
 import * as Net from '@moq/net';
 import { Signal } from '@moq/signals';
@@ -24,6 +25,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   onMetricsUpdate,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
   // 0 = auto: no se fija nada y @moq/watch dimensiona el búfer con el RTT que le comunica el relay
@@ -317,7 +319,13 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
         </span>
       </div>
 
-      <div className="relative aspect-video bg-black flex items-center justify-center">
+      <div
+        ref={screenRef}
+        data-player="moq"
+        onDoubleClick={() => toggleFullscreen(screenRef.current)}
+        className="group relative aspect-video bg-black flex items-center justify-center"
+      >
+        <FullscreenButton target={screenRef} />
         <canvas
           ref={canvasRef}
           width={1920}

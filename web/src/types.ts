@@ -140,6 +140,7 @@ export interface SampleRow {
   time_iso: string;
   epoch: number; // se incrementa en cada reconfiguración del pipeline o de la red, o al activar o apagar un reproductor
   players: string; // reproductores activos en esa muestra, p. ej. dash|moq
+  fullscreen: string | null; // reproductor a pantalla completa en ese momento (dash, moq o rtc), o vacío
   elapsed_s: number; // segundos desde el inicio del epoch
   source: SourceKind | null; // fuente de la emisión: file (bucle) o camera
   fps: number | null; // cadencia de la emisión

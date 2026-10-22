@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { RtcTracer } from '../lib/trace';
 import type { PlayerMetrics, TimecodeLayout } from '../types';
@@ -14,6 +15,7 @@ const WHEP_URL = '/rtc/live/whep';
 
 export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, timecodes, onMetricsUpdate }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   // Búfer de jitter que se le pide al navegador (RTCRtpReceiver.jitterBufferTarget). 0 = no pedir nada
   // y dejar el comportamiento por defecto del navegador, que lo ajusta solo.
@@ -194,7 +196,13 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, timecodes, on
         <span className="text-xs px-2 py-0.5 rounded bg-amber-900/50 text-amber-300 border border-amber-700/40 font-mono">SRTP / UDP 8189</span>
       </div>
 
-      <div className="relative aspect-video bg-black flex items-center justify-center">
+      <div
+        ref={screenRef}
+        data-player="rtc"
+        onDoubleClick={() => toggleFullscreen(screenRef.current)}
+        className="group relative aspect-video bg-black flex items-center justify-center"
+      >
+        <FullscreenButton target={screenRef} />
         <video ref={videoRef} className="w-full h-full object-contain" muted autoPlay playsInline />
 
         {status === 'connecting' && (

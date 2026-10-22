@@ -622,6 +622,7 @@ Desde el panel de control:
 | Escalera de calidades | 1 a 5; altura 1080/720/540/480/360/240 y bitrate libre | Lo que codifica la fuente. Con una sola no hay adaptación |
 | Calidad (por reproductor) | Auto o una calidad fija | Auto usa la adaptación de cada reproductor; fijar una la desactiva |
 | Reproductores activos | Cualquier combinación de LL-DASH, MoQ y WebRTC, con al menos uno | Un reproductor apagado se desmonta: cierra su conexión y no descarga nada, así que no compite con los demás por la red ni por el navegador. Se recuerda en el navegador; cada cambio abre un tramo de medida nuevo. En el CSV, `players` lista los activos y las métricas de los apagados quedan vacías |
+| Pantalla completa (por reproductor) | Botón arriba a la derecha del vídeo (aparece al pasar el ratón) o doble clic; Esc para salir | Amplía la zona de vídeo, con sus avisos. Solo escala la imagen: el timecode se lee del frame decodificado y el reproductor de MoQ sigue dibujando aunque su canvas quede tapado (`visible: 'always'`). Los otros reproductores siguen midiendo detrás (comprobado en Chrome headless el 22-10-2026). En el CSV, `fullscreen` dice cuál está a pantalla completa |
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
 | Latencia objetivo DASH | 0,05 a 6,0 s (0,3 s al abrir) | `liveDelay` de dash.js, con catch-up LoL+ |

@@ -266,6 +266,7 @@ export function App() {
         time_iso: new Date().toISOString(),
         epoch: epochRef.current.epoch,
         players: PLAYER_IDS.filter((id) => active[id]).join('|'),
+        fullscreen: (document.fullscreenElement as HTMLElement | null)?.dataset.player ?? null,
         elapsed_s: Math.round((performance.now() - epochRef.current.startedAt) / 1000),
         source: status?.config.source ?? null,
         fps: status?.config.fps ?? null,
