@@ -311,7 +311,9 @@ ejemplo de baja latencia pide recargar, porque las dos reglas guardan estado des
 
 Medido el 23-10-2026 con las reglas de fábrica, 2 Mbit/s de bajada y objetivo de 0,3 s (README,
 sección 6): dash.js estimó 2,4-2,8 Mbit/s, se quedó en 720p@2000, que no cabe, con el búfer en torno a
-0 s y 11 s congelados en un minuto.
+0 s y 11 s congelados en un minuto. Con L2A y LoL+, en la misma sesión y una pasada de cada, tampoco sostuvo
+el objetivo: 25 y 39 s congelados en un minuto, frente a 30 en otra pasada con las de fábrica. Con
+esa variación entre pasadas no se pueden ordenar las reglas.
 
 El cambio de calidad ocurre **en una frontera de segmento**: el siguiente segmento se pide de otra
 Representation. Con segmentos de 2 s, esa es la granularidad de reacción.

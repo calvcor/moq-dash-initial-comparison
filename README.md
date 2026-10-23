@@ -722,6 +722,16 @@ Son observaciones de una prueba por caso, no resultados contrastados.
 - **DASH elige una calidad que no cabe.** Estima 2,4-2,8 Mbit/s en un enlace de 2 y se queda en 720p@2000, cuyo bitrate puede llegar al 120 % del nominal, más el audio. El búfer ronda 0 s, acelera a 1,5× para volver al objetivo y la latencia va de 0,4 a 4,7 s. Con más latencia objetivo funciona mejor; que sea porque BOLA y la regla de búfer insuficiente tienen entonces margen es una deducción, no está medido.
 - WebRTC no adapta (sección 3.4): con 2 Mbit/s no puede reproducir la calidad alta.
 
+Las tres opciones del selector ABR de DASH, en las mismas condiciones y en la misma sesión, una pasada de 60 s cada una, descontando los 10 primeros:
+
+| ABR | Calidad elegida | Latencia mediana / p90 / máx. | Búfer mediano | Segundos congelados (de 60) |
+| :--- | :--- | :--- | :--- | :--- |
+| L2A | 540p todo el tiempo | 3,7 / 5,6 / 7,5 s | 0,5 s | 25 |
+| LoL+ | 540p y 720p | 5,0 / 9,2 / 11,5 s | 0 s | 39 |
+| Por defecto | 540p y 720p | 3,5 / 7,3 / 10,5 s | 0 s | 30 |
+
+Ninguna sostiene 0,3 s con 2 Mbit/s: L2A no sube de 540p y aun así se congela. La pasada anterior con las reglas por defecto dio 11 s congelados y esta, 30: la variación entre pasadas es mayor que las diferencias entre reglas, así que la tabla no permite ordenarlas. Hace falta repetirlo con campañas.
+
 > [!IMPORTANT]
 > La cola de emulación es una por protocolo, no una por espectador: dos pestañas abiertas a la vez comparten el mismo enlace y se estorban. Para medir con límite de ancho de banda, una sola pestaña.
 
