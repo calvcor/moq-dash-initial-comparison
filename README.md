@@ -538,6 +538,8 @@ La grabación empieza unos segundos antes que el registro (`prerollS`, 5 s por d
 
 Comprobado en local el 23-10-2026 con Chrome headless, la cámara a 15 fps y tres calidades: en 20 s, 300, 301 y 309 frames pintados en DASH, MoQ y WebRTC, todos emparejados, ninguno fuera de la grabación. Con un margen de 0,2 s, los del primer segundo largo salen fuera de la grabación (26, 18 y 22) y ninguno sin emparejar.
 
+En el servidor el mismo día, con el bucle a 60 fps y la escalera 1080/720/540, 30 s desde Chrome headless en el Mac del usuario: DASH y MoQ pintaron 1800 frames y WebRTC 1741 (59 de la fuente sin pintar), todos emparejados y ninguno fuera de la grabación. La latencia exacta (p50 361, 95 y 77 ms) coincide con la del medidor (362, 79 y 79 ms medidos justo antes) dentro de lo que varía entre un minuto y otro.
+
 ---
 
 ## 5. Emulación de red
