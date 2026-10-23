@@ -770,6 +770,26 @@ Bajar es pasar a una calidad con menos `bitrate` de catálogo que la que está e
 - Cancelar y prioridad dan resultados parecidos; con dos rondas no se pueden ordenar entre sí.
 - Una primera tanda se descartó: la variante se fijaba en el panel después de cargar, y el primer cambio, que llega en los primeros segundos, se hacía siempre sin corte.
 
+### 6.2. Microcortes de MoQ con la red limitada
+
+Con la bajada limitada a 6 Mbit/s, MoQ se ve casi siempre en 1080p pero con tirones y, a ratos, un paso atrás en la imagen. Medido el 23-10-2026 en local, con la escalera 1080p@4000 / 720p@2000 / 360p@700, MoQ solo, un Chrome headless por pasada y un registro de cada frame que pinta `@moq/watch` (escucha la señal del frame, sin copiar imágenes). Sin límite, en 60 s: 0-2 huecos de más de 50 ms, ningún salto atrás ni adelante, el retardo `auto` fijo y ningún descarte. Con 6 Mbit/s hay dos fenómenos distintos:
+
+**1. Pasos atrás de hasta 100 ms: cada cambio de pista.** En automático, la selección cambió 122-150 veces por minuto (el bitrate de catálogo de 1080p es el pico retenido, ~7,5 Mbit/s, y oscila alrededor del umbral) y hubo 44-55 saltos atrás de como mucho 100 ms, también de 1080p a 1080p: al volver a elegir la pista que ya está en pantalla, la librería abre otra suscripción a ella y la promociona igual. Con 1080p fijado a mano, ningún salto atrás. La cota es de diseño: `@moq/watch` promociona la pista nueva cuando le faltan menos de 100 ms para alcanzar la imagen anterior (`SLACK` en `js/watch/src/video/playhead.ts`, cuyo comentario dice que es también el mayor paso atrás que puede verse).
+
+**2. Congelados y saltos adelante: frames que llegan tarde.** Con 1080p fijado (sin cambios de pista) siguen 11-20 huecos de más de 50 ms por minuto, que suman 1,7-3,5 s, y 14-56 saltos adelante: la imagen se para y continúa más adelante, sin enseñar lo que llegó tarde. En el registro de llegadas de la librería, 34 frames tarde y 3 grupos enteros saltados por lentos (`skipping slow groups`) en un minuto. El tráfico medio era de 3,9-4,5 Mbit/s en un enlace de 6, pero la cola del router descartó paquetes en casi todas las pasadas (hasta 610 en un minuto): el relay envía a ráfagas por encima de los 6 Mbit/s. Los huecos terminan a menudo justo en un keyframe.
+
+| 6 Mbit/s, 1080p fijado | Pasadas | Huecos >50 ms (suma por minuto) | Saltos adelante | Descartes en la cola |
+| :--- | :--- | :--- | :--- | :--- |
+| Cola de 100 ms, retardo `auto` | 4 | 1,7-3,2 s | 14-56 | 0-610 |
+| Cola de 300 ms, retardo `auto` | 2 | 3,0 y 3,5 s | 26 y 31 | 100 y 344 |
+| Cola de 100 ms, retardo fijo de 800 ms | 2 | 0,27 y 1,85 s | 17 y 52 | 294 y 429 |
+
+- Una cola más profunda no lo arregla: sigue habiendo descartes. Un búfer de 800 ms lo amortigua en una pasada y apenas en la otra.
+- Los descartes no lo explican todo: en una pasada sin ninguno hubo 8 huecos de más de 100 ms.
+- No está localizado por qué el relay supera la tasa del enlace con una media de 4 Mbit/s. Que sea el ritmo de envío (pacing) de BBRv3 en `noq` con los keyframes de 1080p, y su recorte de ventana tras cada pérdida (sección 5), es la hipótesis; para confirmarlo hace falta una traza qlog del relay.
+
+Son una o dos pasadas por caso: la variación entre pasadas es grande.
+
 ## 7. Recuperación automática
 
 La plataforma se recupera sola de reinicios y caídas, sin recargar la pestaña:
