@@ -73,6 +73,12 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   `Page.navigate` (abrir directamente la URL en `/json/new` ha dado pestañas sin el reproductor MoQ).
 - Contra el servidor, por NPM (`https://moq-dash.mininet.duckdns.org`) no hacen falta banderas. Por IP
   sin HTTPS: `--unsafely-treat-insecure-origin-as-secure=http://10.20.40.90`.
+- **Cierra cada Chrome headless por su PID y comprueba que no queda ninguno** (`pgrep -f <user-data-dir>`).
+  Lanzado con `&` desde el shell de las herramientas, `kill %1` no lo cierra: el 23-10-2026 quedaron
+  ocho reproduciendo durante una hora, contra el servidor y el local, compartiendo la cola de emulación
+  con el usuario y con las medidas siguientes (todas invalidadas). Un navegador por pasada, o cierra la
+  pestaña al terminar: un script que abre pestaña nueva cada vez deja la anterior reproduciendo. Antes
+  de medir con límite de red, comprueba en `GET /api/status` que el contador del protocolo no sube.
 - Los objetos `window.dashPlayer` y `window.moqPlayer` están expuestos para inspeccionar.
 - Las cifras absolutas dependen de la red del cliente (Wi‑Fi o VPN meten ráfagas). Para comparar
   versiones o ajustes, alterna las variantes en la misma sesión y usa WebRTC como control.

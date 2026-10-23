@@ -722,15 +722,18 @@ Son observaciones de una prueba por caso, no resultados contrastados.
 - **DASH elige una calidad que no cabe.** Estima 2,4-2,8 Mbit/s en un enlace de 2 y se queda en 720p@2000, cuyo bitrate puede llegar al 120 % del nominal, más el audio. El búfer ronda 0 s, acelera a 1,5× para volver al objetivo y la latencia va de 0,4 a 4,7 s. Con más latencia objetivo funciona mejor; que sea porque BOLA y la regla de búfer insuficiente tienen entonces margen es una deducción, no está medido.
 - WebRTC no adapta (sección 3.4): con 2 Mbit/s no puede reproducir la calidad alta.
 
-Las tres opciones del selector ABR de DASH, en las mismas condiciones y en la misma sesión, una pasada de 60 s cada una, descontando los 10 primeros:
+Las tres opciones del selector ABR de DASH (medido el 23-10-2026 **en local**, no en el servidor). Escalera 1080p@4000 / 720p@2000 / 360p@700, 2 Mbit/s de bajada, objetivo 0,3 s, DASH por el proxy de entrada (sin `DASH_HOST`, así que la red emulada actúa sobre la conexión del proxy y no sobre la del navegador). Un Chrome headless nuevo por pasada, sin más tráfico en el router, dos rondas en orden alterno de 60 s, descontando los 10 primeros:
 
-| ABR | Calidad elegida | Latencia mediana / p90 / máx. | Búfer mediano | Segundos congelados (de 60) |
+| ABR | Calidad elegida | Cambios | Latencia mediana / p90 | Segundos congelados (de 60) |
 | :--- | :--- | :--- | :--- | :--- |
-| L2A | 540p todo el tiempo | 3,7 / 5,6 / 7,5 s | 0,5 s | 25 |
-| LoL+ | 540p y 720p | 5,0 / 9,2 / 11,5 s | 0 s | 39 |
-| Por defecto | 540p y 720p | 3,5 / 7,3 / 10,5 s | 0 s | 30 |
+| Por defecto | Casi siempre 360p, a ratos 720p | 7 y 2 | 0,31 / 0,57 y 0,31 / 0,55 s | 1 y 0 |
+| L2A | 360p y 720p, a partes casi iguales en la primera ronda | 6 y 5 | 0,93 / 9,05 y 0,30 / 0,73 s | 5 y 5 |
+| LoL+ | 360p todo el tiempo | 0 y 0 | 0,31 / 0,35 y 0,31 / 0,31 s | 0 y 0 |
 
-Ninguna sostiene 0,3 s con 2 Mbit/s: L2A no sube de 540p y aun así se congela. La pasada anterior con las reglas por defecto dio 11 s congelados y esta, 30: la variación entre pasadas es mayor que las diferencias entre reglas, así que la tabla no permite ordenarlas. Hace falta repetirlo con campañas.
+En local, LoL+ es la única que se queda quieta en la calidad que cabe y sostiene el objetivo. L2A sube a 720p, que no cabe, y se congela en las dos rondas. Son dos pasadas por regla: hace falta una campaña para darlo por bueno, y repetirlo en el servidor, con DASH directo.
+
+> [!WARNING]
+> **Medidas descartadas el 23-10-2026.** Una primera tabla de L2A y LoL+ hecha en el servidor no vale: los Chrome headless de pasadas anteriores siguieron reproduciendo (cerrar el proceso padre desde el shell no los cerró, y cada pasada abría una pestaña nueva sin cerrar la anterior) y compartían la cola de DASH con el que medía. Lo mismo invalidó una medida de MoQ con 10 Mbit/s que parecía mostrar la selección oscilando y la descarga subiendo hasta el límite. Repetida con un solo navegador, en local, MoQ con 10 Mbit/s se queda en 1080p sin un cambio ni un congelado en 60 s, con 3,8 Mbit/s de carga útil (4,1-4,2 sin límite). Las medidas de MoQ y DASH con 2 Mbit/s de arriba sí son válidas: ningún otro reproductor compartía su cola (durante la de DASH seguía abierto el MoQ de la anterior, que va por otra cola pero comparte la red entre el Mac y el servidor).
 
 > [!IMPORTANT]
 > La cola de emulación es una por protocolo, no una por espectador: dos pestañas abiertas a la vez comparten el mismo enlace y se estorban. Para medir con límite de ancho de banda, una sola pestaña.
