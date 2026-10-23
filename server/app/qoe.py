@@ -330,6 +330,8 @@ class Recordings:
         self.computing: Optional[str] = None
         # Lo pone main.py: True si la emisión está parada (ni empaquetadores ni fuente)
         self.idle: Callable[[], bool] = lambda: False
+        # Lo pone main.py: vuelve a arrancar la emisión con una configuración guardada
+        self.resume: Optional[Callable[[dict], None]] = None
 
     # --- ficheros ---
 
@@ -980,9 +982,10 @@ class Recordings:
     def vmaf(self, rec_id: str) -> Optional[dict]:
         return self.read(rec_id, "vmaf.json")
 
-    def start_worker(self, idle: Callable[[], bool]):
+    def start_worker(self, idle: Callable[[], bool], resume: Optional[Callable[[dict], None]] = None):
         """Atiende la cola de VMAF: la grabación más antigua pendiente, solo con la emisión parada."""
         self.idle = idle
+        self.resume = resume
         # Lo que estaba calculándose cuando se reinició el orquestador vuelve a la cola
         for meta in self.all():
             if (meta.get("vmaf") or {}).get("state") == "running":
@@ -997,7 +1000,9 @@ class Recordings:
                     continue
                 pending = [m for m in self.all() if m.get("state") == "ready" and (m.get("vmaf") or {}).get("state") == "queued"]
                 if pending:
-                    self._compute_vmaf(min(pending, key=lambda m: m["vmaf"]["queued_ms"])["id"])
+                    # Primero la prueba que detuvo la emisión: hasta que acabe, no se reanuda
+                    waiting = lambda m: not (m.get("stopped_after") and not m.get("resumed"))
+                    self._compute_vmaf(min(pending, key=lambda m: (waiting(m), m["vmaf"]["queued_ms"]))["id"])
             except Exception as e:
                 logger.warning(f"QoE: cola de VMAF: {e}")
 
@@ -1026,11 +1031,35 @@ class Recordings:
         except Interrupted:
             logger.info(f"QoE: VMAF de {rec_id} interrumpido: la emisión volvió a arrancar")
             self.update_meta(rec_id, vmaf=self._queued("Interrumpido: la emisión volvió a arrancar"))
+            return
         except Exception as e:
             logger.warning(f"QoE: VMAF de {rec_id} fallido: {e}")
             self.update_meta(rec_id, vmaf={"state": "error", "error": str(e)})
         finally:
             self.computing = None
+        self._resume_after(rec_id)
+
+    def _resume_after(self, rec_id: str):
+        """Si la prueba detuvo la emisión para calcular el VMAF, la vuelve a arrancar como estaba.
+
+        Solo una vez por grabación y solo si sigue parada: si alguien la arrancó entretanto, no se toca.
+        También si el VMAF falló: la prueba ya ha terminado.
+        """
+        meta = self.read(rec_id, "meta.json") or {}
+        config = meta.get("resume_config")
+        if not meta.get("stopped_after") or not config or meta.get("resumed") or not self.resume:
+            return
+        if not self.idle():
+            self.update_meta(rec_id, resumed={"ok": False, "reason": "La emisión ya estaba en marcha"})
+            return
+        try:
+            self.resume(config)
+            self.update_meta(rec_id, resumed={"ok": True, "at_ms": int(time.time() * 1000)})
+            logger.info(f"QoE: emisión reanudada tras calcular {rec_id}")
+        except Exception as e:
+            detail = getattr(e, "detail", None) or str(e)
+            logger.warning(f"QoE: no se pudo reanudar la emisión tras {rec_id}: {detail}")
+            self.update_meta(rec_id, resumed={"ok": False, "reason": detail})
 
     def _vmaf_stream(self, rec_id: str, stream: dict) -> dict:
         """VMAF y PSNR de luma de cada fotograma grabado de una calidad frente a su original.

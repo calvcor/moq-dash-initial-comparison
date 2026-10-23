@@ -754,6 +754,9 @@ def start_qoe_recording(req: qoe.RecordingRequest):
         raise HTTPException(status_code=409, detail="La emisión no está en marcha")
     context = {
         "stop_after": req.stop_after,
+        # Con stop_after, la emisión se reanuda con esta configuración al terminar el VMAF y la QoE (qoe.py):
+        # se guarda con la grabación porque reiniciar el orquestador la pierde
+        "resume_config": current_config.model_dump() if req.stop_after else None,
         "source": current_config.source,
         "fps": current_config.fps,
         "renditions": [r.model_dump() for r in current_config.renditions],
@@ -938,7 +941,10 @@ def on_startup():
     threading.Thread(target=supervise, daemon=True).start()
     threading.Thread(target=trace.listen, daemon=True).start()
     # El VMAF solo se calcula con la emisión parada: comparar imágenes retrasa al codificador
-    qoe.recordings.start_worker(lambda: not desired_running and not alive("master_source"))
+    qoe.recordings.start_worker(
+        lambda: not desired_running and not alive("master_source"),
+        resume=lambda config: start_pipeline(StreamConfig(**config)),
+    )
     versions.start()
 
 @app.on_event("shutdown")

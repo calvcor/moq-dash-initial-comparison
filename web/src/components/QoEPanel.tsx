@@ -51,6 +51,7 @@ interface Recording {
   duration_s: number;
   source?: string;
   stopped_after?: boolean;
+  resumed?: { ok: boolean; reason?: string; at_ms?: number };
   vmaf?: { state: 'queued' | 'running' | 'done' | 'error'; error?: string; note?: string | null };
   views?: Partial<Record<PlayerId, ViewSummary>>;
   qoe?: Partial<Record<PlayerId, QoEBrief>>;
@@ -96,7 +97,7 @@ const HINT = (
     </p>
     <p className="text-amber-300">
       El VMAF solo se calcula con la emisión parada: compararlo con ella en marcha retrasa al codificador. Por eso, por defecto, el servidor
-      detiene la emisión en cuanto termina la grabación y calcula el VMAF y la QoE; para seguir midiendo, hay que volver a iniciarla. La QoE suma por segundos: solo son
+      detiene la emisión en cuanto termina la grabación, calcula el VMAF y la QoE y la vuelve a arrancar con la misma configuración. La QoE suma por segundos: solo son
       comparables pruebas de la misma duración.
     </p>
   </div>
@@ -326,7 +327,7 @@ export const QoEPanel: React.FC<{
           </label>
           <label className="flex items-center gap-1.5" title="El VMAF solo se calcula con la emisión parada">
             <input type="checkbox" checked={stopAfter} disabled={running} onChange={(e) => setStopAfter(e.target.checked)} />
-            Detener la emisión al terminar
+            Detener la emisión para el VMAF y reanudarla después
           </label>
           <span className="text-slate-500">
             {activePlayers.length ? PLAYERS.filter((p) => activePlayers.includes(p.id)).map((p) => p.label).join(' · ') : 'sin reproductores activos'}
@@ -350,7 +351,9 @@ export const QoEPanel: React.FC<{
       )}
       {!streaming && !running && (
         <p className="text-xs text-slate-500">
-          La prueba necesita la emisión en marcha{current?.stopped_after ? ': se detuvo al terminar la última prueba para calcular el VMAF' : ''}.
+          La prueba necesita la emisión en marcha
+          {current?.stopped_after && !current.resumed ? ': se detuvo al terminar la última prueba y se reanudará al acabar su VMAF' : ''}
+          {current?.resumed && !current.resumed.ok ? `: no se pudo reanudar tras la última prueba (${current.resumed.reason})` : ''}.
         </p>
       )}
       {error && <p className="text-xs text-red-400">{error}</p>}
