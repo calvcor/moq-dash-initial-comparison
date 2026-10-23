@@ -606,7 +606,7 @@ Los campos que condicionan el comportamiento del reproductor son cuatro:
 | Campo | Efecto |
 | :--- | :--- |
 | `bitrate` | Es el dato con el que la adaptación automática decide si una calidad cabe. |
-| `stalled` | El publicador recomienda evitar temporalmente esa calidad; la adaptación automática la descarta. |
+| `stalled` | El publicador recomienda evitar temporalmente esa calidad. Con `@moq/watch` 0.6.x la adaptación automática la descartaba; desde `git@bc64b9c` el reproductor ya no lo mira (ver 4.10). |
 | `jitter` | Irregularidad con la que el publicador envía los frames. El reproductor la suma a su búfer. |
 | `delay` | Retraso de una calidad respecto a la más temprana. También se suma al búfer. |
 
@@ -726,22 +726,36 @@ congestión solo descubre capacidad que intenta usar. Si el vídeo ocupa 4 Mbit/
 100, la estimación no tiene por qué reflejar los 100.
 
 **La selección de rendition en `@moq/watch`.** Es lo que el testbed deja actuar sin tocar. El
-algoritmo, leído del código, es este:
+algoritmo de la versión desplegada (`git@bc64b9c`, `js/watch/src/video/source.ts`, `#runSelected`;
+idéntico en la rama principal el 23-10-2026 salvo comentarios), leído del código, es este:
 
-1. Descarta las renditions que el navegador no puede decodificar.
-2. Descarta las marcadas como `stalled` (si lo están todas, se queda con la de menor bitrate).
-3. Toma la estimación del relay y le aplica un **margen del 80 %**.
+1. Descarta las renditions que el navegador no puede decodificar y las que el catálogo marca con
+   `enabled: false` (sin frames).
+2. Se queda con las de mayor `preference` (una transcodificación de compatibilidad lleva -1).
+3. Toma la estimación del relay (`estimatedRecvRate`, del PROBE) y le aplica un **margen del 80 %**.
 4. Elige la rendition de **mayor bitrate que quepa** en ese presupuesto, según el `bitrate` del
    catálogo. Si no cabe ninguna, la de menor bitrate.
-5. Sin estimación disponible, elige la de mayor resolución.
+5. Sin estimación disponible, elige la mejor por orden: mayor imagen y, a igualdad, mayor bitrate.
 
-En esa lógica no hay histéresis ni temporizadores: la selección se recalcula cada vez que cambia la
-estimación. La única amortiguación es el margen del 80 %.
+En esa lógica no hay histéresis, temporizadores, búfer ni historial: la selección se recalcula cada
+vez que cambia la estimación. La única amortiguación es el margen del 80 %. Es una regla de caudal
+pura, del tipo de la `throughputRule` de dash.js, con la estimación del emisor en vez de la del
+cliente.
+
+**Corrección (23-10-2026).** Hasta esta fecha este apartado decía que también se descartaban las
+renditions marcadas `stalled`. Era cierto en `@moq/watch` 0.6.x, con el que se escribió, pero en
+`git@bc64b9c` el catálogo ya no tiene ese campo en su esquema y la selección no lo usa. Las medidas
+de 4.10 que atribuyen los cambios de calidad a las marcas `stalled` se hicieron con 0.6.2-0.6.3.
+
+**El bitrate con el que compara.** Lo escribe el publicador. En `moq-cli` (`git@bc64b9c`), según los
+comentarios de `rs/moq-mux`, se mide en ventanas de 1 s y se retiene el pico: se toma con la primera
+ventana, sube cuando otra lo supera y no baja nunca. Medido en el testbed: 7,4-7,5 Mbit/s para
+1080p@4000, 3,6 para 720p@2000, unas 1,85 veces el nominal. Con el margen del 80 %, mantener 1080p
+exige estimar más de 9,3 Mbit/s.
 
 El reproductor admite además un **objetivo** (`target`) que restringe la elección: por nombre de
 pista, por píxeles, por ancho o alto máximos, o por bitrate máximo. El selector de calidad del panel
-usa solo el nombre, y solo cuando se fija una calidad a mano. Una calidad fijada a mano se mantiene
-aunque esté `stalled`.
+usa solo el nombre, y solo cuando se fija una calidad a mano.
 
 **El cambio de pista.** No hay un mensaje de "cambiar de calidad": cada calidad es una pista
 distinta, así que cambiar es **suscribirse a la nueva y darse de baja de la anterior**. El

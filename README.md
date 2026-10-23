@@ -686,7 +686,7 @@ Con más de una calidad en la escalera, cada reproductor adapta por su cuenta (s
 | Dónde están las calidades | Varias `Representation` en un `AdaptationSet` del manifiesto | Varias *renditions* (pistas) en el catálogo de la emisión |
 | Quién decide | dash.js, con su ABR por defecto | El reproductor, a partir de lo que estima el relay |
 | En qué se basa | Caudal que mide en sus descargas | Tasa de recepción que el relay estima con su control de congestión y envía por mensajes PROBE |
-| Regla | Las de fábrica de dash.js (caudal + BOLA), o L2A o LoL+ en solitario (selector **ABR**) | La de `@moq/watch`: la más alta cuyo bitrate de catálogo quepa en el 80 % de la estimación, descartando las que el publicador marca `stalled` |
+| Regla | Las de fábrica de dash.js (caudal + BOLA), o L2A o LoL+ en solitario (selector **ABR**) | La de `@moq/watch`: la más alta cuyo bitrate de catálogo (pico retenido) quepa en el 80 % de la estimación, sin histéresis (PROTOCOLOS, 4.10; con 0.6.x descartaba además las marcadas `stalled`) |
 | Cuándo conmuta | En frontera de segmento | En frontera de grupo (keyframe), sin corte: mantiene la suscripción anterior hasta que la nueva la alcanza |
 
 **En automático el banco no interviene en ninguno de los dos reproductores**: se observa el comportamiento de dash.js y de `@moq/watch` tal cual. Solo al fijar una calidad a mano se le pide al reproductor esa en concreto (en MoQ, por nombre de rendition).
