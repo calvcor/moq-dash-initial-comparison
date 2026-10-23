@@ -753,6 +753,7 @@ def start_qoe_recording(req: qoe.RecordingRequest):
     if not desired_running or not alive("master_source"):
         raise HTTPException(status_code=409, detail="La emisión no está en marcha")
     context = {
+        "stop_after": req.stop_after,
         "source": current_config.source,
         "fps": current_config.fps,
         "renditions": [r.model_dump() for r in current_config.renditions],
@@ -760,7 +761,10 @@ def start_qoe_recording(req: qoe.RecordingRequest):
         "master_start_time_ms": int(master_start_time * 1000),
     }
     try:
-        return qoe.recordings.start(req.duration_s, context, lambda: int(master_start_time * 1000))
+        return qoe.recordings.start(
+            req.duration_s, context, lambda: int(master_start_time * 1000),
+            on_recorded=stop_pipeline if req.stop_after else None,
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

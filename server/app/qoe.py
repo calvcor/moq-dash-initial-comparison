@@ -196,6 +196,8 @@ class Interrupted(Exception):
 
 class RecordingRequest(BaseModel):
     duration_s: float = Field(..., ge=5, le=330, description="Segundos que se graban desde el primer keyframe")
+    # El VMAF solo se calcula con la emisión parada: así se calcula nada más terminar la prueba
+    stop_after: bool = Field(False, description="Detener la emisión en cuanto termine la grabación")
 
 
 PLAYERS = ("dash", "moq", "rtc")
@@ -537,8 +539,12 @@ class Recordings:
 
     # --- grabación ---
 
-    def start(self, duration_s: float, context: dict, master_start_ms: Callable[[], int]) -> dict:
-        """Empieza a grabar. context: calidades, timecodes y cadencia de la emisión en curso."""
+    def start(self, duration_s: float, context: dict, master_start_ms: Callable[[], int],
+              on_recorded: Optional[Callable[[], None]] = None) -> dict:
+        """Empieza a grabar. context: calidades, timecodes y cadencia de la emisión en curso.
+
+        on_recorded se llama al terminar de grabar bien, antes de indexar (p. ej. para detener la emisión).
+        """
         with self.lock:
             if self.active:
                 raise RuntimeError(f"Ya hay una grabación en curso ({self.active})")
@@ -548,13 +554,21 @@ class Recordings:
                     "created_ms": int(time.time() * 1000), **context}
             self.write(rec_id, "meta.json", meta)
             self.active = rec_id
-        threading.Thread(target=self._run, args=(rec_id, duration_s, master_start_ms), daemon=True).start()
+        threading.Thread(target=self._run, args=(rec_id, duration_s, master_start_ms, on_recorded), daemon=True).start()
         return meta
 
-    def _run(self, rec_id: str, duration_s: float, master_start_ms: Callable[[], int]):
+    def _run(self, rec_id: str, duration_s: float, master_start_ms: Callable[[], int],
+             on_recorded: Optional[Callable[[], None]] = None):
         try:
             started_ms, stamps = self._record(rec_id, duration_s, master_start_ms)
             self.update_meta(rec_id, state="indexing", started_ms=started_ms)
+            if on_recorded:
+                # La emisión ya no hace falta: indexar y subir los registros no dependen de ella
+                try:
+                    on_recorded()
+                    self.update_meta(rec_id, stopped_after=True)
+                except Exception as e:
+                    logger.warning(f"QoE: no se pudo detener la emisión tras {rec_id}: {e}")
             summary = self._build_index(rec_id, stamps)
             self.update_meta(rec_id, state="ready", streams=summary, vmaf=self._queued())
             logger.info(f"QoE: grabación {rec_id} indexada: {summary}")

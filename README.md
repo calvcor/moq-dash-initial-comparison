@@ -566,7 +566,7 @@ En el servidor (bucle a 60 fps, escalera 1080/720/540, 30 s, sin red emulada, lo
 
 - **Lanzar:** duración (15, 30, 60, 120 o 300 s) y margen inicial; la prueba usa los reproductores activos y necesita la emisión en marcha. Mientras dura muestra la fase y su cuenta atrás. No hay que cambiar de pestaña: el navegador detiene el muestreo y esos tramos quedan excluidos.
 - **Resultados de cada prueba** (las 10 últimas): por reproductor, la QoE con sus seis términos, sus entradas (VMAF medio, latencia, parones, velocidad), los frames emparejados, sin pintar y los cambios de calidad, y avisos si algo no cuadró (pestaña oculta, tramos sin muestreo, frames fuera de la grabación, pasos excluidos). Gráfica por segundo de VMAF, latencia o velocidad.
-- **VMAF en cola:** el panel lo dice y, con la emisión en marcha, ofrece un botón para detenerla. No la detiene solo.
+- **Parada al terminar:** con la casilla **Detener la emisión al terminar** (marcada por defecto), el servidor detiene la emisión en cuanto termina la grabación (`stop_after` en `POST /api/qoe/recordings`), y el VMAF y la QoE se calculan solos a continuación. Indexar y subir los registros no dependen de la emisión. Si la grabación falla, no se detiene. Para seguir midiendo hay que volver a iniciarla. Desmarcada, el VMAF queda en cola hasta que se detenga, y el panel ofrece un botón para hacerlo. Desde la consola, `qoeTest` no la detiene.
 - **Exportar:** CSV con cada paso de 1 s de cada reproductor y JSON completo (grabación, términos, entradas y pasos). La QoE es un resultado por prueba, no por segundo de medida: no va en el CSV de muestras.
 
 ---

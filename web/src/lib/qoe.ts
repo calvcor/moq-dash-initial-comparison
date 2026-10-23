@@ -18,6 +18,8 @@ export interface QoETestOptions {
   durationS: number;
   prerollS?: number;
   players: PlayerId[];
+  stopAfter?: boolean; // el servidor detiene la emisión al terminar de grabar, y así calcula el VMAF
+
   onPhase?: (phase: 'recording' | 'logging' | 'uploading' | 'done', untilMs?: number) => void;
 }
 
@@ -28,7 +30,7 @@ export interface QoETestResult {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function runQoETest({ durationS, prerollS = 5, players, onPhase }: QoETestOptions): Promise<QoETestResult> {
+export async function runQoETest({ durationS, prerollS = 5, players, stopAfter = false, onPhase }: QoETestOptions): Promise<QoETestResult> {
   if (!getClockSync()) throw new Error('Sin sincronización de reloj con el servidor');
   const active = players.filter((p) => meters[p]);
   if (!active.length) throw new Error('No hay ningún reproductor activo');
@@ -37,7 +39,7 @@ export async function runQoETest({ durationS, prerollS = 5, players, onPhase }: 
   const res = await fetch('/api/qoe/recordings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ duration_s: prerollS + durationS + 2 }),
+    body: JSON.stringify({ duration_s: prerollS + durationS + 2, stop_after: stopAfter }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `No se pudo grabar (${res.status})`);
   const { id } = await res.json();

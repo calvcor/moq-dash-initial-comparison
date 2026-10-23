@@ -50,6 +50,7 @@ interface Recording {
   error: string | null;
   duration_s: number;
   source?: string;
+  stopped_after?: boolean;
   vmaf?: { state: 'queued' | 'running' | 'done' | 'error'; error?: string; note?: string | null };
   views?: Partial<Record<PlayerId, ViewSummary>>;
   qoe?: Partial<Record<PlayerId, QoEBrief>>;
@@ -94,7 +95,8 @@ const HINT = (
       El registro empieza tras el margen, para que los primeros frames pintados (codificados antes, tanto como la latencia) estén grabados.
     </p>
     <p className="text-amber-300">
-      El VMAF solo se calcula con la emisión parada: compararlo con ella en marcha retrasa al codificador. La QoE suma por segundos: solo son
+      El VMAF solo se calcula con la emisión parada: compararlo con ella en marcha retrasa al codificador. Por eso, por defecto, el servidor
+      detiene la emisión en cuanto termina la grabación y calcula el VMAF y la QoE; para seguir midiendo, hay que volver a iniciarla. La QoE suma por segundos: solo son
       comparables pruebas de la misma duración.
     </p>
   </div>
@@ -107,6 +109,7 @@ export const QoEPanel: React.FC<{
 }> = ({ streaming, activePlayers, onStopStream }) => {
   const [durationS, setDurationS] = useState(30);
   const [prerollS, setPrerollS] = useState(5);
+  const [stopAfter, setStopAfter] = useState(true);
   const [phase, setPhase] = useState<{ name: string; until?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -185,6 +188,7 @@ export const QoEPanel: React.FC<{
         durationS,
         prerollS,
         players: activePlayers,
+        stopAfter,
         onPhase: (name, until) => setPhase({ name, until }),
       });
       setSelected(result.id);
@@ -320,6 +324,10 @@ export const QoEPanel: React.FC<{
             />
             s
           </label>
+          <label className="flex items-center gap-1.5" title="El VMAF solo se calcula con la emisión parada">
+            <input type="checkbox" checked={stopAfter} disabled={running} onChange={(e) => setStopAfter(e.target.checked)} />
+            Detener la emisión al terminar
+          </label>
           <span className="text-slate-500">
             {activePlayers.length ? PLAYERS.filter((p) => activePlayers.includes(p.id)).map((p) => p.label).join(' · ') : 'sin reproductores activos'}
           </span>
@@ -340,7 +348,11 @@ export const QoEPanel: React.FC<{
           {remaining !== null && ` · ${remaining} s`} · no cambies de pestaña: el navegador detiene el muestreo
         </p>
       )}
-      {!streaming && !running && <p className="text-xs text-slate-500">La prueba necesita la emisión en marcha.</p>}
+      {!streaming && !running && (
+        <p className="text-xs text-slate-500">
+          La prueba necesita la emisión en marcha{current?.stopped_after ? ': se detuvo al terminar la última prueba para calcular el VMAF' : ''}.
+        </p>
+      )}
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       {recordings.length > 0 && (
