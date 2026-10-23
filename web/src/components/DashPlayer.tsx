@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import * as dashjs from 'dashjs';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
+import { meters } from '../lib/qoe';
 import { DashTracer } from '../lib/trace';
 import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
@@ -110,7 +111,11 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   useEffect(() => {
     const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
     meterRef.current = glassMeter;
-    return () => glassMeter.close();
+    meters.dash = glassMeter;
+    return () => {
+      glassMeter.close();
+      if (meters.dash === glassMeter) delete meters.dash;
+    };
   }, []);
 
   useEffect(() => {

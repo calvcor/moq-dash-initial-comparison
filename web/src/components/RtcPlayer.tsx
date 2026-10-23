@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
+import { meters } from '../lib/qoe';
 import { RtcTracer } from '../lib/trace';
 import { serverNowMs } from '../lib/clock';
 import type { PlayerMetrics, TimecodeLayout } from '../types';
@@ -70,7 +71,11 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
   useEffect(() => {
     const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
     meterRef.current = glassMeter;
-    return () => glassMeter.close();
+    meters.rtc = glassMeter;
+    return () => {
+      glassMeter.close();
+      if (meters.rtc === glassMeter) delete meters.rtc;
+    };
   }, []);
 
   useEffect(() => {

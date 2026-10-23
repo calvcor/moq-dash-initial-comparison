@@ -42,6 +42,19 @@ export interface FrameTime {
   dt: number;
 }
 
+/**
+ * Lo que pintó un reproductor durante una prueba de QoE (lib/qoe.ts). Una fila por frame nuevo, con las
+ * mismas lecturas que ya hace el medidor: no añade ninguna lectura de píxeles.
+ */
+export interface ViewLog {
+  frames: [number, number, number][]; // [ms desde startMs, timecode, altura del frame]
+  gaps: [number, number][]; // tramos con el muestreo parado (ms, reloj del servidor)
+  unreadable: number; // lecturas sin timecode legible
+  startMs: number; // reloj del servidor
+  endMs: number;
+  missingClock: number; // frames sin sincronización de reloj: no se pueden situar
+}
+
 export interface GlassSnapshot {
   latencyMs: number | null; // mediana de los frames presentados en el último segundo
   fps: number | null; // frames distintos presentados por segundo, media de los últimos 2 s
@@ -70,6 +83,7 @@ export class GlassMeter {
   #stallMs = 0;
   #samples: { t: number; latency: number }[] = [];
   #frameTimes: FrameTime[] = [];
+  #log: ViewLog | null = null;
   #changeValid = false; // #lastChange es el pintado de un frame, no el reinicio tras un parón del muestreo
 
   constructor(grab: FrameGrabber, getLayouts: () => TimecodeLayout[] = () => [DEFAULT_TIMECODE]) {
@@ -90,6 +104,20 @@ export class GlassMeter {
   close() {
     cancelAnimationFrame(this.#raf);
     this.#channel.port1.close();
+  }
+
+  /** Empieza a anotar cada frame nuevo que se pinta (prueba de QoE). */
+  startLog() {
+    const now = serverNowMs();
+    this.#log = { frames: [], gaps: [], unreadable: 0, startMs: now ?? 0, endMs: 0, missingClock: now === null ? 1 : 0 };
+  }
+
+  /** Termina el registro y lo devuelve, o null si no se había empezado. */
+  stopLog(): ViewLog | null {
+    const log = this.#log;
+    this.#log = null;
+    if (log) log.endMs = serverNowMs() ?? 0;
+    return log;
   }
 
   /** Tiempo sin imagen nueva, o null si el propio muestreo está parado (pestaña oculta) y no se puede saber. */
@@ -135,6 +163,9 @@ export class GlassMeter {
       this.#lastChange = t;
       this.#inStall = false;
       this.#changeValid = false;
+      const from = serverNowMs(this.#lastTick);
+      const to = serverNowMs(t);
+      if (this.#log && from !== null && to !== null) this.#log.gaps.push([from, to]);
     }
     this.#lastTick = t;
 
@@ -143,6 +174,7 @@ export class GlassMeter {
     const frame = this.#grab();
     if (!frame) return;
     this.#reading = true;
+    const height = frame.displayHeight;
     let code: number | null = null;
     try {
       code = await this.decode(frame);
@@ -150,7 +182,10 @@ export class GlassMeter {
       frame.close();
       this.#reading = false;
     }
-    if (code === null) return;
+    if (code === null) {
+      if (this.#log) this.#log.unreadable++;
+      return;
+    }
 
     if (code === this.#lastCode) {
       if (!this.#inStall && t - this.#lastChange > STALL_MS) {
@@ -169,6 +204,11 @@ export class GlassMeter {
     // cuentan como congelados, y uno solo dispararía la desviación típica y el máximo
     const dt = t - this.#lastChange;
     if (this.#changeValid && dt < STALL_MS) this.#frameTimes.push({ t, dt });
+    if (this.#log) {
+      const painted = serverNowMs(t);
+      if (painted === null) this.#log.missingClock++;
+      else this.#log.frames.push([Math.round((painted - this.#log.startMs) * 10) / 10, code, height]);
+    }
     this.#lastCode = code;
     this.#lastChange = t;
     this.#changeValid = true;

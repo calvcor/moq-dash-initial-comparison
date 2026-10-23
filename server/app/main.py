@@ -791,6 +791,28 @@ def get_qoe_index(rec_id: str):
         raise HTTPException(status_code=409, detail="La grabación aún no está indexada")
     return index
 
+@app.post("/api/qoe/recordings/{rec_id}/views/{player}")
+def upload_qoe_view(rec_id: str, player: str, view: qoe.ViewUpload):
+    """Lo que pintó un reproductor (dash, moq o rtc) durante la prueba; se traduce a frames al indexar."""
+    qoe_recording_or_404(rec_id)
+    try:
+        summary = qoe.recordings.add_view(rec_id, player, view)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Reproductor desconocido")
+    return {"state": "mapped" if summary else "stored", "summary": summary}
+
+@app.get("/api/qoe/recordings/{rec_id}/views/{player}")
+def get_qoe_view(rec_id: str, player: str):
+    """Por frame pintado: hora, calidad, número de frame de la fuente y latencia exacta."""
+    qoe_recording_or_404(rec_id)
+    try:
+        view = qoe.recordings.view(rec_id, player)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Reproductor desconocido")
+    if view is None:
+        raise HTTPException(status_code=409, detail="Sin registro de este reproductor o aún sin traducir")
+    return view
+
 @app.post("/api/qoe/recordings/{rec_id}/index")
 def reindex_qoe_recording(rec_id: str):
     """Rehace el índice de una grabación con sus marcas guardadas y vuelve a encolar su VMAF."""

@@ -4,6 +4,7 @@ import * as Watch from '@moq/watch';
 import * as Net from '@moq/net';
 import { Signal } from '@moq/signals';
 import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
+import { meters } from '../lib/qoe';
 import { MoqBufferMeter, MoqTracer } from '../lib/trace';
 import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
@@ -90,7 +91,11 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
     };
     const glassMeter = new GlassMeter(grab, () => timecodesRef.current);
     meterRef.current = glassMeter;
-    return () => glassMeter.close();
+    meters.moq = glassMeter;
+    return () => {
+      glassMeter.close();
+      if (meters.moq === glassMeter) delete meters.moq;
+    };
   }, []);
 
   useEffect(() => {

@@ -23,6 +23,12 @@ vale para la comprobación por PSNR.
 Indexar (decodificar dos filas por fotograma) sí se hace al terminar de grabar: no se nota en el
 codificador.
 
+Fase c: lo que vio cada reproductor. Durante la prueba, el medidor glass-to-glass de cada reproductor
+anota cada frame nuevo que pinta (hora en reloj del servidor, timecode y altura) y al final lo sube. El
+timecode que lee el navegador sale de los mismos píxeles codificados que el que se lee aquí al indexar,
+así que se traduce a número de frame buscándolo tal cual en el índice, sin tolerancias. De ahí salen la
+latencia exacta de cada frame (contra la marca de FFmpeg), los saltos y los cambios de calidad.
+
 Con la cámara RTSP como fuente no hay vídeo original guardado. La fuente emite entonces una referencia
 casi sin pérdidas (UDP 5005, ver main.py) con los mismos PTS que la escalera: se graba a la vez que el
 flujo codificado y hace de original, de modo que el fotograma n grabado se compara con el n de la referencia.
@@ -79,7 +85,22 @@ class Interrupted(Exception):
 
 
 class RecordingRequest(BaseModel):
-    duration_s: float = Field(..., ge=5, le=300, description="Segundos que se graban desde el primer keyframe")
+    duration_s: float = Field(..., ge=5, le=330, description="Segundos que se graban desde el primer keyframe")
+
+
+PLAYERS = ("dash", "moq", "rtc")
+
+
+class ViewUpload(BaseModel):
+    """Lo que pintó un reproductor durante la prueba, según su medidor glass-to-glass."""
+    frames: list[tuple[float, int, int]] = Field(..., description="[hora de pintado (ms desde window_ms[0]), timecode, altura] por frame nuevo")
+    gaps: list[tuple[float, float]] = Field(default_factory=list, description="Tramos con el muestreo parado (pestaña oculta, hilo bloqueado): no se sabe qué se pintó")
+    unreadable: int = Field(0, description="Lecturas sin timecode legible")
+    window_ms: tuple[float, float] = Field(..., description="Principio y fin del registro, reloj del servidor")
+    clock_offset_ms: Optional[float] = None
+    clock_rtt_ms: Optional[float] = None
+    hidden: bool = Field(False, description="La pestaña estuvo oculta en algún momento del registro")
+    user_agent: str = ""
 
 
 _source_info: Optional[dict] = None
@@ -190,6 +211,8 @@ def decode_strip(px: bytes, width: int, layout: dict) -> Optional[int]:
 class Recordings:
     def __init__(self):
         self.lock = threading.Lock()
+        self.meta_lock = threading.Lock()
+        self.views_lock = threading.Lock()
         self.active: Optional[str] = None
         self.checking: set[str] = set()
         self.computing: Optional[str] = None
@@ -217,10 +240,13 @@ class Recordings:
         os.replace(tmp, self.path(rec_id, name))
 
     def update_meta(self, rec_id: str, **fields) -> dict:
-        meta = self.read(rec_id, "meta.json") or {}
-        meta.update(fields)
-        self.write(rec_id, "meta.json", meta)
-        return meta
+        # Leer, modificar y escribir de una vez: escriben a la vez el hilo de la grabación, la cola de VMAF
+        # y las peticiones que suben lo que vio cada reproductor
+        with self.meta_lock:
+            meta = self.read(rec_id, "meta.json") or {}
+            meta.update(fields)
+            self.write(rec_id, "meta.json", meta)
+            return meta
 
     def all(self) -> list[dict]:
         if not os.path.isdir(QOE_DIR):
@@ -233,6 +259,110 @@ class Recordings:
         if meta is not None:
             meta["check"] = self.read(rec_id, "check.json")
         return meta
+
+    # --- lo que vio cada reproductor (fase c) ---
+
+    def add_view(self, rec_id: str, player: str, view: ViewUpload) -> Optional[dict]:
+        """Guarda el registro de un reproductor y, si la grabación ya está indexada, lo traduce."""
+        if player not in PLAYERS:
+            raise KeyError(player)
+        self.write(rec_id, f"view-{player}.json", view.model_dump())
+        if (self.read(rec_id, "meta.json") or {}).get("state") == "ready":
+            return self._map_view(rec_id, player)
+        return None
+
+    def view(self, rec_id: str, player: str) -> Optional[dict]:
+        if player not in PLAYERS:
+            raise KeyError(player)
+        return self.read(rec_id, f"view-{player}.mapped.json")
+
+    def _map_views(self, rec_id: str):
+        for player in PLAYERS:
+            if self.read(rec_id, f"view-{player}.json") is not None:
+                self._map_view(rec_id, player)
+
+    def _map_view(self, rec_id: str, player: str) -> dict:
+        """Número de frame, calidad y latencia exacta de cada frame que pintó el reproductor.
+
+        Fuera de la grabación quedan los frames codificados antes de que empezara o después de que
+        terminara (el registro del navegador empieza más tarde para que no los haya, pero con más latencia
+        que ese margen aparecen); sin emparejar, los timecodes que caen dentro y no están en el índice
+        (lectura errónea). Ninguno de los dos se rellena.
+        """
+        view = self.read(rec_id, f"view-{player}.json")
+        index = self.index(rec_id)
+        stamps = self.read(rec_id, "stamps.json") or {}
+        span = 2 ** self.read(rec_id, "meta.json")["timecodes"][0]["bits"]
+        by_height, tables, ranges, marks = {}, {}, {}, {}
+        for stream in index["streams"]:
+            i = stream["index"]
+            by_height[stream["height"]] = i
+            tables[i] = {c: n for c, n in zip(stream["timecode"], stream["n"]) if c is not None and n is not None}
+            codes = [c for c in stream["timecode"] if c is not None]
+            ranges[i] = (codes[0], codes[-1]) if codes else None
+            marks[i] = {int(n): m for n, m in stamps.get(str(i), [])}
+
+        def outside(i: int, code: int) -> bool:
+            first, last = ranges[i]
+            # Distancias módulo 2^bits respecto al primer timecode grabado: fuera si cae antes o después
+            return (code - first) % span > (last - first) % span
+
+        rows, latencies = [], []
+        counts = {"outside_recording": 0, "unmatched": 0, "unknown_height": 0}
+        start = view["window_ms"][0]
+        for since, code, height in view["frames"]:
+            t = round(start + since, 1)
+            i = by_height.get(height)
+            if i is None:
+                counts["unknown_height"] += 1
+                rows.append([t, None, None, None])
+                continue
+            n = tables[i].get(code)
+            if n is None:
+                counts["outside_recording" if ranges[i] is None or outside(i, code) else "unmatched"] += 1
+                rows.append([t, i, None, None])
+                continue
+            mark = marks[i].get(n)
+            latency = round(t - mark, 1) if mark is not None else None
+            if latency is not None:
+                latencies.append(latency)
+            rows.append([t, i, n, latency])
+
+        matched = [(t, i, n) for t, i, n, _ in rows if n is not None]
+        skipped = sum(max(0, b[2] - a[2] - 1) for a, b in zip(matched, matched[1:]))
+        backwards = sum(1 for a, b in zip(matched, matched[1:]) if b[2] <= a[2])
+        switches = sum(1 for a, b in zip(matched, matched[1:]) if b[1] != a[1])
+        summary = {
+            "frames": len(rows),
+            "matched": len(matched),
+            **counts,
+            "unreadable": view.get("unreadable", 0),
+            # Frames de la fuente que no llegaron a pintarse entre dos pintados (saltos al directo, frames
+            # descartados por el reproductor o no leídos por el medidor)
+            "skipped": skipped,
+            # Debería ser 0: un frame anterior pintado después de uno posterior
+            "backwards": backwards,
+            "rendition_switches": switches,
+            "gaps": len(view.get("gaps", [])),
+            "hidden": view.get("hidden", False),
+            "window_s": round((view["window_ms"][1] - view["window_ms"][0]) / 1000, 1),
+            "latency_ms": {
+                "p50": percentile(latencies, 0.5), "p95": percentile(latencies, 0.95),
+                "min": min(latencies), "max": max(latencies),
+            } if latencies else None,
+            "clock_rtt_ms": view.get("clock_rtt_ms"),
+        }
+        self.write(rec_id, f"view-{player}.mapped.json", {
+            "summary": summary,
+            "columns": ["t_ms", "stream", "n", "latency_ms"],
+            "frames": rows,
+            "gaps": view.get("gaps", []),
+            "window_ms": view["window_ms"],
+        })
+        with self.views_lock:
+            meta = self.read(rec_id, "meta.json")
+            self.update_meta(rec_id, views={**(meta.get("views") or {}), player: summary})
+        return summary
 
     def index(self, rec_id: str) -> Optional[dict]:
         return self.read(rec_id, "index.json")
@@ -266,6 +396,8 @@ class Recordings:
             summary = self._build_index(rec_id, stamps)
             self.update_meta(rec_id, state="ready", streams=summary, vmaf=self._queued())
             logger.info(f"QoE: grabación {rec_id} indexada: {summary}")
+            # Los registros que subieron los reproductores antes de terminar el índice
+            self._map_views(rec_id)
         except Exception as e:
             logger.warning(f"QoE: grabación {rec_id} fallida: {e}")
             self.update_meta(rec_id, state="error", error=str(e))
@@ -354,6 +486,7 @@ class Recordings:
             raise RuntimeError("La grabación se está comparando")
         summary = self._build_index(rec_id, stamps)
         self.update_meta(rec_id, state="ready", error=None, streams=summary, vmaf=self._queued())
+        self._map_views(rec_id)
         return summary
 
     def original(self, rec_id: str) -> dict:

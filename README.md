@@ -457,8 +457,8 @@ En DASH la diferencia entre real y declarada (~55 ms) es el tiempo de codificaci
 Objetivo: puntuar cada sesión con la QoE de LL-GABR (Raman et al., 2024, ecuación 6), que combina VMAF, parones, latencia, velocidad de reproducción y cambios de calidad. **El VMAF no se calcula en el navegador ni se graba allí el vídeo**: grabar los fotogramas cargaría el navegador (y alteraría la medida) y enviarlos obligaría a recodificar. En su lugar:
 
 1. Durante la prueba, el servidor graba el flujo que sale del codificador. Es el mismo que reparten las tres ramas, que no recodifican.
-2. El navegador anota qué timecode muestra y cuándo (pendiente).
-3. El servidor calcula el VMAF de cada fotograma grabado frente a su original de Big Buck Bunny (hecho) y, con el registro del navegador, reconstruye lo que vio el espectador (pendiente).
+2. El navegador anota qué timecode muestra y cuándo (hecho).
+3. El servidor calcula el VMAF de cada fotograma grabado frente a su original de Big Buck Bunny (hecho) y, con el registro del navegador, reconstruye lo que vio el espectador (hecho: qué frame, de qué calidad y con qué latencia; falta la puntuación de QoE).
 
 En DASH y MoQ el transporte es fiable y la decodificación H.264 es determinista, así que el fotograma reconstruido es el que se pintó. En WebRTC con pérdidas no tiene por qué: la ocultación de errores del navegador no se reproduce y el VMAF saldría optimista.
 
@@ -526,6 +526,17 @@ Grabar e indexar no se notan; la comprobación sí. Por eso lo que compara imág
 Medido en local (10 núcleos) con la grabación que cruza el final del bucle, 20 s y tres calidades: 55 s de cálculo. VMAF medio 89,9 (1080p), 82,0 (720p) y 58,2 (360p); p5 72,5, 58,4 y 25,5. Los fotogramas en negro del final y del principio del vídeo dan 97,4 en las tres calidades.
 
 En el servidor (8 vCPU), el 21-10-2026, con 30 s grabados: 51-59 s de cálculo con una calidad y 138 s con tres (27 s grabados). VMAF medio a 1080p y 4000 kbps entre 69 y 78 según el tramo de la película (p5 57-62); con la escalera, 68,8 (1080p), 56,4 (720p) y 32,1 (360p). La prueba de principio a fin (grabar con la emisión en marcha, `POST /api/stop`, cálculo automático) funciona: empieza a los pocos segundos de la parada.
+
+**Fase c, hecha: lo que pintó cada reproductor.** Mientras dura la prueba, el medidor glass-to-glass de cada reproductor activo anota cada frame nuevo que pinta: hora (reloj del servidor), timecode y altura. Son las lecturas que ya hace el medidor; no añade ninguna de píxeles, solo guarda tres números por frame (deducido del código: no se ha medido su coste). Al terminar, cada reproductor sube su registro (`POST /api/qoe/recordings/{id}/views/{dash|moq|rtc}`) y el servidor lo traduce en cuanto la grabación está indexada:
+
+- **Número de frame:** el timecode leído en el navegador sale de los mismos píxeles codificados que el que leyó el servidor al indexar, así que se busca tal cual en el índice de esa calidad, sin tolerancias. La calidad sale de la altura del frame.
+- **Latencia exacta de cada frame:** hora de pintado menos la marca que escribió FFmpeg al quemar ese frame, no el timecode quemado (que puede ir unos ms por detrás).
+- **Lo que no cuadra se cuenta y no se rellena:** frames fuera de la grabación (codificados antes de que empezara o después de que acabara), sin emparejar (timecode dentro de la grabación que no está en el índice: lectura errónea), de altura desconocida, lecturas ilegibles, tramos con el muestreo parado (`gaps`) y si la pestaña estuvo oculta.
+- **Además:** frames de la fuente que no se llegaron a pintar entre dos pintados (`skipped`: saltos al directo, frames descartados o no leídos por el medidor), cambios de calidad y frames pintados fuera de orden (`backwards`, debe ser 0).
+
+La grabación empieza unos segundos antes que el registro (`prerollS`, 5 s por defecto): los frames que se pintan al principio se codificaron antes, tanto como la latencia. Con más latencia que ese margen aparecen frames fuera de la grabación. De momento la prueba se lanza desde la consola del navegador, con los reproductores activos: `await qoeTest(30)` (duración en segundos; un segundo argumento cambia el margen). `GET /api/qoe/recordings/{id}/views/{reproductor}` da, por frame pintado, hora, calidad, número de frame y latencia.
+
+Comprobado en local el 23-10-2026 con Chrome headless, la cámara a 15 fps y tres calidades: en 20 s, 300, 301 y 309 frames pintados en DASH, MoQ y WebRTC, todos emparejados, ninguno fuera de la grabación. Con un margen de 0,2 s, los del primer segundo largo salen fuera de la grabación (26, 18 y 22) y ninguno sin emparejar.
 
 ---
 
@@ -707,6 +718,8 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
 | `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
 | `POST /api/qoe/recordings/{id}/index` | Rehace el índice con las marcas guardadas y vuelve a encolar el VMAF |
+| `POST /api/qoe/recordings/{id}/views/{reproductor}` | Lo que pintó un reproductor (`dash`, `moq` o `rtc`) durante la prueba: por frame, hora, timecode y altura. Se traduce a frames al indexar |
+| `GET /api/qoe/recordings/{id}/views/{reproductor}` | Por frame pintado: hora, calidad, número de frame de la fuente y latencia exacta, con el resumen de lo que no cuadra |
 | `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior). Solo con la emisión parada |
 | `POST /api/qoe/recordings/{id}/vmaf` | Pone en la cola el cálculo de VMAF (se encola solo al indexar). Se calcula en cuanto la emisión esté parada |
 | `GET /api/qoe/recordings/{id}/vmaf` | VMAF y PSNR de luma de cada fotograma grabado, por calidad, con la versión de vmaf, el modelo y la zona comparada |
