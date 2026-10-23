@@ -14,7 +14,9 @@ comprobación directa, se dice.
 > octubre, cuando pasó a 0.14.5: el 0.14.4 acumula retraso en su entrada sin parar, y el 0.14.5 se queda
 > atrás en cuanto hay un espectador (medido el 15 de octubre; ver el commit de esa fecha). Desde el 19 de
 > octubre: relay 0.17.7, publicador 0.14.7 (sin ese problema), `@moq/watch` 0.6.3, `@moq/net` 0.4.4 y
-> `@moq/hang` 0.5.3. Desde el 21 de octubre, el servidor usa un publicador compilado desde la rama
+> `@moq/hang` 0.5.3. Desde el 23 de octubre, relay 0.17.8: solo retroportes de correcciones (TLS, límites
+> al analizar certificados y rutas); en el servidor, con el bucle, la escalera 1080/720/540 y WebRTC de
+> control, la latencia y los frames de MoQ no cambiaron de forma apreciable (ver el commit de ese día). Desde el 21 de octubre, el servidor usa un publicador compilado desde la rama
 > principal de moq (`git@bc64b9c`, `MOQ_CLI_FROM=git`; su `--version` dice 0.14.2), que no tiene el límite
 > de ~2 MB/s de entrada de la 0.14.7: con la escalera 2000/1000/350 y un espectador, espera p95 en su
 > entrada de 1 ms frente a 1,2-3,5 s y ningún cambio de calidad en 40 s frente a 34-54 (ver 4.14). Las
