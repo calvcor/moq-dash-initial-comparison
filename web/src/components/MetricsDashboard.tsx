@@ -526,10 +526,12 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
               Recolectando datos de telemetría en tiempo real...
             </div>
           ) : (
+            // Una gráfica por pestaña (key): Chart.js no soporta cambiar en caliente el eje x de numérico
+            // (tiempo en pantalla) a categorías, y al volver a latencia o bitrate la página se quedaba en blanco
             metricTab === 'frametime' ? (
-              <Line data={frameTimeChartData} options={frameTimeChartOptions} />
+              <Line key="frametime" data={frameTimeChartData} options={frameTimeChartOptions} />
             ) : (
-              <Line data={metricTab === 'latency' ? latencyChartData : bitrateChartData} options={chartOptions} />
+              <Line key={metricTab} data={metricTab === 'latency' ? latencyChartData : bitrateChartData} options={chartOptions} />
             )
           )}
         </div>
