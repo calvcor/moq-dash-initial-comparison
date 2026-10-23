@@ -1,0 +1,189 @@
+diff --git a/js/watch/src/media.ts b/js/watch/src/media.ts
+index e319c5db6..0c8ea488b 100644
+--- a/js/watch/src/media.ts
++++ b/js/watch/src/media.ts
+@@ -2,7 +2,7 @@ import type { Milli } from "@moq/clock";
+ import type { Container } from "@moq/hang";
+ import type * as Moq from "@moq/net";
+ import { Error as NetError } from "@moq/net";
+-import type { Effect, Getter } from "@moq/signals";
++import { type Effect, type Getter, type GetterInit, getter } from "@moq/signals";
+ 
+ /**
+  * Open a media subscription with its max delay on the initial request and every update.
+@@ -14,17 +14,18 @@ export function subscribeMedia(
+ 	props: {
+ 		broadcast: Moq.Broadcast.Consumer;
+ 		track: string;
+-		priority: number;
++		priority: GetterInit<number>;
+ 		maxDelay: Getter<Milli>;
+ 	},
+ ): Moq.Track.Subscriber | undefined {
+ 	if (effect.get(props.broadcast.closed) !== undefined) return;
+-	const subscription = () => ({ priority: props.priority, maxDelay: props.maxDelay.peek() });
++	const priority = getter(props.priority);
++	const subscription = () => ({ priority: priority.peek(), maxDelay: props.maxDelay.peek() });
+ 	const subscriber = props.broadcast.track(props.track).subscribe(subscription());
+ 	effect.cleanup(() => subscriber.close());
+ 
+ 	effect.run((inner) => {
+-		subscriber.update({ priority: props.priority, maxDelay: inner.get(props.maxDelay) });
++		subscriber.update({ priority: inner.get(priority), maxDelay: inner.get(props.maxDelay) });
+ 	});
+ 
+ 	return subscriber;
+diff --git a/js/watch/src/player.ts b/js/watch/src/player.ts
+index 36a10e847..0943b119b 100644
+--- a/js/watch/src/player.ts
++++ b/js/watch/src/player.ts
+@@ -45,6 +45,8 @@ export type PlayerInput = {
+ 	buffer: Getter<Milli>;
+ 	/** Desired video rendition or quality limits. */
+ 	target: Getter<Video.Target | undefined>;
++	/** Handover on a switch to a lower-bitrate video rendition. */
++	switching: Getter<Video.Switching>;
+ 	/** Selected caption track, or undefined for off. */
+ 	captions: Getter<string | undefined>;
+ };
+@@ -99,6 +101,7 @@ export class Player {
+ 			delay: getter(props.delay ?? "auto"),
+ 			buffer: getter(props.buffer ?? Milli.zero),
+ 			target: getter<Video.Target | undefined>(props.target),
++			switching: getter<Video.Switching>(props.switching ?? "seamless"),
+ 			captions: getter<string | undefined>(props.captions),
+ 		});
+ 
+@@ -126,7 +129,12 @@ export class Player {
+ 		this.sync = new Sync({ delay: this.in.delay, buffer: this.in.buffer });
+ 		this.#signals.cleanup(() => this.sync.close());
+ 
+-		this.video = new Video.Decoder({ source: videoSource, sync: this.sync, enabled: this.#videoEnabled });
++		this.video = new Video.Decoder({
++			source: videoSource,
++			sync: this.sync,
++			enabled: this.#videoEnabled,
++			switching: this.in.switching,
++		});
+ 		this.audio = new Audio.Decoder({ source: audioSource, sync: this.sync, enabled: this.#audioEnabled });
+ 		this.#signals.cleanup(() => {
+ 			this.video.close();
+diff --git a/js/watch/src/video/decoder.ts b/js/watch/src/video/decoder.ts
+index a65349c78..ac52032ce 100644
+--- a/js/watch/src/video/decoder.ts
++++ b/js/watch/src/video/decoder.ts
+@@ -32,9 +32,23 @@ import type { Source } from "./source";
+ // The amount of time to wait before considering the video to be buffering.
+ const BUFFERING = Milli(500);
+ 
++/**
++ * How a switch to a lower-bitrate rendition hands over from the one on screen.
++ *
++ * - `seamless` (default): keep downloading the outgoing rendition until the new one catches up.
++ * - `cancel`: stop downloading the outgoing rendition at once, holding its last picture until the
++ *   new one catches up to it.
++ * - `priority`: keep the seamless handover, but subscribe to the new rendition above the outgoing one.
++ *
++ * Switches to a higher bitrate are always seamless.
++ */
++export type Switching = "seamless" | "cancel" | "priority";
++
+ export type DecoderInput = {
+ 	/** Whether to download the video track. Defaults to true; the parent may wire it from the renderer's output. */
+ 	enabled: Getter<boolean>;
++	/** Handover on a switch down. Defaults to `seamless`. */
++	switching: Getter<Switching>;
+ };
+ 
+ /** Constructor properties for {@link Decoder}. */
+@@ -125,6 +139,7 @@ export class Decoder {
+ 	constructor(props: DecoderProps) {
+ 		this.in = {
+ 			enabled: getter(props?.enabled ?? true),
++			switching: getter<Switching>(props?.switching ?? "seamless"),
+ 		};
+ 
+ 		this.source = props.source;
+@@ -246,6 +261,28 @@ export class Decoder {
+ 			predecessor,
+ 		});
+ 		this.#selected = pending;
++
++		// A switch down under congestion competes with the outgoing rendition for the same link.
++		// `stopped` is the outgoing rendition while `cancel` holds it; it resumes unless the handover completes.
++		let stopped: DecoderTrack | undefined;
++		effect.cleanup(() => stopped?.resume());
++		const outgoingTrack = this.#active.peek();
++		const switching = this.in.switching.peek();
++		if (outgoingTrack && switching !== "seamless" && !republished) {
++			const bitrate = (t: { track: string; catalog: Getter<Catalog.Root | undefined> }) =>
++				t.catalog.peek()?.video?.renditions?.[t.track]?.bitrate;
++			const from = bitrate(outgoingTrack);
++			const to = bitrate({ track, catalog: broadcast.out.catalog });
++			if (from !== undefined && to !== undefined && to < from) {
++				if (switching === "cancel") {
++					outgoingTrack.stop();
++					stopped = outgoingTrack;
++				} else {
++					pending.priority.set(Catalog.PRIORITY.video + 1);
++				}
++			}
++		}
++
+ 		effect.run((inner) => {
+ 			if (!pending) {
+ 				inner.close(); // Promoted tracks are observed by their active lifetime.
+@@ -256,6 +293,8 @@ export class Decoder {
+ 			this.#recordError(pending, error);
+ 			pending.close();
+ 			pending = undefined;
++			stopped?.resume();
++			stopped = undefined;
+ 			this.#pending.set(undefined);
+ 		});
+ 		effect.set(this.#pending, { track, catalog: broadcast.out.catalog });
+@@ -282,6 +321,8 @@ export class Decoder {
+ 			// #runActive will be in charge of it now.
+ 			if (current) current.arrivals = undefined;
+ 			pending.arrivals = this.#arrivals;
++			pending.priority.set(Catalog.PRIORITY.video);
++			stopped = undefined;
+ 			this.#active.set(pending);
+ 			this.#pending.set(undefined);
+ 			pending = undefined;
+@@ -422,6 +463,10 @@ class DecoderTrack {
+ 	identity: string;
+ 	catalog: Getter<Catalog.Root | undefined>;
+ 	stats: Signal<Stats | undefined>;
++	// Subscription priority; raised above the outgoing rendition while a switch down is pending.
++	priority = new Signal<number>(Catalog.PRIORITY.video);
++	// Whether to download. Stopping keeps the last picture and timestamp.
++	#download = new Signal(true);
+ 	// Set once promoted, so only the rendition feeding the picture reports arrivals.
+ 	arrivals?: ArrivalProducer;
+ 
+@@ -478,11 +523,23 @@ class DecoderTrack {
+ 		return consumer;
+ 	}
+ 
++	/** Stop downloading and decoding, holding the last picture. */
++	stop(): void {
++		this.#download.set(false);
++	}
++
++	/** Undo {@link stop}. */
++	resume(): void {
++		this.#download.set(true);
++	}
++
+ 	#run(effect: Effect): void {
++		if (!effect.get(this.#download)) return;
++
+ 		const sub = subscribeMedia(effect, {
+ 			broadcast: this.broadcast,
+ 			track: this.name,
+-			priority: Catalog.PRIORITY.video,
++			priority: this.priority,
+ 			maxDelay: this.sync.out.maxDelay,
+ 		});
+ 		if (!sub) return;

@@ -26,7 +26,9 @@ comprobación directa, se dice.
 > medidas de MoQ anteriores y posteriores a ese día no son comparables. Desde el 22 de octubre, el
 > dashboard del servidor usa también `@moq/watch` y sus `@moq/*` compilados desde ese mismo commit
 > (`git@bc64b9c`, `MOQ_WATCH_FROM=git`), como ya se hacía en local: el reproductor de MoQ cambia, así que
-> las medidas de MoQ del servidor anteriores y posteriores tampoco son comparables entre sí. Lo que este documento describe se observó con las
+> las medidas de MoQ del servidor anteriores y posteriores tampoco son comparables entre sí. Desde el 23 de octubre, ese `@moq/watch` lleva
+> además el parche del experimento de cambio de calidad (README, 6.1; versión `git@bc64b9c+switching`):
+> con su opción por defecto (`seamless`) se comporta como sin parche. Lo que este documento describe se observó con las
 > de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
 
 > **Audio:** desde el 22 de octubre de 2026 la fuente codifica el audio en **Opus** (antes, AAC-LC), para
@@ -772,7 +774,10 @@ termina. Medido el 23-10-2026 en el servidor, con `@moq/watch` y `moq-cli` compi
 `git@bc64b9c`, escalera 1080p@4000 / 720p@2000 / 540p@1200 y 2 Mbit/s de bajada: durante 60 s la
 selección fue 540p en 58 de 60 muestras y el frame pintado, 1080p en las 60, con el enlace al tope y
 10 s congelados (README, sección 6). En el bundle desplegado, la pista nueva se promociona solo cuando
-su playhead alcanza el de la activa (leído del código); no hay un plazo que suelte la anterior. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
+su playhead alcanza el de la activa (leído del código); no hay un plazo que suelte la anterior. Las dos
+pistas se piden con la misma prioridad (`Catalog.PRIORITY.video`, 60) y ninguna opción de la librería
+lo cambia. El testbed tiene un experimento declarado que modifica esto (README, 6.1): soltar la anterior
+o dar prioridad a la nueva al bajar elimina el atasco con 2 Mbit/s. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
 coincidir durante un rato, o indefinidamente si la nueva nunca llega a alcanzar a la anterior. Por
 eso el testbed registra las dos por separado (`moq_selected_height` y `moq_height`).
 

@@ -366,6 +366,7 @@ export function App() {
         moq_quality_switches: currentMoq.qualitySwitches,
         moq_bw_estimate_kbps: currentMoq.bandwidthEstimateKbps,
         moq_quality_mode: currentMoq.qualityMode,
+        moq_switching: currentMoq.switching ?? null,
         dash_stage_encode_ms: stage(currentDash, 'encode'),
         dash_stage_package_ms: stage(currentDash, 'package'),
         dash_stage_deliver_ms: stage(currentDash, 'deliver'),

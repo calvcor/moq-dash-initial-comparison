@@ -16,6 +16,12 @@ ARG MOQ_WATCH_COMMIT=bc64b9c52561209322dcb8dec9992bf867f499f7
 ADD https://codeload.github.com/moq-dev/moq/tar.gz/${MOQ_WATCH_COMMIT} /tmp/moq.tar.gz
 WORKDIR /moq
 RUN tar -xzf /tmp/moq.tar.gz --strip-components=1 && bun install --frozen-lockfile
+# Parches del testbed sobre ese commit (patches/, README 6.1). Hoy, uno: la opción `switching` del cambio
+# de calidad de MoQ, que por defecto deja el comportamiento original. Están hechos para el commit fijado: si
+# se cambia MOQ_WATCH_COMMIT y uno no aplica, la construcción falla en vez de compilar otra cosa.
+COPY patches/ /patches/
+RUN set -e; apt-get update -qq && apt-get install -y -qq --no-install-recommends patch >/dev/null; \
+    for p in /patches/*.patch; do patch -p1 --forward < "$p"; done
 RUN set -e; \
     case "$(uname -m)" in aarch64) arch=arm64 ;; *) arch=x64 ;; esac; \
     rolldown=$(bun -e 'console.log(require("/moq/node_modules/rolldown/package.json").version)'); \
@@ -28,7 +34,7 @@ RUN set -e; mkdir /pkgs; \
       test -f js/$p/dist/package.json; \
       (cd js/$p/dist && bun pm pack --destination /pkgs); \
     done; \
-    printf 'git@%.7s' "${MOQ_WATCH_COMMIT}" > /pkgs/label
+    printf 'git@%.7s+switching' "${MOQ_WATCH_COMMIT}" > /pkgs/label
 
 FROM moqwatch-${MOQ_WATCH_FROM} AS moqwatch
 

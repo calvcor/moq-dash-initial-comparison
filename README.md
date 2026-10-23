@@ -740,6 +740,36 @@ En local, LoL+ es la única que se queda quieta en la calidad que cabe y sostien
 
 ---
 
+### 6.1. Experimento: cambio de calidad hacia abajo en MoQ
+
+**No es el comportamiento de `@moq/watch`**: es una modificación nuestra, declarada, que por defecto no actúa. Sirve para aislar un mecanismo de la librería: al bajar de calidad, `@moq/watch` sigue descargando la calidad anterior, con la misma prioridad que la nueva, hasta que la nueva la alcanza (PROTOCOLOS, 4.10). Con el enlace lleno, la nueva no la alcanza nunca. Ninguna opción de la librería lo cambia y ningún draft del IETF lo prescribe: MOQT (`draft-ietf-moq-transport-22`, 14.1.2) solo sugiere pedir la pista alternativa con menos prioridad para sondear al subir.
+
+**Cómo está hecho.** Un parche sobre el commit fijado, [web/patches/moq-watch-switching.patch](web/patches/moq-watch-switching.patch), que `web/Dockerfile` aplica antes de compilar `@moq/watch` (solo con `MOQ_WATCH_FROM=git`; la versión de npm no lo lleva y el selector queda desactivado). Añade a `Player` y al decodificador de vídeo la opción `switching`:
+
+| Valor | Panel | Al bajar de calidad |
+| :--- | :--- | :--- |
+| `seamless` (por defecto) | Sin corte | El original: sigue descargando la anterior hasta que la nueva la alcanza |
+| `cancel` | Cancelar | Deja de descargar la anterior al momento (cierra su suscripción) y congela su última imagen hasta que la nueva la alcanza. Si la selección cambia antes, o la nueva falla, la anterior vuelve a descargar |
+| `priority` | Prioridad | Sin corte, pero la nueva se pide con prioridad 61 frente a 60 mientras dura el cambio |
+
+Bajar es pasar a una calidad con menos `bitrate` de catálogo que la que está en pantalla; subir es siempre como el original. La regla de selección (qué calidad se elige) no se toca. La versión aparece como `git@bc64b9c+switching`; la opción, en el selector **Cambio** del panel de MoQ (se recuerda en el navegador, porque el primer cambio llega a los pocos segundos de cargar) y en el CSV como `moq_switching`. Con el parche, los 388 tests de `@moq/watch` pasan (cubren el comportamiento por defecto; las variantes nuevas no tienen tests propios).
+
+**Medido el 23-10-2026 en local.** Escalera 1080p@4000 / 720p@2000 / 360p@700, MoQ solo, un Chrome headless nuevo por pasada sin otro tráfico en la cola, la variante fijada antes de cargar, dos rondas en orden alterno de 60 s:
+
+| Bajada | Variante | Calidad pintada | Latencia g2g mediana | Congelados (de 60 s) | Tráfico en el router |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2 Mbit/s | Sin corte | 1080p todo el tiempo | 1,20 y 1,32 s | 50,0 y 51,1 s | 1,97 Mbit/s (lleno) |
+| 2 Mbit/s | Cancelar | 360p todo el tiempo | 125 y 141 ms | 0 y 0 s | 1,45-1,48 Mbit/s |
+| 2 Mbit/s | Prioridad | 360p todo el tiempo | 189 y 220 ms | 0 y 0,4 s | 1,45-1,49 Mbit/s |
+| 5 Mbit/s | Sin corte | 720p; 1080p los primeros 14-18 s | 312 y 408 ms | 2,1 y 3,1 s | 3,7-3,9 Mbit/s |
+| 5 Mbit/s | Cancelar | 720p | 181 y 229 ms | 0,65 y 0,65 s | 3,5-3,6 Mbit/s |
+| 5 Mbit/s | Prioridad | 720p | 245 y 262 ms | 0,62 y 0,67 s | 3,7 Mbit/s |
+
+- Con 2 Mbit/s, las dos variantes resuelven el atasco: el cambio se completa en el primer intento y la reproducción queda fluida en la calidad que cabe. Sin corte, el reproductor no sale nunca de 1080p.
+- Con 5 Mbit/s la mejora es menor (unos 2 s menos de congelados por minuto y 100-200 ms menos de latencia) y del mismo signo en las dos rondas. Lo que domina allí es la regla de selección: el catálogo anuncia el pico retenido (1080p a ~7,5 Mbit/s), así que 1080p no se sostiene y la selección cambia 18-28 veces por minuto en las tres variantes.
+- Cancelar y prioridad dan resultados parecidos; con dos rondas no se pueden ordenar entre sí.
+- Una primera tanda se descartó: la variante se fijaba en el panel después de cargar, y el primer cambio, que llega en los primeros segundos, se hacía siempre sin corte.
+
 ## 7. Recuperación automática
 
 La plataforma se recupera sola de reinicios y caídas, sin recargar la pestaña:
@@ -782,6 +812,7 @@ Desde el panel de control:
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
 | Latencia objetivo DASH | 0,05 a 6,0 s (0,3 s al abrir) | `liveDelay` de dash.js, con catch-up LoL+ |
+| Cambio MoQ (experimento) | Sin corte (por defecto), Cancelar o Prioridad | Qué hace `@moq/watch` con la calidad anterior al bajar (sección 6.1). Solo con el parche de `web/patches/`. Se recuerda en el navegador. En el CSV, `moq_switching` |
 | ABR DASH | Por defecto (al abrir), L2A o LoL+ | Reglas de adaptación de dash.js en Auto: las de fábrica, o una de sus reglas de baja latencia en solitario (sección 6). Cambiarlo recrea el reproductor. En el CSV, `dash_abr` |
 | Umbral de búfer vacío DASH | 0 a 1 s, por defecto 0,3 s (el de fábrica) | `buffer.stallThreshold` y `lowLatencyStallThreshold` de dash.js: por debajo, declara el búfer vacío, fuerza la calidad más baja y la corrección de latencia lo da por parado. No detiene el vídeo. En el CSV, `dash_stall_threshold_s` |
 | Salto al directo DASH | 0 (desactivado) a 10 s, por defecto 1,5 s | `liveCatchup.maxDrift` de dash.js: desvío sobre el objetivo a partir del cual salta al directo en vez de corregir con la velocidad. El salto aborta las descargas y abre conexiones TCP frías; con retardo de red alto puede encadenar saltos y paradas |
@@ -898,7 +929,8 @@ Pendiente:
 - [ ] Perfiles de red dinámicos (trazas o escalones programados) y modo de enlace compartido, para estudiar la competencia entre protocolos.
 - [ ] Cliente fuera del host (contenedor u otra máquina) para que TCP sea extremo a extremo también en macOS.
 - [x] Adaptación de calidad: elegir el algoritmo ABR de dash.js (L2A, LoL+) desde el panel.
-- [ ] Adaptación de calidad en MoQ: el bitrate del catálogo sale inflado y, con el enlace saturado, el cambio sin corte de `@moq/watch` no llega a completarse (sección 6). Reportarlo aguas arriba.
+- [x] Experimento con el cambio de calidad hacia abajo en MoQ (sección 6.1).
+- [ ] Adaptación de calidad en MoQ: el bitrate del catálogo es el pico retenido y la selección no tiene histéresis (sección 6.1). Proponer aguas arriba la opción de cambio, con estas medidas.
 - [ ] Carga de CPU: tres calidades a 1080p60 más dos reproductores en la misma máquina la dejan cerca de la saturación.
 
 ---

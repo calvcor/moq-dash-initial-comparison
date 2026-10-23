@@ -6,7 +6,18 @@ import { Signal } from '@moq/signals';
 import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { meters } from '../lib/qoe';
 import { MoqBufferMeter, MoqTracer } from '../lib/trace';
-import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
+import type { MoqSwitching, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
+
+const SWITCHING_KEY = 'testbed.moqSwitching';
+
+/** Variante de cambio recordada en este navegador; si no hay o no se puede leer, la original. */
+function loadSwitching(): MoqSwitching {
+  try {
+    const saved = localStorage.getItem(SWITCHING_KEY);
+    if (saved === 'cancel' || saved === 'priority') return saved;
+  } catch (_) {}
+  return 'seamless';
+}
 
 interface MoqPlayerProps {
   url: string;
@@ -45,6 +56,25 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   useEffect(() => {
     mutedSignalRef.current.set(!audible);
   }, [audible]);
+
+  // Cambio de calidad hacia abajo (opción `switching` del parche de web/patches, README 6.1). 'seamless' es el
+  // comportamiento original de @moq/watch; las otras dos son el experimento. Sin el parche (versión de npm) la
+  // opción no existe, el selector se desactiva y el CSV la deja vacía.
+  // Se recuerda en el navegador, como los reproductores activos: la opción solo actúa en el siguiente cambio y
+  // el primero llega a los pocos segundos de cargar, así que tiene que estar puesta antes de conectar.
+  const [switching, setSwitching] = useState<MoqSwitching>(loadSwitching);
+  const switchingSignalRef = useRef(new Signal<MoqSwitching>(switching));
+  const [switchingSupported, setSwitchingSupported] = useState<boolean | null>(null);
+  const handleSwitchingChange = (value: MoqSwitching) => {
+    setSwitching(value);
+    switchingSignalRef.current.set(value);
+    try {
+      localStorage.setItem(SWITCHING_KEY, value);
+    } catch (_) {}
+  };
+  useEffect(() => {
+    onMetricsUpdate({ switching: switchingSupported === false ? null : switching });
+  }, [switching, switchingSupported]);
 
   const handleLatencyChange = (newMs: number) => {
     setTargetLatencyMs(newMs);
@@ -197,7 +227,10 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           // directo, y con un valor mayor la latencia real queda por encima de la que marca el slider.
           delay: delaySignal,
           target: targetSignal,
+          // Solo la entiende la versión con el parche; la de npm ignora la propiedad
+          ...({ switching: switchingSignalRef.current } as object),
         });
+        setSwitchingSupported('switching' in (player.in as object));
         playerRef.current = player;
         // Acceso desde la consola del navegador para depurar
         (window as any).moqPlayer = player;
@@ -400,6 +433,22 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
 
       <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
         <span>Relay: {url}/live.hang</span>
+        <label
+          className="flex items-center space-x-1.5"
+          title="Experimento, no el comportamiento de @moq/watch: qué hacer al bajar de calidad. Se recuerda en este navegador. Sin corte: el original, sigue descargando la calidad anterior hasta que la nueva la alcanza. Cancelar: deja de descargar la anterior al momento y congela su última imagen hasta que la nueva la alcanza. Prioridad: sin corte, pero la nueva calidad se pide con más prioridad que la anterior. Subir de calidad es siempre sin corte. Se aplica al siguiente cambio, sin reconectar."
+        >
+          <span>Cambio:</span>
+          <select
+            value={switching}
+            disabled={switchingSupported === false}
+            onChange={(e) => handleSwitchingChange(e.target.value as MoqSwitching)}
+            className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+          >
+            <option value="seamless">Sin corte</option>
+            <option value="cancel">Cancelar</option>
+            <option value="priority">Prioridad</option>
+          </select>
+        </label>
         <label className="flex items-center space-x-1.5" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
           <span>Calidad:</span>
           <select
