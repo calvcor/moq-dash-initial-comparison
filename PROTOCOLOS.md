@@ -296,7 +296,22 @@ Representation. Las reglas activas por defecto en esta versión son:
 | `abandonRequestsRule` | Abandona una descarga en curso si va demasiado lenta. |
 
 Las reglas específicas de baja latencia (`l2ARule`, `loLPRule`) existen pero están desactivadas por
-defecto; el testbed no las activa.
+defecto. El selector **ABR** del panel permite elegir una de ellas: dash.js documenta que están
+probadas en solitario, así que el testbed activa solo la elegida y apaga las demás, como hace su
+ejemplo de baja latencia. Por defecto se dejan las de fábrica. Queda en el CSV como `dash_abr`.
+
+| Opción | Reglas activas |
+| :--- | :--- |
+| Por defecto | Las de la tabla de arriba (`droppedFramesRule`, de fábrica, está apagada). |
+| L2A | Solo `l2ARule` (*Learn2Adapt*, aprendizaje en línea sobre el caudal y el búfer). |
+| LoL+ | Solo `loLPRule` (*Low-on-Latency+*, que pondera calidad, latencia, búfer y cambios). |
+
+Cambiar de opción recrea el reproductor: dash.js sí aplica un cambio de reglas en caliente, pero su
+ejemplo de baja latencia pide recargar, porque las dos reglas guardan estado desde el arranque.
+
+Medido el 23-10-2026 con las reglas de fábrica, 2 Mbit/s de bajada y objetivo de 0,3 s (README,
+sección 6): dash.js estimó 2,4-2,8 Mbit/s, se quedó en 720p@2000, que no cabe, con el búfer en torno a
+0 s y 11 s congelados en un minuto.
 
 El cambio de calidad ocurre **en una frontera de segmento**: el siguiente segmento se pide de otra
 Representation. Con segmentos de 2 s, esa es la granularidad de reacción.
@@ -384,6 +399,7 @@ testbed:
 | `streaming.retryAttempts` | Menos | 15 para manifiesto, inicialización y segmentos | Reintentos ante un fallo de descarga. |
 | `streaming.retryIntervals` | — | 1000 ms | Espera entre reintentos. |
 | `streaming.abr.autoSwitchBitrate.video` | `true` | `true`, o `false` al fijar una calidad | Activa o desactiva el ABR. |
+| `streaming.abr.rules` | Ver 3.6 | Las de fábrica (al abrir), o solo `l2ARule` o solo `loLPRule` | Qué reglas de ABR están activas (selector **ABR**). |
 
 Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
 
@@ -392,7 +408,6 @@ Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
 | `streaming.liveCatchup.playbackRate` | −0,5 a +0,5 | Cuánto puede frenar o acelerar: entre 0,5× y 1,5×. |
 | `streaming.liveCatchup.playbackBufferMin` | 0,5 s | En modo LoL+, por debajo de este búfer la librería frena la reproducción. |
 | `streaming.buffer.stallThreshold`, `lowLatencyStallThreshold` | 0,3 s | Por debajo de este búfer lo declara vacío: fuerza la calidad más baja y la corrección de latencia lo da por parado. No detiene el vídeo. Configurable desde el panel. |
-| `streaming.abr.rules` | Ver 3.6 | Qué reglas de ABR están activas. |
 | `streaming.utcSynchronization.enabled` | `true` | Sincronización de reloj con el servidor. |
 
 Dos de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo
@@ -734,7 +749,12 @@ reproductor lo hace sin corte:
 3. Promueve la nueva y cierra la anterior.
 
 Dos consecuencias medibles. La primera: durante el cambio se descargan dos calidades a la vez, justo
-cuando la red va peor. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
+cuando la red va peor. Si la anterior ya llena el enlace, la nueva no la alcanza nunca y el cambio no
+termina. Medido el 23-10-2026 en el servidor, con `@moq/watch` y `moq-cli` compilados desde
+`git@bc64b9c`, escalera 1080p@4000 / 720p@2000 / 540p@1200 y 2 Mbit/s de bajada: durante 60 s la
+selección fue 540p en 58 de 60 muestras y el frame pintado, 1080p en las 60, con el enlace al tope y
+10 s congelados (README, sección 6). En el bundle desplegado, la pista nueva se promociona solo cuando
+su playhead alcanza el de la activa (leído del código); no hay un plazo que suelte la anterior. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
 coincidir durante un rato, o indefinidamente si la nueva nunca llega a alcanzar a la anterior. Por
 eso el testbed registra las dos por separado (`moq_selected_height` y `moq_height`).
 

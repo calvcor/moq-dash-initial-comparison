@@ -4,7 +4,7 @@ import * as dashjs from 'dashjs';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { meters } from '../lib/qoe';
 import { DashTracer } from '../lib/trace';
-import type { PlayerMetrics, Rendition, TimecodeLayout } from '../types';
+import type { DashAbr, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
 interface DashPlayerProps {
   url: string;
@@ -97,6 +97,32 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
     }
   };
 
+  // Algoritmo de adaptación. 'default' deja las reglas de fábrica de dash.js (caudal y BOLA en modo
+  // dinámico, búfer insuficiente, historial de cambios y abandono de peticiones). L2A y LoL+ son las reglas
+  // de dash.js para baja latencia; según su documentación están probadas en solitario, así que se activa
+  // solo la elegida, como en su ejemplo de baja latencia. Cambiarlo recrea el reproductor: el ejemplo
+  // oficial pide recargar porque las dos guardan estado desde el arranque.
+  const [abr, setAbr] = useState<DashAbr>('default');
+  const abrSettings = (mode: DashAbr) =>
+    mode === 'default'
+      ? {}
+      : {
+          streaming: {
+            abr: {
+              rules: {
+                throughputRule: { active: false },
+                bolaRule: { active: false },
+                insufficientBufferRule: { active: false },
+                switchHistoryRule: { active: false },
+                droppedFramesRule: { active: false },
+                abandonRequestsRule: { active: false },
+                l2ARule: { active: mode === 'l2a' },
+                loLPRule: { active: mode === 'lolp' },
+              },
+            },
+          },
+        };
+
   const stallSettings = (sec: number) => ({ streaming: { buffer: { stallThreshold: sec, lowLatencyStallThreshold: sec } } });
 
   const handleStallThresholdChange = (newSec: number) => {
@@ -105,8 +131,8 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   };
 
   useEffect(() => {
-    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift, stallThresholdSec: stallThreshold });
-  }, [targetLatency, maxDrift, stallThreshold]);
+    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift, stallThresholdSec: stallThreshold, abr });
+  }, [targetLatency, maxDrift, stallThreshold, abr]);
 
   useEffect(() => {
     const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
@@ -220,6 +246,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
         },
       });
       player.updateSettings(stallSettings(stallThreshold));
+      player.updateSettings(abrSettings(abr));
 
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
         console.log('[dash.js] Stream inicializado');
@@ -318,7 +345,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
         playerRef.current = null;
       }
     };
-  }, [url, isStreaming, attempt]);
+  }, [url, isStreaming, attempt, abr]);
 
   useEffect(() => {
     onMetricsUpdate({ status: playerStatus });
@@ -454,6 +481,21 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
         >
           {direct ? `Directo · ${new URL(url).host}` : 'Vía proxy · /media/dash/manifest.mpd'}
         </span>
+        <label
+          className="flex items-center space-x-1.5"
+          title="Reglas de adaptación de dash.js en Auto. Por defecto: las de fábrica (caudal y BOLA, búfer insuficiente, historial de cambios, abandono de peticiones). L2A y LoL+: sus reglas para baja latencia, cada una en solitario. Cambiarlo recrea el reproductor."
+        >
+          <span>ABR:</span>
+          <select
+            value={abr}
+            onChange={(e) => setAbr(e.target.value as DashAbr)}
+            className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500"
+          >
+            <option value="default">Por defecto</option>
+            <option value="l2a">L2A</option>
+            <option value="lolp">LoL+</option>
+          </select>
+        </label>
         <label className="flex items-center space-x-1.5" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
           <span>Calidad:</span>
           <select

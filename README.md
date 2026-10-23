@@ -686,10 +686,12 @@ Con más de una calidad en la escalera, cada reproductor adapta por su cuenta (s
 | Dónde están las calidades | Varias `Representation` en un `AdaptationSet` del manifiesto | Varias *renditions* (pistas) en el catálogo de la emisión |
 | Quién decide | dash.js, con su ABR por defecto | El reproductor, a partir de lo que estima el relay |
 | En qué se basa | Caudal que mide en sus descargas | Tasa de recepción que el relay estima con su control de congestión y envía por mensajes PROBE |
-| Regla | La de dash.js (throughput + BOLA) | La de `@moq/watch`: la más alta cuyo bitrate de catálogo quepa en el 80 % de la estimación, descartando las que el publicador marca `stalled` |
+| Regla | Las de fábrica de dash.js (caudal + BOLA), o L2A o LoL+ en solitario (selector **ABR**) | La de `@moq/watch`: la más alta cuyo bitrate de catálogo quepa en el 80 % de la estimación, descartando las que el publicador marca `stalled` |
 | Cuándo conmuta | En frontera de segmento | En frontera de grupo (keyframe), sin corte: mantiene la suscripción anterior hasta que la nueva la alcanza |
 
 **En automático el banco no interviene en ninguno de los dos reproductores**: se observa el comportamiento de dash.js y de `@moq/watch` tal cual. Solo al fijar una calidad a mano se le pide al reproductor esa en concreto (en MoQ, por nombre de rendition).
+
+En DASH, el selector **ABR** elige entre las reglas que trae la propia dash.js, sin modificarlas: **Por defecto** (las de fábrica: caudal y BOLA en modo dinámico, búfer insuficiente, historial de cambios y abandono de peticiones), **L2A** o **LoL+**. Las dos últimas son sus reglas para baja latencia; dash.js documenta que están probadas en solitario, así que se activa solo la elegida y se apagan las demás, como en su ejemplo de baja latencia (`samples/low-latency/low-latency-testplayer.html`). Cambiarlo recrea el reproductor, porque ese ejemplo pide recargar: las dos reglas guardan estado desde el arranque. Es una variable declarada, en el CSV como `dash_abr` (`default`, `l2a` o `lolp`); por defecto, las de fábrica.
 
 El panel muestra por reproductor la calidad en curso, los cambios de calidad y el ancho de banda estimado; todo va al CSV (`*_height`, `*_rendition_kbps`, `*_quality_switches`, `*_bw_estimate_kbps`, `*_quality_mode`, `moq_selected_height` y `ladder`). En MoQ se registran por separado la rendition **seleccionada** y la altura del frame que realmente **se pinta**, porque durante un cambio no coinciden.
 
@@ -708,6 +710,17 @@ Lo que se ve en MoQ con `@moq/watch` 0.6.2 y `moq-cli` 0.14.2:
 - **Con la red libre** la selección también oscila (unas 50 veces por minuto), porque el publicador marca la calidad alta como `stalled` de forma intermitente.
 
 Son observaciones de una prueba por caso, no resultados contrastados.
+
+**Con 2 Mbit/s de bajada (medido el 23-10-2026 en el servidor).** Escalera 1080p@4000 / 720p@2000 / 540p@1200, cola de 100 ms, `moq-cli` y `@moq/watch` compilados desde `git@bc64b9c`, dash.js 5.2.1 con las reglas de fábrica y objetivo de 0,3 s. Chrome headless, un solo reproductor activo cada vez, 60 s por rama:
+
+| | Calidad elegida | Calidad pintada | Tráfico en el router | Segundos congelados |
+| :--- | :--- | :--- | :--- | :--- |
+| MoQ | 540p (58 de 60 muestras) | 1080p las 60 | ~2000 kbit/s, el tope | 10, uno de unos 12 s seguidos |
+| DASH | 720p@2000 desde el segundo 4 | La elegida | 1700-2300 kbit/s | 11 |
+
+- **MoQ elige bien y no llega a cambiar.** El catálogo anuncia 7412 / 3647 / 2213 kbit/s (unas 1,85 veces el nominal), así que no cabe ninguna y la regla se queda con la más baja. Pero el cambio sin corte de `@moq/watch` solo promociona la pista nueva cuando alcanza a la anterior, y mientras tanto sigue suscrito a la de 1080p: con el enlace lleno de 1080p, la de 540p no la alcanza nunca (PROTOCOLOS, 4.10). Es comportamiento de la librería; no se corrige.
+- **DASH elige una calidad que no cabe.** Estima 2,4-2,8 Mbit/s en un enlace de 2 y se queda en 720p@2000, cuyo bitrate puede llegar al 120 % del nominal, más el audio. El búfer ronda 0 s, acelera a 1,5× para volver al objetivo y la latencia va de 0,4 a 4,7 s. Con más latencia objetivo funciona mejor; que sea porque BOLA y la regla de búfer insuficiente tienen entonces margen es una deducción, no está medido.
+- WebRTC no adapta (sección 3.4): con 2 Mbit/s no puede reproducir la calidad alta.
 
 > [!IMPORTANT]
 > La cola de emulación es una por protocolo, no una por espectador: dos pestañas abiertas a la vez comparten el mismo enlace y se estorban. Para medir con límite de ancho de banda, una sola pestaña.
@@ -756,11 +769,12 @@ Desde el panel de control:
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
 | Latencia objetivo DASH | 0,05 a 6,0 s (0,3 s al abrir) | `liveDelay` de dash.js, con catch-up LoL+ |
+| ABR DASH | Por defecto (al abrir), L2A o LoL+ | Reglas de adaptación de dash.js en Auto: las de fábrica, o una de sus reglas de baja latencia en solitario (sección 6). Cambiarlo recrea el reproductor. En el CSV, `dash_abr` |
 | Umbral de búfer vacío DASH | 0 a 1 s, por defecto 0,3 s (el de fábrica) | `buffer.stallThreshold` y `lowLatencyStallThreshold` de dash.js: por debajo, declara el búfer vacío, fuerza la calidad más baja y la corrección de latencia lo da por parado. No detiene el vídeo. En el CSV, `dash_stall_threshold_s` |
 | Salto al directo DASH | 0 (desactivado) a 10 s, por defecto 1,5 s | `liveCatchup.maxDrift` de dash.js: desvío sobre el objetivo a partir del cual salta al directo en vez de corregir con la velocidad. El salto aborta las descargas y abre conexiones TCP frías; con retardo de red alto puede encadenar saltos y paradas |
 | Latencia objetivo MoQ | auto (al abrir), o 50 a 2000 ms | `delay` de `@moq/watch`. En auto, que es su valor por defecto, la librería lo calcula del RTT que comunica el relay (1,25 × el mínimo, con suelo de 20 ms). En ambos casos le suma el jitter de pista del catálogo; el valor efectivo se muestra junto al slider. En auto, `moq_target_ms` queda vacío en el CSV. **En auto no sube durante la sesión**: tras cambiar el perfil de red hay que recargar para que lo recalcule (PROTOCOLOS, 4.11) |
 
-La fuente, el GOP, la escalera, el segmento y el fragmento requieren pulsar **Aplicar Cambios**; los sliders actúan al momento y su valor queda en el CSV (`dash_target_ms`, `dash_max_drift_s`, `moq_target_ms`).
+La fuente, el GOP, la escalera, el segmento y el fragmento requieren pulsar **Aplicar Cambios**; los sliders actúan al momento y su valor queda en el CSV (`dash_target_ms`, `dash_max_drift_s`, `moq_target_ms`), igual que el selector ABR de DASH (`dash_abr`).
 
 El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola del navegador para depurar.
 
@@ -870,7 +884,8 @@ Pendiente:
 - [ ] Atribuir los ~200 ms entre latencia real y declarada en MoQ, repitiendo la medida con decodificación por hardware.
 - [ ] Perfiles de red dinámicos (trazas o escalones programados) y modo de enlace compartido, para estudiar la competencia entre protocolos.
 - [ ] Cliente fuera del host (contenedor u otra máquina) para que TCP sea extremo a extremo también en macOS.
-- [ ] Adaptación de calidad: elegir el algoritmo ABR de dash.js (L2A, LoL+) desde el panel y corregir el bitrate inflado del catálogo MoQ.
+- [x] Adaptación de calidad: elegir el algoritmo ABR de dash.js (L2A, LoL+) desde el panel.
+- [ ] Adaptación de calidad en MoQ: el bitrate del catálogo sale inflado y, con el enlace saturado, el cambio sin corte de `@moq/watch` no llega a completarse (sección 6). Reportarlo aguas arriba.
 - [ ] Carga de CPU: tres calidades a 1080p60 más dos reproductores en la misma máquina la dejan cerca de la saturación.
 
 ---

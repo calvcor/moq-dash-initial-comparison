@@ -130,11 +130,15 @@ export interface PlayerMetrics {
   qualityMode: 'auto' | 'manual';
   maxDriftSec?: number; // solo DASH: desvío a partir del cual dash.js salta al directo (0 = nunca)
   stallThresholdSec?: number; // solo DASH: nivel de búfer por debajo del cual dash.js lo declara vacío
+  abr?: DashAbr; // solo DASH: reglas de adaptación de dash.js
   packetsLost?: number | null; // solo WebRTC: paquetes RTP perdidos según el navegador
   stages?: StageBreakdown | null;
   status: 'idle' | 'connecting' | 'playing' | 'error';
   errorMessage?: string;
 }
+
+// Reglas de adaptación de dash.js: las de fábrica, o L2A o LoL+ en solitario
+export type DashAbr = 'default' | 'l2a' | 'lolp';
 
 // Latencia glass-to-glass repartida por etapas, medida sobre frames concretos del último segundo
 export interface StageBreakdown {
@@ -179,6 +183,7 @@ export interface SampleRow {
   dash_quality_mode: string;
   dash_max_drift_s: number | null;
   dash_stall_threshold_s: number | null;
+  dash_abr: string | null; // default, l2a o lolp
   moq_g2g_ms: number | null;
   moq_reported_ms: number | null;
   moq_kbps: number | null;
