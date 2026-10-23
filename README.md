@@ -744,7 +744,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/camera` | Sondea la cámara: host (sin credenciales), códec, resolución, fps, audio y último error. Con la cámara emitiendo, devuelve lo último que se supo sin abrir otra sesión |
 | `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
 | `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |
-| `POST /api/qoe/recordings` | Graba el flujo codificado `duration_s` segundos (5-300) y lo indexa al terminar; con la cámara, también la referencia. Exige la emisión en marcha |
+| `POST /api/qoe/recordings` | Graba el flujo codificado `duration_s` segundos (5-330) y lo indexa al terminar; con la cámara, también la referencia. Exige la emisión en marcha. Con `stop_after: true`, detiene la emisión al terminar de grabar para que se calcule el VMAF |
 | `GET /api/qoe/recordings` | Grabaciones guardadas, de la más reciente a la más antigua |
 | `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
 | `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
