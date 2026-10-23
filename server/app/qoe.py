@@ -477,16 +477,15 @@ class Recordings:
             meta = self.read(rec_id, "meta.json")
             self.update_meta(rec_id, views={**(meta.get("views") or {}), player: summary})
         if (meta.get("vmaf") or {}).get("state") == "done":
-            self._qoe(rec_id, player)
+            # El tramo común cambia con cada reproductor que llega: se rehacen todos
+            self._qoe_all(rec_id)
         return summary
 
     def recompute_qoe(self, rec_id: str) -> dict:
         """Rehace la QoE de los reproductores con registro (p. ej. tras cambiar el método)."""
         if ((self.read(rec_id, "meta.json") or {}).get("vmaf") or {}).get("state") != "done":
             raise RuntimeError("Falta el VMAF de la grabación")
-        done = [p for p in PLAYERS if self.read(rec_id, f"view-{p}.mapped.json") is not None]
-        for player in done:
-            self._qoe(rec_id, player)
+        self._qoe_all(rec_id)
         return (self.read(rec_id, "meta.json") or {}).get("qoe") or {}
 
     def qoe(self, rec_id: str, player: str) -> Optional[dict]:
@@ -494,8 +493,35 @@ class Recordings:
             raise KeyError(player)
         return self.read(rec_id, f"qoe-{player}.json")
 
-    def _qoe(self, rec_id: str, player: str):
-        """QoE de LL-GABR de un reproductor: lo que pintó (fase c) con el VMAF de cada frame (fase b)."""
+    def _qoe_all(self, rec_id: str):
+        """QoE de cada reproductor sobre el mismo contenido: el tramo de la fuente que pintaron todos.
+
+        Con distinta latencia, en la misma ventana de reloj cada reproductor enseña un trozo distinto de la
+        película, y el VMAF depende mucho de la escena (60-77 en Big Buck Bunny en medio minuto). Por eso
+        la comparación se alinea por contenido: del último "primer frame pintado" al primer "último frame
+        pintado" entre todos. Cada uno se evalúa en su propio reloj mientras pintaba ese tramo, así que
+        sus duraciones pueden diferir (un parón alarga la suya).
+        """
+        views = {p: self.read(rec_id, f"view-{p}.mapped.json") for p in PLAYERS}
+        views = {p: v for p, v in views.items() if v is not None}
+        spans = {}
+        for p, v in views.items():
+            numbers = [row[2] for row in v["frames"] if row[2] is not None]
+            if numbers:
+                spans[p] = (min(numbers), max(numbers))
+        if not spans:
+            return
+        first, last = max(a for a, _ in spans.values()), min(b for _, b in spans.values())
+        content = (first, last) if first < last else None
+        for player in views:
+            self._qoe(rec_id, player, content)
+
+    def _qoe(self, rec_id: str, player: str, content: Optional[tuple[int, int]] = None):
+        """QoE de LL-GABR de un reproductor: lo que pintó (fase c) con el VMAF de cada frame (fase b).
+
+        content: tramo de la fuente (números de frame, ambos incluidos) sobre el que se evalúa; sin él, todo
+        lo que pintó desde su primer frame.
+        """
         view = self.read(rec_id, f"view-{player}.mapped.json")
         vmaf = self.vmaf(rec_id)
         index = self.index(rec_id)
@@ -514,6 +540,11 @@ class Recordings:
             })
         # Desde el primer frame pintado: lo que había en pantalla antes no se sabe
         start = frames[0][0] if frames else end
+        if content is not None:
+            # Desde que pinta el primer frame del tramo común hasta que pinta uno posterior a él
+            first, last = content
+            start = next((t for t, _, n, _ in frames if n is not None and n >= first), end)
+            end = next((t for t, _, n, _ in frames if n is not None and n > last and t > start), end)
         result = qoe_session(segments, start, end, meta["fps"], view.get("gaps", []))
         result.update({
             "player": player,
@@ -522,11 +553,15 @@ class Recordings:
             "stall_ms": STALL_MS,
             "hidden": view["summary"].get("hidden", False),
             "view": view["summary"],
+            # Tramo de la fuente común a todos los reproductores de la prueba y lo que duró en este
+            "content": {"first_n": content[0], "last_n": content[1], "frames": content[1] - content[0] + 1,
+                        "video_s": round((content[1] - content[0] + 1) / meta["fps"], 2),
+                        "wall_s": round((end - start) / 1000, 2)} if content else None,
         })
         self.write(rec_id, f"qoe-{player}.json", result)
         with self.views_lock:
             meta = self.read(rec_id, "meta.json")
-            brief = {k: result.get(k) for k in ("qoe", "T", "excluded_steps", "terms", "inputs", "hidden")}
+            brief = {k: result.get(k) for k in ("qoe", "T", "excluded_steps", "terms", "inputs", "hidden", "content")}
             self.update_meta(rec_id, qoe={**(meta.get("qoe") or {}), player: brief})
         logger.info(f"QoE: {rec_id} {player}: {result['qoe']} (T={result['T']})")
 
@@ -1025,9 +1060,7 @@ class Recordings:
             summary = [{k: v for k, v in s.items() if k not in ("vmaf", "psnr_y")} for s in streams]
             self.update_meta(rec_id, vmaf={"state": "done", "elapsed_s": round(time.time() - began, 1), "streams": summary})
             logger.info(f"QoE: VMAF de {rec_id} en {time.time() - began:.0f} s")
-            for player in PLAYERS:
-                if self.read(rec_id, f"view-{player}.mapped.json") is not None:
-                    self._qoe(rec_id, player)
+            self._qoe_all(rec_id)
         except Interrupted:
             logger.info(f"QoE: VMAF de {rec_id} interrumpido: la emisión volvió a arrancar")
             self.update_meta(rec_id, vmaf=self._queued("Interrumpido: la emisión volvió a arrancar"))

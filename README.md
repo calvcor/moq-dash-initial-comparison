@@ -544,7 +544,9 @@ En el servidor el mismo día, con el bucle a 60 fps y la escalera 1080/720/540, 
 
 $$\text{QoE} = \alpha\sum_t \frac{vmaf_t}{20} - \beta\sum_t rt_t - \gamma\, r_c - \sigma\,\frac{\sum_t l_t}{T} - \mu\,|1-s_t| - \omega\sum_{t\ge 2}\frac{|vmaf_t - vmaf_{t-1}|}{20}$$
 
-con α = 0,077, β = 1,249, γ = 2,897, σ = 1,249, μ = 0,771 y ω = 1,436. Cada paso t es 1 s de reloj del espectador (en el artículo, un segmento de 1 s), desde el primer frame pintado del registro.
+con α = 0,077, β = 1,249, γ = 2,897, σ = 1,249, μ = 0,771 y ω = 1,436. Cada paso t es 1 s de reloj del espectador (en el artículo, un segmento de 1 s).
+
+**Alineación por contenido.** Con distinta latencia, en la misma ventana de reloj cada reproductor enseña un trozo distinto de la película, y el VMAF depende mucho de la escena (de 60 a 77 en medio minuto de Big Buck Bunny). Por eso la QoE de cada reproductor se calcula sobre el mismo tramo de la fuente: del último "primer frame pintado" al primer "último frame pintado" entre todos los de la prueba (`content` en el resultado: frames, segundos de vídeo y segundos de reloj que le llevó a cada uno). Cada uno se evalúa en su propio reloj mientras pintaba ese tramo, así que las duraciones pueden diferir: un parón alarga la suya y recortar latencia la acorta. El mismo frame de la misma calidad tiene el mismo VMAF para todos, porque reciben el mismo flujo codificado. Con un solo reproductor, el tramo es todo lo que pintó.
 
 | Término | Cómo se obtiene aquí |
 | :--- | :--- |
