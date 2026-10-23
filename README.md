@@ -571,6 +571,37 @@ En el servidor (bucle a 60 fps, escalera 1080/720/540, 30 s, sin red emulada, lo
 - **Parada y reanudación:** con la casilla **Detener la emisión para el VMAF y reanudarla después** (marcada por defecto), el servidor detiene la emisión en cuanto termina la grabación (`stop_after` en `POST /api/qoe/recordings`), calcula el VMAF y la QoE, y la vuelve a arrancar con la configuración que tenía al empezar la prueba, guardada con la grabación (`resume_config`), así que también sobrevive a un reinicio del orquestador. Indexar y subir los registros no dependen de la emisión. Si la grabación falla, no se detiene; si el VMAF falla, se reanuda igual; si alguien la arranca mientras se calcula, el cálculo vuelve a la cola y no se toca. Esa prueba pasa la primera en la cola de VMAF. El resultado queda en la grabación (`resumed`). Desmarcada, el VMAF queda en cola hasta que se detenga a mano, y el panel ofrece un botón para hacerlo. Desde la consola, `qoeTest` no la detiene.
 - **Exportar:** CSV con cada paso de 1 s de cada reproductor y JSON completo (grabación, términos, entradas y pasos). La QoE es un resultado por prueba, no por segundo de medida: no va en el CSV de muestras.
 
+### 4.8. Campañas de medida (en construcción)
+
+Baterías de pruebas desatendidas para estudiar cómo se comportan las tres implementaciones con distintas condiciones de red y latencias objetivo. Hecha la fase 1 (el servidor, `server/app/campaign.py`); faltan la página `/campaign` con el editor, el monitor y el modo trabajador del navegador (fase 2), y las gráficas de resultados y un trabajador headless (fase 3). Hasta entonces se maneja con la API (sección 9).
+
+**Reparto.** El orquestador guarda la campaña en disco (`media/campaigns/<id>/`) y marca el ritmo: aplica él mismo la emisión y el perfil de red y decide qué prueba toca. El navegador solo hace de **trabajador**: cada segundo envía un latido (`POST /api/campaigns-worker`) diciendo qué prueba tiene montada, recibe lo que debe tener y sube las filas de cada segundo de los reproductores (las mismas del CSV del dashboard, más `t_server_ms` en reloj del servidor). Si la pestaña se recarga o se cuelga, se vuelve a enganchar y la prueba interrumpida se repite. Un solo trabajador a la vez.
+
+**Una prueba** es una terna condición de red × latencia objetivo × repetición, con una configuración de la emisión y unos reproductores. Fases (`phase` en el latido):
+
+| Fase | Qué pasa | El trabajador |
+| :--- | :--- | :--- |
+| `preparing` | Se aplica la emisión (solo si cambia, con `stream_settle_s` de margen) y la red, y se dejan 2 s para vaciar las colas | Desmonta los reproductores |
+| `mounting` | Se espera al trabajador (hasta 60 s) | Crea reproductores **nuevos** con los ajustes de la prueba y lo dice con `mounted` y `mounted_at_ms` |
+| `warmup` | `warmup_s`; las filas se guardan marcadas y no entran en el resumen | Mide y sube filas |
+| `measuring` | `measure_s`; las filas del resumen | Mide y sube filas |
+| `closing` | 8 s para recibir las últimas filas; resumen y validez | Sigue subiendo |
+
+Los reproductores son siempre nuevos porque MoQ en auto solo calcula su objetivo al conectar (PROTOCOLOS, 4.11); de paso se mide el arranque (`first_g2g_s`, con la resolución de una fila por segundo).
+
+**Latencia objetivo.** Cada valor de `targets` lleva el de cada reproductor (`dash_ms`, `moq_ms`, `rtc_ms`) y se pasa a su mando tal como lo entiende su implementación: `liveDelay` de dash.js (de extremo a extremo), `delay` de `@moq/watch` (un búfer al que la librería suma el jitter del catálogo) y `jitterBufferTarget` de WebRTC (solo el búfer del receptor). **No significan lo mismo**; el eje del análisis es la latencia conseguida frente a la pedida. `null` es el valor por defecto de la implementación. Lo normal es poner el mismo valor en los tres; valores distintos son un experimento aparte y declarado.
+
+**Diseño.** El orden se sortea (con `seed`, guardada) dentro de cada bloque, que es una configuración de la emisión × una repetición: la deriva del sistema en una campaña larga no se confunde con la condición y la fuente solo se reinicia al cambiar de bloque. Cada `control_every` pruebas se intercala una de **control**, sin restricción de red y con el primer objetivo, que detecta esa deriva. Con `player_mode: "each"` cada reproductor va en su propia prueba, para medir cuánto se estorban en el navegador.
+
+**Validez.** Una prueba se marca `invalid` y se repite al final de su bloque (hasta `max_attempts` intentos) si hay filas con la pestaña oculta, reinicios del supervisor, anomalías de ingesta, reproductores activos distintos de los de la prueba, latencia medida en menos del 80 % de los segundos de algún reproductor, o el trabajador se desconecta (15 s sin latido) o desmonta los reproductores.
+
+**Mientras corre**, `POST /api/config`, `/api/start`, `/api/stop`, `/api/network` y `/api/qoe/recordings` responden 409: la emisión y la red las lleva la campaña. En pausa se pueden tocar; al reanudar se vuelven a aplicar. Al terminar o al cancelar, la red y la emisión vuelven a como estaban al empezar (también si estaba parada). Si el orquestador se reinicia con una campaña en marcha, la retoma al arrancar y repite la prueba en curso.
+
+**Resultados.** `runs.csv`: una fila por prueba (también las inválidas) y reproductor, con la condición (`network_label`, `target_label`, perfil de red), la validez y el resumen de la medida: muestras y cobertura, p50/p95/media/σ/mín/máx de glass-to-glass, paradas y su tiempo (`stall_ratio`), bitrate, fps, mediana del p95 del tiempo en pantalla, búfer, altura media y fracción del tiempo en la más alta, cambios de calidad, recreaciones del reproductor, descartes del router y, en WebRTC, paquetes perdidos. `samples.csv`: todas las filas de cada segundo con la condición delante; `in_summary` marca las que entran en el resumen de una prueba válida (las de un intento interrumpido conservan el `run_id`, con otro `run_started_ms`). Se mide lo que hacen las implementaciones tal como vienen: la campaña no toca su comportamiento.
+
+> [!NOTE]
+> Comprobado en local el 23-10-2026 con un trabajador simulado (un script que inventa las filas): aplicación de la red en cada prueba, repetición de una prueba inválida, reanudación tras reiniciar el orquestador, restauración al terminar y exportación. Sin reproductores reales todavía.
+
 ---
 
 ## 5. Emulación de red
@@ -739,12 +770,12 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 
 | Método y ruta | Descripción |
 | :--- | :--- |
-| `GET /api/status` | Estado, configuración, `stream_ids`, reinicios del supervisor, disposición del timecode, anomalías de ingesta, deriva DASH y red (perfil y contadores del router) |
+| `GET /api/status` | Estado, configuración, `stream_ids`, reinicios del supervisor, disposición del timecode, anomalías de ingesta, deriva DASH, red (perfil y contadores del router) y campaña en marcha (`campaign`) |
 | `POST /api/start` | Arranca los empaquetadores (cuerpo opcional: configuración) |
 | `POST /api/stop` | Detiene todo, incluida la codificación de la fuente. La parada se recuerda entre reinicios: no vuelve a emitir hasta `POST /api/start` |
 | `POST /api/config` | Aplica una configuración y reinicia lo necesario. La escalera va en `renditions: [{height, bitrate_kbps}]`; se sigue aceptando `bitrate_kbps` para una única calidad 1080p. `source`: `file` (bucle, por defecto) o `camera`; con la cámara, `fps` lo fija el servidor y, si no la alcanza, responde 502 con el motivo. `rtc_audio`: audio en la rama WebRTC (por defecto, no) |
 | `GET /api/camera` | Sondea la cámara: host (sin credenciales), códec, resolución, fps, audio y último error. Con la cámara emitiendo, devuelve lo último que se supo sin abrir otra sesión |
-| `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las dos ramas en el router |
+| `POST /api/network` | Aplica un perfil de red (`down` y `up`) a las tres ramas en el router |
 | `POST /api/trace` | Dadas las marcas de tiempo de frames ya pintados, devuelve cuándo pasó cada uno por los puntos de medida del servidor |
 | `POST /api/qoe/recordings` | Graba el flujo codificado `duration_s` segundos (5-330) y lo indexa al terminar; con la cámara, también la referencia. Exige la emisión en marcha. Con `stop_after: true`, detiene la emisión al terminar de grabar para que se calcule el VMAF, y la reanuda con la misma configuración al acabar el VMAF y la QoE |
 | `GET /api/qoe/recordings` | Grabaciones guardadas, de la más reciente a la más antigua |
@@ -758,6 +789,14 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior). Solo con la emisión parada |
 | `POST /api/qoe/recordings/{id}/vmaf` | Pone en la cola el cálculo de VMAF (se encola solo al indexar). Se calcula en cuanto la emisión esté parada |
 | `GET /api/qoe/recordings/{id}/vmaf` | VMAF y PSNR de luma de cada fotograma grabado, por calidad, con la versión de vmaf, el modelo y la zona comparada |
+| `POST /api/campaigns` | Crea una campaña (sección 4.8) con sus pruebas ya sorteadas: `name`, `streams` (configuraciones de la emisión), `networks` (`[{label, profile}]`), `targets` (`[{label, dash_ms, moq_ms, rtc_ms}]`), `players`, `player_mode` (`together` o `each`), `quality` (`null` = auto o una altura), `repetitions`, `warmup_s`, `measure_s`, `control_every`, `max_attempts`, `stream_settle_s`, `seed`. Devuelve las pruebas y la duración estimada (`eta_s`) |
+| `GET /api/campaigns` | Campañas guardadas, sin sus pruebas |
+| `GET /api/campaigns/{id}` | Plan, estado, pruebas con su resumen, trabajador y eventos |
+| `POST /api/campaigns/{id}/start`, `/pause`, `/abort` | Arranca o reanuda; pausa (la prueba en curso se repetirá); cancela y restaura la red y la emisión |
+| `DELETE /api/campaigns/{id}` | Borra una campaña que no esté en marcha |
+| `GET /api/campaigns/{id}/runs.csv`, `/samples.csv` | Resumen por prueba y reproductor; filas de cada segundo con la condición |
+| `POST /api/campaigns-worker` | Latido del trabajador (`worker_id`, `mounted`, `mounted_at_ms`): devuelve la prueba que debe tener montada y con qué ajustes |
+| `POST /api/campaigns/{id}/samples` | Filas de cada segundo de una prueba (`run_id`, `rows`, cada una con `t_server_ms`) |
 | `GET /api/versions` | Versiones desplegadas de los componentes de terceros y la última publicada de cada uno |
 | `GET /api/time` | Reloj del servidor en ms, para la medida glass-to-glass |
 | `GET /api/utc` | Reloj del servidor en ISO 8601, para el `UTCTiming` del manifiesto |
@@ -788,6 +827,7 @@ moq-dash-initial-comparison/
 │       ├── main.py               # API de control y ciclo de vida de los procesos
 │       ├── source.py             # Descarga del vídeo fuente si falta
 │       ├── trace.py              # Registro de por dónde pasa cada frame, para el desglose por etapas
+│       ├── campaign.py           # Campañas de medida: plan, planificador, validez y resúmenes
 │       ├── qoe.py                # QoE: grabación del flujo codificado, índice y emparejamiento con el original
 │       ├── recorder.py           # Grabador MPEG-TS de la cuarta salida de la fuente (UDP 5004) y de la referencia de la cámara (5005)
 │       ├── origin.py             # Origen LL-DASH en memoria y calibración del AST

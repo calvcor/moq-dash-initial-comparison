@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
 from . import qoe, source, trace, versions
+from .campaign import campaigns
 from .origin import origin, router as origin_router
 from .source import VIDEO_FILE
 
@@ -154,6 +155,58 @@ class LinkProfile(BaseModel):
 class NetworkProfile(BaseModel):
     down: LinkProfile = LinkProfile()  # servidor -> navegador
     up: LinkProfile = LinkProfile()    # navegador -> servidor
+
+class CampaignNetwork(BaseModel):
+    """Una condición de red de la campaña: el perfil del router y un nombre para los resultados."""
+    label: str = Field(..., min_length=1, max_length=80)
+    profile: NetworkProfile
+
+class CampaignTarget(BaseModel):
+    """Una latencia objetivo, en el mando de cada reproductor tal como lo entiende su implementación
+    (liveDelay de dash.js, delay de @moq/watch, jitterBufferTarget de WebRTC). None: su valor por defecto."""
+    label: str = Field(..., min_length=1, max_length=80)
+    dash_ms: Optional[int] = Field(None, ge=0, le=10000)
+    moq_ms: Optional[int] = Field(None, ge=0, le=10000)
+    rtc_ms: Optional[int] = Field(None, ge=0, le=10000)
+
+class CampaignRequest(BaseModel):
+    """Plan de una campaña de medida (ver campaign.py)."""
+    name: str = Field(..., min_length=1, max_length=120)
+    streams: list[StreamConfig] = Field(..., min_length=1, max_length=10)
+    networks: list[CampaignNetwork] = Field(..., min_length=1, max_length=200)
+    # La primera es también la de las pruebas de control
+    targets: list[CampaignTarget] = Field(..., min_length=1, max_length=50)
+    players: list[Literal["dash", "moq", "rtc"]] = Field(["dash", "moq", "rtc"], min_length=1)
+    # together: los reproductores a la vez en cada prueba; each: una prueba por reproductor (control de la
+    # interferencia entre ellos en el navegador)
+    player_mode: Literal["together", "each"] = "together"
+    # None: la adaptación de cada reproductor; una altura fija la desactiva
+    quality: Optional[int] = Field(None, ge=144, le=1080)
+    repetitions: int = Field(3, ge=1, le=50)
+    warmup_s: float = Field(30, ge=5, le=600)
+    measure_s: float = Field(120, ge=10, le=3600)
+    # Una prueba de control (sin restricción de red) cada tantas; 0 = ninguna
+    control_every: int = Field(10, ge=0, le=1000)
+    max_attempts: int = Field(2, ge=1, le=5)
+    # Margen tras reiniciar la emisión antes de montar los reproductores
+    stream_settle_s: float = Field(15, ge=0, le=120)
+    seed: Optional[int] = None
+
+    @model_validator(mode="after")
+    def check(self):
+        for network in self.networks:
+            p = network.profile
+            if p.down.jitter_ms > p.down.delay_ms or p.up.jitter_ms > p.up.delay_ms:
+                raise ValueError(f"{network.label}: el jitter no puede superar el retardo")
+        if len(set(self.players)) != len(self.players):
+            raise ValueError("Reproductores repetidos")
+        return self
+
+def campaign_guard():
+    """Con una campaña en marcha, la emisión y la red las lleva ella: los cambios a mano la falsearían."""
+    running = campaigns.running()
+    if running and running["state"] == "running":
+        raise HTTPException(status_code=409, detail=f"Hay una campaña en marcha ({running['name']}): ponla en pausa antes")
 
 def router_call(profile: Optional[NetworkProfile] = None) -> Optional[dict]:
     """Lee (o aplica) el perfil de red del router. None si el router no responde."""
@@ -519,11 +572,16 @@ def get_status():
         "ingest_anomalies": {name: count_anomalies(name) for name in log_state},
         "dash_availability_drift_ms": origin.drift_ms,
         "network": router_call(),
+        "campaign": campaigns.running(),
     }
 
 @app.post("/api/network")
+def post_network(profile: NetworkProfile):
+    campaign_guard()
+    return set_network(profile)
+
 def set_network(profile: NetworkProfile):
-    """Aplica el mismo perfil de red a las dos ramas (LL-DASH y MoQ) en el router."""
+    """Aplica el mismo perfil de red a las tres ramas en el router."""
     if profile.down.jitter_ms > profile.down.delay_ms or profile.up.jitter_ms > profile.up.delay_ms:
         raise HTTPException(status_code=422, detail="El jitter no puede superar el retardo")
     result = router_call(profile)
@@ -686,6 +744,10 @@ def get_camera():
         return camera_state
 
 @app.post("/api/start")
+def post_start(config: Optional[StreamConfig] = None):
+    campaign_guard()
+    return start_pipeline(config)
+
 def start_pipeline(config: Optional[StreamConfig] = None):
     global current_config, desired_running
     wanted = config.source if config else current_config.source
@@ -729,6 +791,10 @@ def start_pipeline(config: Optional[StreamConfig] = None):
     return {"message": "Streaming iniciado con éxito (fuente en directo)", "config": current_config}
 
 @app.post("/api/stop")
+def post_stop():
+    campaign_guard()
+    return stop_pipeline()
+
 def stop_pipeline():
     """Detiene todo, incluida la codificación de la fuente, que es lo que consume CPU."""
     global desired_running
@@ -745,11 +811,13 @@ def stop_pipeline():
 
 @app.post("/api/config")
 def update_config(config: StreamConfig):
+    campaign_guard()
     return start_pipeline(config)
 
 @app.post("/api/qoe/recordings")
 def start_qoe_recording(req: qoe.RecordingRequest):
     """Graba el flujo codificado (todas las calidades) durante la prueba y después lo indexa (ver qoe.py)."""
+    campaign_guard()
     if not desired_running or not alive("master_source"):
         raise HTTPException(status_code=409, detail="La emisión no está en marcha")
     context = {
@@ -879,6 +947,93 @@ def check_qoe_recording(rec_id: str):
         raise HTTPException(status_code=409, detail=str(e))
     return {"state": "running"}
 
+@app.get("/api/campaigns")
+def list_campaigns():
+    """Campañas guardadas, sin sus pruebas, de la más reciente a la más antigua."""
+    return campaigns.all()
+
+@app.post("/api/campaigns")
+def create_campaign(req: CampaignRequest):
+    """Crea una campaña con sus pruebas ya sorteadas; no arranca hasta POST .../start."""
+    return campaigns.create(req.model_dump())
+
+def campaign_or_404(cid: str) -> dict:
+    campaign = campaigns.get(cid)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    return campaign
+
+@app.get("/api/campaigns/{cid}")
+def get_campaign(cid: str):
+    """Plan, estado, pruebas con su resumen y registro de eventos."""
+    return campaign_or_404(cid)
+
+# Antes que /{action}: la primera ruta que encaja es la que responde
+class CampaignRows(BaseModel):
+    """Filas de cada segundo de una prueba, las del CSV del dashboard más t_server_ms (reloj del servidor)."""
+    run_id: str
+    rows: list[dict] = Field(..., max_length=600)
+
+@app.post("/api/campaigns/{cid}/samples")
+def upload_campaign_rows(cid: str, batch: CampaignRows):
+    try:
+        return {"stored": campaigns.add_rows(cid, batch.run_id, batch.rows)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+
+@app.post("/api/campaigns/{cid}/{action}")
+def control_campaign(cid: str, action: Literal["start", "pause", "abort"]):
+    """start (o reanudar), pause (la prueba en curso se repetirá) o abort (restaura la red y la emisión)."""
+    campaign_or_404(cid)
+    try:
+        getattr(campaigns, action)(cid)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return campaigns.get(cid)
+
+@app.delete("/api/campaigns/{cid}")
+def delete_campaign(cid: str):
+    campaign_or_404(cid)
+    try:
+        campaigns.delete(cid)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"deleted": cid}
+
+@app.get("/api/campaigns/{cid}/{name}.csv", response_class=PlainTextResponse)
+def export_campaign(cid: str, name: Literal["runs", "samples"]):
+    """runs: una fila por prueba y reproductor con su resumen; samples: las filas de cada segundo."""
+    campaign_or_404(cid)
+    return PlainTextResponse(
+        campaigns.export_csv(cid, f"{name}.jsonl"), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="campaign-{cid}-{name}.csv"'},
+    )
+
+class WorkerBeat(BaseModel):
+    """Latido del trabajador de campañas: quién es y qué prueba tiene montada (None si ninguna)."""
+    worker_id: str = Field(..., min_length=1, max_length=80)
+    mounted: Optional[str] = None
+    # Cuándo creó los reproductores de esa prueba, en reloj del servidor (para medir el arranque)
+    mounted_at_ms: Optional[float] = None
+    info: dict = {}
+
+@app.post("/api/campaigns-worker")
+def campaign_worker(beat: WorkerBeat):
+    """Devuelve lo que debe tener montado el trabajador. Un solo trabajador a la vez."""
+    return campaigns.heartbeat(beat.worker_id, beat.mounted, beat.mounted_at_ms, beat.info)
+
+def campaign_snapshot() -> dict:
+    """Lo que el planificador necesita saber de la emisión y la red, sin pasar por la API."""
+    network = router_call()
+    return {
+        "running": desired_running,
+        "config": current_config.model_dump(),
+        "network": (network or {}).get("profile"),
+        "restarts": dict(restarts),
+        "anomalies": {name: count_anomalies(name) for name in log_state},
+        "versions": dict(versions.installed),
+    }
+
 def supervise():
     """Relanza lo que se haya caído o colgado mientras la emisión deba estar en marcha.
 
@@ -946,6 +1101,12 @@ def on_startup():
         resume=lambda config: start_pipeline(StreamConfig(**config)),
     )
     versions.start()
+    campaigns.apply_stream = lambda config: start_pipeline(StreamConfig(**config))
+    campaigns.apply_network = lambda profile: set_network(NetworkProfile(**profile))
+    campaigns.stop_stream = stop_pipeline
+    campaigns.snapshot = campaign_snapshot
+    campaigns.load()
+    threading.Thread(target=campaigns.scheduler, daemon=True).start()
 
 @app.on_event("shutdown")
 def on_shutdown():
