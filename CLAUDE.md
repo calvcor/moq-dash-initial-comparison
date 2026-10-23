@@ -90,7 +90,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 - **Reiniciar el orquestador pierde la configuración de la emisión**: vuelve a la escalera por defecto
   de tres calidades. Restáurala después con `POST /api/config` (normalmente el usuario usa una sola
   calidad: `{"gop_size":60,"fps":60,"seg_duration":2.0,"frag_duration":0.1,"renditions":[{"height":1080,"bitrate_kbps":4000}]}`).
-  Comprueba siempre el estado con `GET /api/status` antes y después.
+  Comprueba siempre el estado con `GET /api/status` antes y después. **`POST /api/config` arranca la
+  emisión**: si estaba parada, haz `POST /api/stop` justo después (la configuración se queda en memoria).
 - Es un servidor doméstico: **no dejes la emisión en marcha si el usuario la tenía detenida**
   (`POST /api/stop` para la fuente también). Sin permisos para subir prioridades (`renice` a 0 falla).
 - Puertos: 80/tcp (página por NPM), 8443/tcp (DASH directo), 4433/udp (MoQ), 8189/udp (WebRTC).
