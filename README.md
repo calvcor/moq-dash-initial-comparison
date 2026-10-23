@@ -560,6 +560,8 @@ con α = 0,077, β = 1,249, γ = 2,897, σ = 1,249, μ = 0,771 y ω = 1,436. Cad
 
 Primera prueba en local el 23-10-2026 (cámara a 15 fps, tres calidades, 20 s, nada de red emulada, todos los reproductores en 1080p): DASH 5,20, MoQ 6,17 y WebRTC 5,27. El VMAF es el mismo en las tres (92,1-92,3); la diferencia sale casi toda de la latencia (1,09, 0,32 y 0,88 s de media) y, en WebRTC, de la velocidad (1,042 de media, porque iba reduciendo su latencia) y de la suavidad. Es una sola sesión: sirve para comprobar el cálculo, no como resultado.
 
+En el servidor (bucle a 60 fps, escalera 1080/720/540, 30 s, sin red emulada, los tres en 1080p sin cambios de calidad): DASH 2,83, MoQ 3,40 y WebRTC 3,42. El VMAF medio es el mismo (67,0-67,1) y la calidad aporta unos 7,5 puntos a cada uno, pero **la suavidad resta unos 4**: el VMAF de Big Buck Bunny cambia de un segundo a otro con la escena (55-58 puntos de VMAF sumados en 29 pasos), aunque no cambie la calidad. Es lo que dice la ecuación; pesa igual en las tres ramas, pero conviene tenerlo presente al leer el total. La diferencia entre ramas sale de la latencia (0,37, 0,10 y 0,08 s de media).
+
 ---
 
 ## 5. Emulación de red
