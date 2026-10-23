@@ -29,6 +29,9 @@ timecode que lee el navegador sale de los mismos píxeles codificados que el que
 así que se traduce a número de frame buscándolo tal cual en el índice, sin tolerancias. De ahí salen la
 latencia exacta de cada frame (contra la marca de FFmpeg), los saltos y los cambios de calidad.
 
+Fase d: la QoE de LL-GABR (Raman, Turkkan y Kosar, 2024, ecuación 6) de cada reproductor, con lo que pintó
+(fase c) y el VMAF de cada frame (fase b). Se calcula sola en cuanto están las dos cosas. Ver qoe_session.
+
 Con la cámara RTSP como fuente no hay vídeo original guardado. La fuente emite entonces una referencia
 casi sin pérdidas (UDP 5005, ver main.py) con los mismos PTS que la escalera: se graba a la vez que el
 flujo codificado y hace de original, de modo que el fotograma n grabado se compara con el n de la referencia.
@@ -78,6 +81,113 @@ VMAF_MODEL = "vmaf_v0.6.1"
 VMAF_SCALER = "bicubic"
 VMAF_POLL_S = 2.0
 IDLE_REQUIRED = "Compara imágenes: solo se hace con la emisión parada"
+
+
+# QoE de LL-GABR, ecuación 6 (sección 4.3 del artículo), con sus pesos
+LLGABR = {"alpha": 0.077, "beta": 1.249, "gamma": 2.897, "sigma": 1.249, "mu": 0.771, "omega": 1.436}
+QOE_STEP_MS = 1000   # un paso de la ecuación = 1 s de reloj del espectador (los segmentos del artículo son de 1 s)
+STALL_MS = 150       # parón: tanto o más sin frame nuevo; el mismo umbral que "Congelados" en el dashboard
+MIN_SPEED_FRAMES = 3 # frames pintados que hacen falta en un paso para estimar su velocidad
+
+
+def qoe_session(segments: list[dict], start: float, end: float, fps: float, gaps: list) -> dict:
+    """QoE de LL-GABR de lo que vio un reproductor entre start y end (ms, reloj del servidor).
+
+    segments: lo que hubo en pantalla, en orden: {"t0", "t1", "n", "latency_ms", "vmaf"}; n None si no se
+    sabe qué frame era. Cada uno va de su pintado al siguiente.
+
+    Por paso t (1 s de reloj del espectador):
+    - vmaf_t: media del VMAF de los frames distintos que estuvieron en pantalla en el paso, aunque se
+      pintaran antes (así un paso entero congelado tiene el del frame congelado).
+    - rt_t: segundos del paso dentro de un parón (STALL_MS o más sin frame nuevo, con toda su duración).
+    - l_t: latencia media de lo que hubo en pantalla, en s: la de cada frame crece desde su pintado mientras
+      sigue en pantalla. Respecto a la que se mide al pintar, suma medio intervalo entre frames (~8 ms a 60 fps).
+    - s_t: velocidad de reproducción, la pendiente de vídeo avanzado frente a reloj en los pintados del paso
+      (mínimos cuadrados, para no depender del redondeo a refrescos de pantalla). Solo en pasos sin parón:
+      dentro de un parón ya penalizan rt_t y r_c.
+    - r_c: número de parones que empiezan en la sesión.
+
+    Un paso que se solapa con algo desconocido (frame sin emparejar, fuera de la grabación, sin VMAF o sin
+    latencia, o el muestreo parado) se excluye entero; T es el número de pasos que quedan. La suavidad solo
+    se cuenta entre pasos consecutivos incluidos.
+
+    Lo que el artículo no dice y aquí se decide: no define rt_t, r_c ni s_t en el texto (por su tabla 3,
+    congelado y latencia van en segundos); el término de velocidad aparece sin sumatorio, y se toma su media
+    sobre los pasos, como el de latencia. Los demás términos se suman como en la ecuación, así que la QoE
+    crece con la duración: solo se comparan sesiones de la misma duración.
+    """
+    w = LLGABR
+    steps = int((end - start) // QOE_STEP_MS)
+    rows = []
+    for k in range(steps):
+        a, b = start + k * QOE_STEP_MS, start + (k + 1) * QOE_STEP_MS
+        inside = [s for s in segments if s["t1"] > a and s["t0"] < b]
+        known = inside and all(s["n"] is not None and s["vmaf"] is not None and s["latency_ms"] is not None for s in inside)
+        stopped = any(g[1] > a and g[0] < b for g in gaps)
+        if not known or stopped:
+            rows.append({"t": k, "included": False})
+            continue
+        frames = {(s["stream"], s["n"]): s["vmaf"] for s in inside}
+        vmaf = sum(frames.values()) / len(frames)
+        stall_ms = latency_area = 0.0
+        for s in inside:
+            u, v = max(a, s["t0"]), min(b, s["t1"])
+            if s["t1"] - s["t0"] >= STALL_MS:
+                stall_ms += v - u
+            # Integral de la latencia (que crece 1 ms por ms mientras el frame sigue en pantalla) entre u y v
+            latency_area += s["latency_ms"] * (v - u) + ((v - s["t0"]) ** 2 - (u - s["t0"]) ** 2) / 2
+        speed = None
+        painted = [(s["t0"], s["n"]) for s in inside if a <= s["t0"] < b]
+        if stall_ms == 0 and len(painted) >= MIN_SPEED_FRAMES:
+            mt = sum(t for t, _ in painted) / len(painted)
+            mn = sum(n for _, n in painted) / len(painted)
+            var = sum((t - mt) ** 2 for t, _ in painted)
+            if var > 0:
+                # frames por ms → segundos de vídeo por segundo de reloj
+                speed = sum((t - mt) * (n - mn) for t, n in painted) / var * 1000 / fps
+        rows.append({
+            "t": k, "included": True, "vmaf": round(vmaf, 3), "rebuffer_s": round(stall_ms / 1000, 3),
+            "latency_s": round(latency_area / QOE_STEP_MS / 1000, 4), "speed": round(speed, 4) if speed is not None else None,
+            "frames": len(frames),
+        })
+
+    included = [r for r in rows if r["included"]]
+    T = len(included)
+    if T == 0:
+        return {"T": 0, "steps": steps, "qoe": None, "terms": None, "rows": rows}
+    first_kept, last_kept = start + included[0]["t"] * QOE_STEP_MS, start + (included[-1]["t"] + 1) * QOE_STEP_MS
+    kept = {r["t"] for r in included}
+    stalls = [s for s in segments if s["t1"] - s["t0"] >= STALL_MS and int((s["t0"] - start) // QOE_STEP_MS) in kept]
+    speeds = [r["speed"] for r in included if r["speed"] is not None]
+    smooth = sum(abs(r["vmaf"] - p["vmaf"]) / 20 for p, r in zip(rows, rows[1:]) if p["included"] and r["included"])
+    terms = {
+        "quality": w["alpha"] * sum(r["vmaf"] / 20 for r in included),
+        "rebuffer_time": -w["beta"] * sum(r["rebuffer_s"] for r in included),
+        "rebuffer_count": -w["gamma"] * len(stalls),
+        "latency": -w["sigma"] * sum(r["latency_s"] for r in included) / T,
+        "speed": -w["mu"] * (sum(abs(1 - s) for s in speeds) / len(speeds)) if speeds else None,
+        "smoothness": -w["omega"] * smooth,
+    }
+    qoe = sum(v for v in terms.values() if v is not None)
+    return {
+        "T": T,
+        "steps": steps,
+        "excluded_steps": steps - T,
+        "qoe": round(qoe, 3),
+        "terms": {k: (round(v, 3) if v is not None else None) for k, v in terms.items()},
+        "inputs": {
+            "vmaf_mean": round(sum(r["vmaf"] for r in included) / T, 2),
+            "rebuffer_s": round(sum(r["rebuffer_s"] for r in included), 3),
+            "rebuffer_count": len(stalls),
+            "latency_mean_s": round(sum(r["latency_s"] for r in included) / T, 4),
+            "speed_mean": round(sum(speeds) / len(speeds), 4) if speeds else None,
+            "speed_steps": len(speeds),
+            "speed_abs_dev_mean": round(sum(abs(1 - s) for s in speeds) / len(speeds), 4) if speeds else None,
+            "vmaf_change_sum": round(smooth * 20, 2),
+        },
+        "rows": rows,
+        "window_ms": [first_kept, last_kept],
+    }
 
 
 class Interrupted(Exception):
@@ -362,7 +472,59 @@ class Recordings:
         with self.views_lock:
             meta = self.read(rec_id, "meta.json")
             self.update_meta(rec_id, views={**(meta.get("views") or {}), player: summary})
+        if (meta.get("vmaf") or {}).get("state") == "done":
+            self._qoe(rec_id, player)
         return summary
+
+    def recompute_qoe(self, rec_id: str) -> dict:
+        """Rehace la QoE de los reproductores con registro (p. ej. tras cambiar el método)."""
+        if ((self.read(rec_id, "meta.json") or {}).get("vmaf") or {}).get("state") != "done":
+            raise RuntimeError("Falta el VMAF de la grabación")
+        done = [p for p in PLAYERS if self.read(rec_id, f"view-{p}.mapped.json") is not None]
+        for player in done:
+            self._qoe(rec_id, player)
+        return (self.read(rec_id, "meta.json") or {}).get("qoe") or {}
+
+    def qoe(self, rec_id: str, player: str) -> Optional[dict]:
+        if player not in PLAYERS:
+            raise KeyError(player)
+        return self.read(rec_id, f"qoe-{player}.json")
+
+    def _qoe(self, rec_id: str, player: str):
+        """QoE de LL-GABR de un reproductor: lo que pintó (fase c) con el VMAF de cada frame (fase b)."""
+        view = self.read(rec_id, f"view-{player}.mapped.json")
+        vmaf = self.vmaf(rec_id)
+        index = self.index(rec_id)
+        meta = self.read(rec_id, "meta.json")
+        score = {}
+        for stream, result in zip(index["streams"], vmaf["streams"]):
+            score[stream["index"]] = dict(zip(stream["n"], result["vmaf"]))
+        frames = view["frames"]
+        end = view["window_ms"][1]
+        segments = []
+        for k, (t, stream, n, latency) in enumerate(frames):
+            t1 = frames[k + 1][0] if k + 1 < len(frames) else end
+            segments.append({
+                "t0": t, "t1": t1, "stream": stream, "n": n, "latency_ms": latency,
+                "vmaf": score.get(stream, {}).get(n) if n is not None else None,
+            })
+        # Desde el primer frame pintado: lo que había en pantalla antes no se sabe
+        start = frames[0][0] if frames else end
+        result = qoe_session(segments, start, end, meta["fps"], view.get("gaps", []))
+        result.update({
+            "player": player,
+            "weights": LLGABR,
+            "step_ms": QOE_STEP_MS,
+            "stall_ms": STALL_MS,
+            "hidden": view["summary"].get("hidden", False),
+            "view": view["summary"],
+        })
+        self.write(rec_id, f"qoe-{player}.json", result)
+        with self.views_lock:
+            meta = self.read(rec_id, "meta.json")
+            brief = {k: result.get(k) for k in ("qoe", "T", "excluded_steps", "terms", "inputs", "hidden")}
+            self.update_meta(rec_id, qoe={**(meta.get("qoe") or {}), player: brief})
+        logger.info(f"QoE: {rec_id} {player}: {result['qoe']} (T={result['T']})")
 
     def index(self, rec_id: str) -> Optional[dict]:
         return self.read(rec_id, "index.json")
@@ -844,6 +1006,9 @@ class Recordings:
             summary = [{k: v for k, v in s.items() if k not in ("vmaf", "psnr_y")} for s in streams]
             self.update_meta(rec_id, vmaf={"state": "done", "elapsed_s": round(time.time() - began, 1), "streams": summary})
             logger.info(f"QoE: VMAF de {rec_id} en {time.time() - began:.0f} s")
+            for player in PLAYERS:
+                if self.read(rec_id, f"view-{player}.mapped.json") is not None:
+                    self._qoe(rec_id, player)
         except Interrupted:
             logger.info(f"QoE: VMAF de {rec_id} interrumpido: la emisión volvió a arrancar")
             self.update_meta(rec_id, vmaf=self._queued("Interrumpido: la emisión volvió a arrancar"))

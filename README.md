@@ -458,7 +458,7 @@ Objetivo: puntuar cada sesión con la QoE de LL-GABR (Raman et al., 2024, ecuaci
 
 1. Durante la prueba, el servidor graba el flujo que sale del codificador. Es el mismo que reparten las tres ramas, que no recodifican.
 2. El navegador anota qué timecode muestra y cuándo (hecho).
-3. El servidor calcula el VMAF de cada fotograma grabado frente a su original de Big Buck Bunny (hecho) y, con el registro del navegador, reconstruye lo que vio el espectador (hecho: qué frame, de qué calidad y con qué latencia; falta la puntuación de QoE).
+3. El servidor calcula el VMAF de cada fotograma grabado frente a su original de Big Buck Bunny (hecho) y, con el registro del navegador, reconstruye lo que vio el espectador (hecho) y lo puntúa con la QoE de LL-GABR (hecho).
 
 En DASH y MoQ el transporte es fiable y la decodificación H.264 es determinista, así que el fotograma reconstruido es el que se pintó. En WebRTC con pérdidas no tiene por qué: la ocultación de errores del navegador no se reproduce y el VMAF saldría optimista.
 
@@ -539,6 +539,26 @@ La grabación empieza unos segundos antes que el registro (`prerollS`, 5 s por d
 Comprobado en local el 23-10-2026 con Chrome headless, la cámara a 15 fps y tres calidades: en 20 s, 300, 301 y 309 frames pintados en DASH, MoQ y WebRTC, todos emparejados, ninguno fuera de la grabación. Con un margen de 0,2 s, los del primer segundo largo salen fuera de la grabación (26, 18 y 22) y ninguno sin emparejar.
 
 En el servidor el mismo día, con el bucle a 60 fps y la escalera 1080/720/540, 30 s desde Chrome headless en el Mac del usuario: DASH y MoQ pintaron 1800 frames y WebRTC 1741 (59 de la fuente sin pintar), todos emparejados y ninguno fuera de la grabación. La latencia exacta (p50 361, 95 y 77 ms) coincide con la del medidor (362, 79 y 79 ms medidos justo antes) dentro de lo que varía entre un minuto y otro.
+
+**Fase d, hecha: la QoE de LL-GABR.** En cuanto una grabación tiene el VMAF y el registro de un reproductor, el servidor calcula su QoE con la ecuación 6 del artículo (Raman, Turkkan y Kosar, 2024, sección 4.3) y sus pesos:
+
+$$\text{QoE} = \alpha\sum_t \frac{vmaf_t}{20} - \beta\sum_t rt_t - \gamma\, r_c - \sigma\,\frac{\sum_t l_t}{T} - \mu\,|1-s_t| - \omega\sum_{t\ge 2}\frac{|vmaf_t - vmaf_{t-1}|}{20}$$
+
+con α = 0,077, β = 1,249, γ = 2,897, σ = 1,249, μ = 0,771 y ω = 1,436. Cada paso t es 1 s de reloj del espectador (en el artículo, un segmento de 1 s), desde el primer frame pintado del registro.
+
+| Término | Cómo se obtiene aquí |
+| :--- | :--- |
+| vmaf_t | Media del VMAF de los frames distintos que estuvieron en pantalla en el paso, aunque se pintaran antes: un paso entero congelado tiene el del frame congelado |
+| rt_t | Segundos del paso dentro de un parón: 150 ms o más sin frame nuevo (el umbral de "Congelados"), con toda su duración |
+| r_c | Número de parones |
+| l_t | Latencia media de lo que hubo en pantalla, en segundos: la de cada frame (contra la marca de FFmpeg) crece mientras sigue en pantalla. Respecto a la que se mide al pintar, suma medio intervalo entre frames (~8 ms a 60 fps) |
+| s_t | Velocidad: pendiente de vídeo avanzado (número de frame / fps) frente a reloj en los frames pintados del paso, por mínimos cuadrados para no depender del redondeo a refrescos. Igual para las tres ramas, sin leer ningún parámetro del reproductor. Solo en pasos sin parón |
+
+**Lo que el artículo no concreta y aquí se ha decidido:** no define en el texto rt_t, r_c ni s_t (por su tabla 3, congelado y latencia van en segundos); el término de velocidad aparece sin sumatorio y se toma su media sobre los pasos, como el de latencia; y un paso que se solapa con algo desconocido (frame sin emparejar o fuera de la grabación, sin VMAF o sin latencia, muestreo parado) se excluye entero, de modo que T son los pasos que quedan (`excluded_steps` cuenta los demás). Los términos de calidad, parones y suavidad se suman, así que **la QoE crece con la duración: solo se comparan sesiones de la misma duración**, y no con los valores del artículo (300 s). La suavidad (ω) castiga cualquier cambio de VMAF entre segundos, también los del propio contenido, no solo los cambios de calidad.
+
+`GET /api/qoe/recordings/{id}/qoe/{reproductor}` da el total, cada término, sus entradas y cada paso; el resumen va también en la grabación (`qoe`). `POST /api/qoe/recordings/{id}/qoe` la recalcula.
+
+Primera prueba en local el 23-10-2026 (cámara a 15 fps, tres calidades, 20 s, nada de red emulada, todos los reproductores en 1080p): DASH 5,20, MoQ 6,17 y WebRTC 5,27. El VMAF es el mismo en las tres (92,1-92,3); la diferencia sale casi toda de la latencia (1,09, 0,32 y 0,88 s de media) y, en WebRTC, de la velocidad (1,042 de media, porque iba reduciendo su latencia) y de la suavidad. Es una sola sesión: sirve para comprobar el cálculo, no como resultado.
 
 ---
 
@@ -720,6 +740,8 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/qoe/recordings/{id}` | Estado (`recording`, `indexing`, `ready`, `error`), resumen del índice por calidad y resultado de la comprobación |
 | `GET /api/qoe/recordings/{id}/index` | Por fotograma grabado y calidad: PTS, timecode leído y número de frame de la fuente |
 | `POST /api/qoe/recordings/{id}/index` | Rehace el índice con las marcas guardadas y vuelve a encolar el VMAF |
+| `GET /api/qoe/recordings/{id}/qoe/{reproductor}` | QoE de LL-GABR de ese reproductor: total, términos, entradas y cada paso de 1 s |
+| `POST /api/qoe/recordings/{id}/qoe` | Recalcula la QoE de los reproductores con registro |
 | `POST /api/qoe/recordings/{id}/views/{reproductor}` | Lo que pintó un reproductor (`dash`, `moq` o `rtc`) durante la prueba: por frame, hora, timecode y altura. Se traduce a frames al indexar |
 | `GET /api/qoe/recordings/{id}/views/{reproductor}` | Por frame pintado: hora, calidad, número de frame de la fuente y latencia exacta, con el resumen de lo que no cuadra |
 | `POST /api/qoe/recordings/{id}/check` | Comprueba por PSNR el emparejamiento con el original (resultado en el `GET` anterior). Solo con la emisión parada |

@@ -813,6 +813,27 @@ def get_qoe_view(rec_id: str, player: str):
         raise HTTPException(status_code=409, detail="Sin registro de este reproductor o aún sin traducir")
     return view
 
+@app.get("/api/qoe/recordings/{rec_id}/qoe/{player}")
+def get_qoe_score(rec_id: str, player: str):
+    """QoE de LL-GABR de un reproductor: total, términos, entradas y cada paso de 1 s."""
+    qoe_recording_or_404(rec_id)
+    try:
+        result = qoe.recordings.qoe(rec_id, player)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Reproductor desconocido")
+    if result is None:
+        raise HTTPException(status_code=409, detail="Aún sin QoE: falta el VMAF (emisión parada) o el registro del reproductor")
+    return result
+
+@app.post("/api/qoe/recordings/{rec_id}/qoe")
+def recompute_qoe_score(rec_id: str):
+    """Rehace la QoE de todos los reproductores con registro."""
+    qoe_recording_or_404(rec_id)
+    try:
+        return qoe.recordings.recompute_qoe(rec_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
 @app.post("/api/qoe/recordings/{rec_id}/index")
 def reindex_qoe_recording(rec_id: str):
     """Rehace el índice de una grabación con sus marcas guardadas y vuelve a encolar su VMAF."""
