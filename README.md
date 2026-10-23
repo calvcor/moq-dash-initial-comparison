@@ -534,7 +534,7 @@ En el servidor (8 vCPU), el 21-10-2026, con 30 s grabados: 51-59 s de cálculo c
 - **Lo que no cuadra se cuenta y no se rellena:** frames fuera de la grabación (codificados antes de que empezara o después de que acabara), sin emparejar (timecode dentro de la grabación que no está en el índice: lectura errónea), de altura desconocida, lecturas ilegibles, tramos con el muestreo parado (`gaps`) y si la pestaña estuvo oculta.
 - **Además:** frames de la fuente que no se llegaron a pintar entre dos pintados (`skipped`: saltos al directo, frames descartados o no leídos por el medidor), cambios de calidad y frames pintados fuera de orden (`backwards`, debe ser 0).
 
-La grabación empieza unos segundos antes que el registro (`prerollS`, 5 s por defecto): los frames que se pintan al principio se codificaron antes, tanto como la latencia. Con más latencia que ese margen aparecen frames fuera de la grabación. De momento la prueba se lanza desde la consola del navegador, con los reproductores activos: `await qoeTest(30)` (duración en segundos; un segundo argumento cambia el margen). `GET /api/qoe/recordings/{id}/views/{reproductor}` da, por frame pintado, hora, calidad, número de frame y latencia.
+La grabación empieza unos segundos antes que el registro (`prerollS`, 5 s por defecto): los frames que se pintan al principio se codificaron antes, tanto como la latencia. Con más latencia que ese margen aparecen frames fuera de la grabación. La prueba se lanza desde el panel **Prueba de QoE** (debajo de las métricas) con los reproductores activos, o desde la consola: `await qoeTest(30)` (duración en segundos; un segundo argumento cambia el margen). `GET /api/qoe/recordings/{id}/views/{reproductor}` da, por frame pintado, hora, calidad, número de frame y latencia.
 
 Comprobado en local el 23-10-2026 con Chrome headless, la cámara a 15 fps y tres calidades: en 20 s, 300, 301 y 309 frames pintados en DASH, MoQ y WebRTC, todos emparejados, ninguno fuera de la grabación. Con un margen de 0,2 s, los del primer segundo largo salen fuera de la grabación (26, 18 y 22) y ninguno sin emparejar.
 
@@ -561,6 +561,13 @@ con α = 0,077, β = 1,249, γ = 2,897, σ = 1,249, μ = 0,771 y ω = 1,436. Cad
 Primera prueba en local el 23-10-2026 (cámara a 15 fps, tres calidades, 20 s, nada de red emulada, todos los reproductores en 1080p): DASH 5,20, MoQ 6,17 y WebRTC 5,27. El VMAF es el mismo en las tres (92,1-92,3); la diferencia sale casi toda de la latencia (1,09, 0,32 y 0,88 s de media) y, en WebRTC, de la velocidad (1,042 de media, porque iba reduciendo su latencia) y de la suavidad. Es una sola sesión: sirve para comprobar el cálculo, no como resultado.
 
 En el servidor (bucle a 60 fps, escalera 1080/720/540, 30 s, sin red emulada, los tres en 1080p sin cambios de calidad): DASH 2,83, MoQ 3,40 y WebRTC 3,42. El VMAF medio es el mismo (67,0-67,1) y la calidad aporta unos 7,5 puntos a cada uno, pero **la suavidad resta unos 4**: el VMAF de Big Buck Bunny cambia de un segundo a otro con la escena (55-58 puntos de VMAF sumados en 29 pasos), aunque no cambie la calidad. Es lo que dice la ecuación; pesa igual en las tres ramas, pero conviene tenerlo presente al leer el total. La diferencia entre ramas sale de la latencia (0,37, 0,10 y 0,08 s de media).
+
+**Fase e, hecha: el panel Prueba de QoE.** Debajo de las métricas del dashboard:
+
+- **Lanzar:** duración (15, 30, 60, 120 o 300 s) y margen inicial; la prueba usa los reproductores activos y necesita la emisión en marcha. Mientras dura muestra la fase y su cuenta atrás. No hay que cambiar de pestaña: el navegador detiene el muestreo y esos tramos quedan excluidos.
+- **Resultados de cada prueba** (las 10 últimas): por reproductor, la QoE con sus seis términos, sus entradas (VMAF medio, latencia, parones, velocidad), los frames emparejados, sin pintar y los cambios de calidad, y avisos si algo no cuadró (pestaña oculta, tramos sin muestreo, frames fuera de la grabación, pasos excluidos). Gráfica por segundo de VMAF, latencia o velocidad.
+- **VMAF en cola:** el panel lo dice y, con la emisión en marcha, ofrece un botón para detenerla. No la detiene solo.
+- **Exportar:** CSV con cada paso de 1 s de cada reproductor y JSON completo (grabación, términos, entradas y pasos). La QoE es un resultado por prueba, no por segundo de medida: no va en el CSV de muestras.
 
 ---
 

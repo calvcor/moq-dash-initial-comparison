@@ -10,6 +10,7 @@ import { VersionsPanel, versionsLabel } from './components/VersionsPanel';
 import { RateWindow } from './lib/glass';
 import type { FrameTime } from './lib/glass';
 import { runQoETest } from './lib/qoe';
+import { QoEPanel } from './components/QoEPanel';
 import { gridCols } from './lib/layout';
 import { syncClock, getClockSync } from './lib/clock';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile, VersionReport } from './types';
@@ -248,8 +249,8 @@ export function App() {
   const [players, setPlayers] = useState<Record<PlayerId, boolean>>(loadPlayers);
   const playersRef = useRef(players);
   playersRef.current = players;
-  // Prueba de QoE desde la consola, con los reproductores activos, hasta que tenga botón en el panel:
-  // await qoeTest(30) graba, anota lo que pinta cada uno durante 30 s y lo sube (lib/qoe.ts)
+  // Prueba de QoE también desde la consola (la usan las pruebas con Chrome headless): await qoeTest(30)
+  // graba, anota lo que pinta cada reproductor activo durante 30 s y lo sube (lib/qoe.ts)
   useEffect(() => {
     (window as any).qoeTest = (durationS = 30, prerollS = 5) =>
       runQoETest({ durationS, prerollS, players: PLAYER_IDS.filter((p) => playersRef.current[p]) });
@@ -724,6 +725,13 @@ export function App() {
             onReset={handleResetSamples}
           />
         </div>
+
+        {/* Prueba de QoE: grabación en el servidor, lo que pinta cada reproductor, VMAF y LL-GABR */}
+        <QoEPanel
+          streaming={serverStatus?.status === 'running'}
+          activePlayers={PLAYER_IDS.filter((p) => players[p])}
+          onStopStream={handleStop}
+        />
       </div>
     </div>
   );
