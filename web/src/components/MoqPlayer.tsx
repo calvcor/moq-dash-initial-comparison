@@ -7,6 +7,7 @@ import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_M
 import { meters } from '../lib/qoe';
 import { MoqBufferMeter, MoqTracer } from '../lib/trace';
 import { MoqProbeAbr } from '../lib/moqProbe';
+import { MoqExplain } from './MoqExplain';
 import type { MoqAbr, MoqSwitching, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
 const SWITCHING_KEY = 'testbed.moqSwitching';
@@ -89,6 +90,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   // Adaptación: 'watch' deja decidir a @moq/watch (el comportamiento que se mide); 'probe' es el experimento de
   // README 6.3, un controlador propio con sondeo por prioridad que pide la calidad a la librería por target.name.
   const [abr, setAbr] = useState<MoqAbr>(loadAbr);
+  const [showExplain, setShowExplain] = useState(false);
   const abrRef = useRef<MoqAbr>(abr);
   const probeAbrRef = useRef<MoqProbeAbr | null>(null);
   const handleAbrChange = (value: MoqAbr) => {
@@ -525,8 +527,21 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          onClick={() => setShowExplain((v) => !v)}
+          className="ml-auto text-emerald-400 hover:text-emerald-300 whitespace-nowrap"
+          title="Cómo sube y baja de calidad este reproductor con las opciones elegidas"
+        >
+          {showExplain ? 'Ocultar explicación ▴' : 'Cómo funciona ▾'}
+        </button>
         </div>
       </div>
+      {showExplain && (
+        <div className="px-4 py-3 bg-slate-950/80 border-t border-slate-800/60 text-[11px] leading-relaxed text-slate-400">
+          <MoqExplain abr={abr} switching={switching} quality={quality} switchingSupported={switchingSupported} />
+        </div>
+      )}
     </div>
   );
 };
