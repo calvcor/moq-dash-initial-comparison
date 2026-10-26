@@ -319,6 +319,21 @@ latencia mediana; las de fábrica, casi igual (0-1 s congelados); L2A subió a 7
 cada ronda. Una medida anterior en el servidor que no permitía ordenarlas se descartó: tenía otros
 reproductores en la misma cola.
 
+**Cómo deciden L2A y LoL+** (leído del código de dash.js 5.2.1; README, sección 6):
+
+- **L2A** mantiene una distribución de probabilidad sobre las calidades y la ajusta en cada segmento
+  con un paso de descenso de Lagrange: penaliza las calidades cuyo `velocidad × bitrate` supera la
+  última muestra de caudal (media de una sola descarga) y elige la más próxima a la media ponderada.
+  Sube como mucho un escalón, y solo si su bitrate nominal cabe en ese caudal, sin margen. No mira la
+  latencia ni el búfer. Con 5 Mbit/s y 1080p@4000 tiende a la máxima aunque sus picos no quepan.
+- **LoL+** elige con un mapa autoorganizado (una neurona por calidad, con caudal, latencia, parón y
+  cambio) cuyos pesos escoge en cada segmento maximizando un modelo de QoE (premio por bitrate,
+  penalización por parón, latencia y velocidad distinta de 1×). Antes aplica una bajada de seguridad:
+  si `búfer − bitrate × duración del segmento / caudal < 0,3 s` (`DWS_BUFFER_MIN`), baja, y en la
+  mínima se queda. Con segmentos de 2 s y objetivo de 0,3 s se cumple siempre: LoL+ no sale de la
+  mínima, haya o no límite de red. Con el objetivo a 6 s, en local y sin límite, subió a 1080p en
+  cuanto el búfer superó unos 1,5-3 s (tres pasadas).
+
 El cambio de calidad ocurre **en una frontera de segmento**: el siguiente segmento se pide de otra
 Representation. Con segmentos de 2 s, esa es la granularidad de reacción.
 

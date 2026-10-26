@@ -730,6 +730,8 @@ Las tres opciones del selector ABR de DASH (medido el 23-10-2026 **en local**, n
 | L2A | 360p y 720p, a partes casi iguales en la primera ronda | 6 y 5 | 0,93 / 9,05 y 0,30 / 0,73 s | 5 y 5 |
 | LoL+ | 360p todo el tiempo | 0 y 0 | 0,31 / 0,35 y 0,31 / 0,31 s | 0 y 0 |
 
+**Por qué LoL+ se queda en la calidad mínima con objetivos bajos** (leído del código de dash.js 5.2.1). Antes de su mapa autoorganizado, LoL+ baja de calidad si `búfer − tiempo de descarga estimado < 0,3 s` (`DWS_BUFFER_MIN`), y si ya está en la mínima se queda. El tiempo de descarga lo estima para un segmento entero, `bitrate × duración / caudal`, con la duración del segmento (2 s aquí). Con 0,3 s de objetivo el búfer ronda 0,26 s y la condición se cumple siempre, haya o no límite de red: LoL+ no sale de la mínima. Con segmentos de 2 s hace falta un búfer de unos 0,6 s para que pueda subir. Medido en local sin límite: con el objetivo a 6 s, LoL+ pasa a 720p y a 1080p en cuanto el búfer crece (a los 0-4 s de alcanzar 1,5-3 s de búfer; tres pasadas, con el slider movido antes y después de elegir la regla y con los tres reproductores activos). Alargar la latencia no es instantáneo: dash.js reproduce a 0,5× unos 12 s hasta llegar a 6 s. **L2A**, al contrario, compara el bitrate nominal con la última muestra de caudal sin margen, así que tiende a la calidad máxima aunque sus picos no quepan.
+
 En local, LoL+ es la única que se queda quieta en la calidad que cabe y sostiene el objetivo. L2A sube a 720p, que no cabe, y se congela en las dos rondas. Son dos pasadas por regla: hace falta una campaña para darlo por bueno, y repetirlo en el servidor, con DASH directo.
 
 > [!WARNING]
