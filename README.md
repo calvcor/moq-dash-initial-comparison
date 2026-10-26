@@ -253,7 +253,7 @@ python3 tsgate.py 5001 | ffmpeg -analyzeduration 1000000 -i pipe:0 \
 
 - **Publicación por HTTP PUT al origen en memoria** (`server/app/origin.py`). Cada segmento se sirve a los clientes mientras FFmpeg aún lo está escribiendo, fragmento a fragmento. Escribiendo a disco FFmpeg solo expone el segmento completo.
 - **`-use_timeline 0`** hace que el manifiesto anuncie `availabilityTimeOffset`, que es lo que permite a dash.js pedir el segmento en curso.
-- **`-frag_type duration`** es necesario para que `-frag_duration` tenga efecto.
+- **`-frag_type duration`** es necesario para que `-frag_duration` tenga efecto. Con la opción **1 frame** (`frag_duration` = 0 en la API y en el CSV) se usa en su lugar `-frag_type every_frame`: un fragmento por frame, 16,7 ms a 60 fps (120 por segmento de 2 s; el audio Opus, uno por frame de 20 ms). El manifiesto anuncia entonces `availabilityTimeOffset` de 1,983 s en vídeo.
 - **`-dash_segment_type mp4`**: con audio Opus, FFmpeg metería esa pista en WebM; así va en CMAF como el vídeo.
 - **`availabilityStartTime` calibrado**: el origen sustituye el que escribe FFmpeg (retrasado por su sondeo de entrada) por el deducido del instante real en que se abre un segmento. El manifiesto no se publica hasta tenerlo, unos segundos tras cada arranque.
 
@@ -883,7 +883,7 @@ Desde el panel de control:
 | Audio en WebRTC | Desactivado (por defecto) o activado | El Opus de la fuente, sin recodificar. Sube la latencia de WebRTC hasta el búfer del audio: poco con el bucle, 100-200 ms con la cámara (sección 3.4b). En el CSV, `rtc_audio` |
 | Pantalla completa (por reproductor) | Botón arriba a la derecha del vídeo (aparece al pasar el ratón) o doble clic; Esc para salir | Amplía la zona de vídeo, con sus avisos. Solo escala la imagen: el timecode se lee del frame decodificado y el reproductor de MoQ sigue dibujando aunque su canvas quede tapado (`visible: 'always'`). Los otros reproductores siguen midiendo detrás (comprobado en Chrome headless el 22-10-2026). En el CSV, `fullscreen` dice cuál está a pantalla completa |
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
-| Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
+| Fragmento CMAF | 1 frame, 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked. 1 frame es `-frag_type every_frame` (16,7 ms a 60 fps) y vale 0 en la API y en el CSV. Medido el 26-10-2026 en local, sin límite y con objetivo de 0,3 s, dos pasadas alternas de 40 s: la latencia de DASH no baja (394-410 ms frente a 390 con 100 ms; la fija el búfer de dash.js) y su estimación de caudal sí (16-18 Mbit/s frente a 40-50; sección 6) |
 | Latencia objetivo DASH | 0,05 a 6,0 s (0,3 s al abrir) | `liveDelay` de dash.js, con catch-up LoL+ |
 | ABR MoQ (experimento) | Librería (por defecto) o Sondeo | Quién decide la calidad: `@moq/watch` o el controlador con sondeo por prioridad (sección 6.3). Solo con Calidad en Auto. Se recuerda en el navegador. En el CSV, `moq_abr`, `moq_probing` y `moq_probe_capacity_kbps` |
 | Cambio MoQ (experimento) | Sin corte (por defecto), Cancelar o Prioridad | Qué hace `@moq/watch` con la calidad anterior al bajar (sección 6.1). Solo con el parche de `web/patches/`. Se recuerda en el navegador. En el CSV, `moq_switching` |

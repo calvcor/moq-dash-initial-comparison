@@ -119,7 +119,9 @@ class StreamConfig(BaseModel):
     # sincroniza audio y vídeo y retrasa el vídeo (README, sección 3.4b)
     rtc_audio: bool = False
     seg_duration: float = 2.0    # Segundos por segmento DASH
-    frag_duration: float = 0.1   # Chunks CMAF de 100ms para LL-DASH
+    # Duración de los fragmentos CMAF de LL-DASH, en segundos. 0 = un frame por fragmento (-frag_type every_frame):
+    # 16,7 ms a 60 fps, y lo que dure un frame con la cámara.
+    frag_duration: float = Field(0.1, ge=0)
     # Escalera de calidades que se codifica en vivo, de mayor a menor. Una sola entrada = sin adaptación.
     renditions: list[Rendition] = Field(default_factory=default_ladder, min_length=1, max_length=5)
 
@@ -599,6 +601,13 @@ def launch(name: str, cmd: str, log: str):
         stderr=open(log, "w")
     )
 
+def frag_options(frag_duration: float) -> str:
+    """Opciones de fragmentación de FFmpeg: un frame por fragmento con 0, o fragmentos de esa duración."""
+    if frag_duration == 0:
+        return "-frag_type every_frame "
+    # -frag_type duration es necesario para que -frag_duration tenga efecto
+    return f"-frag_type duration -frag_duration {frag_duration} "
+
 def start_dash():
     """Empaquetador LL-DASH: lee de UDP 5001 y publica fragmentos CMAF por HTTP PUT chunked."""
     kill_proc(processes.get("dash_pipeline"))
@@ -617,7 +626,7 @@ def start_dash():
         f"-map 0:v -map 0:a:0 -c:v copy -c:a copy -tag:v avc1 {declared}"
         # MP4 (CMAF) también para el audio: con Opus, FFmpeg elegiría WebM para esa pista
         f"-f dash -dash_segment_type mp4 -adaptation_sets 'id=0,streams=v id=1,streams=a' -seg_duration {current_config.seg_duration} "
-        f"-frag_type duration -frag_duration {current_config.frag_duration} "
+        f"{frag_options(current_config.frag_duration)}"
         f"-streaming 1 -ldash 1 -use_template 1 -use_timeline 0 "
         f"-utc_timing_url '{UTC_TIMING_URL}' "
         f"-window_size {window} -extra_window_size {window} "

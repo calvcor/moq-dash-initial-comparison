@@ -238,7 +238,8 @@ El manifiesto completo, con todos sus campos explicados y ejemplos de cálculo, 
 
 1. **Empaquetado.** `ffmpeg -f dash -streaming 1 -ldash 1` lee el MPEG-TS, copia el vídeo sin
    recodificar y produce fragmentos CMAF. Las opciones relevantes:
-   - `-seg_duration` y `-frag_duration`: los dos mandos del panel.
+   - `-seg_duration` y `-frag_duration`: los dos mandos del panel. Con la opción "1 frame" se usa
+     `-frag_type every_frame` en vez de `-frag_duration`: un fragmento por frame.
    - `-use_template 1 -use_timeline 0`: URL calculadas por número, sin lista de segmentos. Es
      condición para que el manifiesto anuncie `availabilityTimeOffset`.
    - `-adaptation_sets "id=0,streams=v id=1,streams=a"`: todas las calidades de vídeo en un mismo
