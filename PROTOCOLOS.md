@@ -339,8 +339,12 @@ Representation. Con segmentos de 2 s, esa es la granularidad de reacción.
 
 Un problema conocido de medir caudal en baja latencia: un segmento servido a goteo tarda 2 s en
 descargarse **por definición**, vaya como vaya la red, así que "bytes / tiempo" da el bitrate del
-vídeo y no la capacidad del enlace. `dash.js` lo compensa con heurísticas sobre los fragmentos
-individuales, que son menos fiables que una medida directa.
+vídeo y no la capacidad del enlace. `dash.js` lo compensa midiendo cada fragmento por separado
+(modo `moofParsing`, la idea de ACTE), pero acumula los fragmentos que llegan en 1 ms o menos hasta
+pasar de 1 ms, y ese intervalo incluye el hueco hasta el siguiente: con la red rápida (sin límite, en
+local o en la red local del servidor) la estimación vuelve a ser unas dos veces el bitrate descargado.
+Medido el 26-10-2026: 1,65 Mbit/s en 360p sin límite, 18,7-21 Mbit/s con la red limitada a 20 Mbit/s
+(README, sección 6).
 
 ### 3.7. De dónde sale su latencia
 
