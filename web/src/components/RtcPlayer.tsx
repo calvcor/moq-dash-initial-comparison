@@ -269,14 +269,14 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
 
       {/* Búfer de jitter objetivo */}
       <div
-        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs"
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
         title="Búfer de jitter que se pide al navegador (RTCRtpReceiver.jitterBufferTarget). En auto no se pide nada y el navegador lo ajusta solo según la red."
       >
-        <div className="flex items-center space-x-2">
-          <span className="text-slate-400 font-medium">Búfer objetivo:</span>
-          <span className="font-mono text-amber-400 font-semibold">{targetMs === 0 ? 'auto (navegador)' : `${targetMs}ms`}</span>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <span className="text-slate-400 font-medium whitespace-nowrap">Búfer objetivo:</span>
+          <span className="font-mono text-amber-400 font-semibold whitespace-nowrap">{targetMs === 0 ? 'auto (navegador)' : `${targetMs}ms`}</span>
         </div>
-        <div className="flex items-center space-x-3 w-1/2 max-w-xs">
+        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
           <span className="text-[10px] text-slate-500 font-mono">auto</span>
           <input
             type="range"
@@ -291,7 +291,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
         </div>
       </div>
 
-      <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
+      <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono">
         <span>MediaMTX · {WHEP_URL}</span>
         <span>RTCPeerConnection + &lt;video&gt;</span>
       </div>

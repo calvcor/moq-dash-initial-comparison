@@ -401,12 +401,12 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
       </div>
 
       {/* Control de Latencia Objetivo en Vivo */}
-      <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs">
-        <div className="flex items-center space-x-2">
-          <span className="text-slate-400 font-medium">Latencia objetivo:</span>
-          <span className="font-mono text-blue-400 font-semibold">{targetLatency.toFixed(2)}s ({Math.round(targetLatency * 1000)}ms)</span>
+      <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <span className="text-slate-400 font-medium whitespace-nowrap">Latencia objetivo:</span>
+          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">{targetLatency.toFixed(2)}s ({Math.round(targetLatency * 1000)}ms)</span>
         </div>
-        <div className="flex items-center space-x-3 w-1/2 max-w-xs">
+        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
           <span className="text-[10px] text-slate-500 font-mono">0.05s</span>
           <input
             type="range"
@@ -423,16 +423,16 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
 
       {/* Umbral de salto al directo (liveCatchup.maxDrift) */}
       <div
-        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex items-center justify-between text-xs"
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
         title="Si la latencia se desvía del objetivo más que este valor, dash.js salta al directo en vez de corregir con la velocidad de reproducción. El salto aborta las descargas en curso y abre conexiones TCP nuevas: con retardo de red alto puede encadenar saltos y paradas. 0 = no saltar nunca."
       >
-        <div className="flex items-center space-x-2">
-          <span className="text-slate-400 font-medium">Salto al directo:</span>
-          <span className="font-mono text-blue-400 font-semibold">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <span className="text-slate-400 font-medium whitespace-nowrap">Salto al directo:</span>
+          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">
             {maxDrift === 0 ? 'desactivado' : `desvío > ${maxDrift.toFixed(1)}s`}
           </span>
         </div>
-        <div className="flex items-center space-x-3 w-1/2 max-w-xs">
+        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
           <span className="text-[10px] text-slate-500 font-mono">no</span>
           <input
             type="range"
@@ -449,14 +449,14 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
 
       {/* Umbral de búfer vacío (buffer.stallThreshold y lowLatencyStallThreshold) */}
       <div
-        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex items-center justify-between text-xs"
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
         title="Si el búfer baja de este nivel, dash.js lo declara vacío: la regla de búfer insuficiente fuerza la calidad más baja, la corrección de latencia da la reproducción por parada y se registra un rebuffering en sus métricas. No detiene el vídeo: eso solo ocurre cuando el navegador se queda sin datos. Con una latencia objetivo baja el búfer ronda este valor. 0,3 s es el valor de fábrica de dash.js."
       >
-        <div className="flex items-center space-x-2">
-          <span className="text-slate-400 font-medium">Umbral de búfer vacío:</span>
-          <span className="font-mono text-blue-400 font-semibold">{`${stallThreshold.toFixed(2)}s`}{stallThreshold === 0.3 && ' (de fábrica)'}</span>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <span className="text-slate-400 font-medium whitespace-nowrap">Umbral de búfer vacío:</span>
+          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">{`${stallThreshold.toFixed(2)}s`}{stallThreshold === 0.3 && ' (de fábrica)'}</span>
         </div>
-        <div className="flex items-center space-x-3 w-1/2 max-w-xs">
+        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
           <span className="text-[10px] text-slate-500 font-mono">0s</span>
           <input
             type="range"
@@ -471,8 +471,9 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
         </div>
       </div>
 
-      <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
-        <span
+      <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 font-mono space-y-1.5">
+        <div
+          className="truncate"
           title={
             direct
               ? 'El navegador conecta directamente al servidor de DASH a través del router de emulación: su propia conexión TCP atraviesa la red emulada, como en MoQ y WebRTC.'
@@ -480,9 +481,10 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           }
         >
           {direct ? `Directo · ${new URL(url).host}` : 'Vía proxy · /media/dash/manifest.mpd'}
-        </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <label
-          className="flex items-center space-x-1.5"
+          className="flex items-center space-x-1.5 whitespace-nowrap"
           title="Reglas de adaptación de dash.js en Auto. Por defecto: las de fábrica (caudal y BOLA, búfer insuficiente, historial de cambios, abandono de peticiones). L2A y LoL+: sus reglas para baja latencia, cada una en solitario. Cambiarlo recrea el reproductor."
         >
           <span>ABR:</span>
@@ -496,7 +498,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
             <option value="lolp">LoL+</option>
           </select>
         </label>
-        <label className="flex items-center space-x-1.5" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
+        <label className="flex items-center space-x-1.5 whitespace-nowrap" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
           <span>Calidad:</span>
           <select
             value={quality}
@@ -511,6 +513,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
             ))}
           </select>
         </label>
+        </div>
       </div>
     </div>
   );

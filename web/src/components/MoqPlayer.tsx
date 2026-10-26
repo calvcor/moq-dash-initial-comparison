@@ -450,17 +450,17 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
 
       {/* Control de Latencia Objetivo en Vivo */}
       <div
-        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs"
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
         title="Búfer de jitter de @moq/watch (opción delay), no la latencia total: un retardo de red constante se suma aparte. Con un valor fijo, ese valor. En auto depende de la versión: la 0.6.3 publicada lo calcula como 1,25 veces el RTT mínimo (suelo de 20 ms) y no lo sube durante la sesión hasta recargar; la compilada desde main (git@…) lo estima de lo tarde que llegan los frames respecto al más rápido de los últimos 2 s (percentil 95, techo de unos 2 s): sube al empeorar la red y baja al estabilizarse, aunque la red siga lenta. En ambos casos se suma el jitter que declara el catálogo; el resultado es el que se muestra entre paréntesis."
       >
-        <div className="flex items-center space-x-2">
-          <span className="text-slate-400 font-medium">Latencia objetivo:</span>
-          <span className="font-mono text-emerald-400 font-semibold">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <span className="text-slate-400 font-medium whitespace-nowrap">Latencia objetivo:</span>
+          <span className="font-mono text-emerald-400 font-semibold whitespace-nowrap">
             {targetLatencyMs === 0 ? 'auto (RTT)' : `${targetLatencyMs}ms`}
             {resolvedDelayMs !== null && ` (efectiva ${resolvedDelayMs}ms)`}
           </span>
         </div>
-        <div className="flex items-center space-x-3 w-1/2 max-w-xs">
+        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
           <span className="text-[10px] text-slate-500 font-mono">auto</span>
           <input
             type="range"
@@ -475,10 +475,13 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
         </div>
       </div>
 
-      <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
-        <span>Relay: {url}/live.hang</span>
+      <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 font-mono space-y-1.5">
+        <div className="truncate" title={`${url}/live.hang`}>
+          Relay: {url}/live.hang
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <label
-          className="flex items-center space-x-1.5"
+          className="flex items-center space-x-1.5 whitespace-nowrap"
           title="Experimento, no el comportamiento de @moq/watch. Librería: decide @moq/watch (la estimación del relay y su regla del 80 %). Sondeo: decide un controlador del banco que, a ratos, pide la calidad siguiente con la prioridad mínima y sube si cabe en lo que reciben las dos; baja si la actual deja de llegar a su ritmo (README 6.3). Solo actúa con Calidad en Auto. Se recuerda en este navegador."
         >
           <span>ABR:</span>
@@ -492,7 +495,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
           </select>
         </label>
         <label
-          className="flex items-center space-x-1.5"
+          className="flex items-center space-x-1.5 whitespace-nowrap"
           title="Experimento, no el comportamiento de @moq/watch: qué hacer al bajar de calidad. Se recuerda en este navegador. Sin corte: el original, sigue descargando la calidad anterior hasta que la nueva la alcanza. Cancelar: deja de descargar la anterior al momento y congela su última imagen hasta que la nueva la alcanza. Prioridad: sin corte, pero la nueva calidad se pide con más prioridad que la anterior. Subir de calidad es siempre sin corte. Se aplica al siguiente cambio, sin reconectar."
         >
           <span>Cambio:</span>
@@ -507,7 +510,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
             <option value="priority">Prioridad</option>
           </select>
         </label>
-        <label className="flex items-center space-x-1.5" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
+        <label className="flex items-center space-x-1.5 whitespace-nowrap" title="Auto deja decidir al algoritmo de adaptación del reproductor; fijar una calidad lo desactiva.">
           <span>Calidad:</span>
           <select
             value={quality}
@@ -522,6 +525,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
             ))}
           </select>
         </label>
+        </div>
       </div>
     </div>
   );
