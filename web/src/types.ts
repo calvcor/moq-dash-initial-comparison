@@ -130,7 +130,10 @@ export interface PlayerMetrics {
   qualityMode: 'auto' | 'manual';
   maxDriftSec?: number; // solo DASH: desvío a partir del cual dash.js salta al directo (0 = nunca)
   stallThresholdSec?: number; // solo DASH: nivel de búfer por debajo del cual dash.js lo declara vacío
-  switching?: MoqSwitching | null; // solo MoQ: cambio de calidad hacia abajo (parche de web/patches); null sin el parche
+  switching?: MoqSwitching | null;
+  moqAbr?: MoqAbr; // solo MoQ: quién decide la calidad (la librería o el experimento de sondeo)
+  probing?: boolean | null; // solo MoQ con sondeo: hay un sondeo en curso
+  probeCapacityKbps?: number | null; // solo MoQ con sondeo: capacidad estimada en el último sondeo // solo MoQ: cambio de calidad hacia abajo (parche de web/patches); null sin el parche
   abr?: DashAbr; // solo DASH: reglas de adaptación de dash.js
   packetsLost?: number | null; // solo WebRTC: paquetes RTP perdidos según el navegador
   stages?: StageBreakdown | null;
@@ -140,6 +143,9 @@ export interface PlayerMetrics {
 
 // Cambio de calidad hacia abajo en MoQ (opción `switching` del parche de web/patches)
 export type MoqSwitching = 'seamless' | 'cancel' | 'priority';
+
+// Quién decide la calidad en MoQ: @moq/watch, o el controlador del experimento de sondeo (README 6.3)
+export type MoqAbr = 'watch' | 'probe';
 
 // Reglas de adaptación de dash.js: las de fábrica, o L2A o LoL+ en solitario
 export type DashAbr = 'default' | 'l2a' | 'lolp';
@@ -207,7 +213,10 @@ export interface SampleRow {
   moq_quality_switches: number;
   moq_bw_estimate_kbps: number | null;
   moq_quality_mode: string;
-  moq_switching: string | null; // seamless (original), cancel o priority; vacío sin el parche
+  moq_switching: string | null;
+  moq_abr: string; // watch (la librería) o probe (experimento de sondeo, README 6.3)
+  moq_probing: number | null; // 1 si había un sondeo en curso en la muestra
+  moq_probe_capacity_kbps: number | null; // capacidad estimada en el último sondeo // seamless (original), cancel o priority; vacío sin el parche
   // Desglose de la latencia por etapas (ms); la suma de las de cada rama es su glass-to-glass
   dash_stage_encode_ms: number | null;
   dash_stage_package_ms: number | null;

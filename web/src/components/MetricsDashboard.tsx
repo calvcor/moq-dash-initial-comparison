@@ -203,6 +203,13 @@ const Telemetry: React.FC<{
       />
       <Stat label="Cambios de calidad" value={String(metrics.qualitySwitches)} />
       <Stat label="Ancho de banda estimado" value={fmt(metrics.bandwidthEstimateKbps, 'kbps')} hint={estimateHint} />
+      {metrics.moqAbr === 'probe' && (
+        <Stat
+          label={`Capacidad por sondeo${metrics.probing ? ' (sondeando)' : ''}`}
+          value={fmt(metrics.probeCapacityKbps ?? null, 'kbps')}
+          hint="Experimento (README 6.3): lo que recibían la calidad actual y la de sondeo en el último sondeo. Con él decide el controlador del banco, no @moq/watch."
+        />
+      )}
       <Stat label="Bitrate vídeo recibido" value={fmt(metrics.bitrateKbps, 'kbps')} hint={VIDEO_HINT} />
       <Stat label="Descarga total" value={fmt(metrics.networkKbps, 'kbps')} hint={networkHint} />
       <Stat label={bufferLabel} value={fmt(metrics.bufferLengthSec, 's')} hint={bufferHint} />

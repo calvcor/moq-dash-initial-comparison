@@ -796,7 +796,9 @@ selección fue 540p en 58 de 60 muestras y el frame pintado, 1080p en las 60, co
 su playhead alcanza el de la activa (leído del código); no hay un plazo que suelte la anterior. Las dos
 pistas se piden con la misma prioridad (`Catalog.PRIORITY.video`, 60) y ninguna opción de la librería
 lo cambia. El testbed tiene un experimento declarado que modifica esto (README, 6.1): soltar la anterior
-o dar prioridad a la nueva al bajar elimina el atasco con 2 Mbit/s. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
+o dar prioridad a la nueva al bajar elimina el atasco con 2 Mbit/s. Otro experimento (README, 6.3) sustituye la estimación del relay
+por un sondeo con la calidad siguiente a prioridad mínima: mide bien la capacidad (85-98 % de la real),
+pero como algoritmo de adaptación no mejora al de la librería con la red fija. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
 coincidir durante un rato, o indefinidamente si la nueva nunca llega a alcanzar a la anterior. Por
 eso el testbed registra las dos por separado (`moq_selected_height` y `moq_height`).
 

@@ -6,9 +6,19 @@ import { Signal } from '@moq/signals';
 import { GlassMeter, RateWindow, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { meters } from '../lib/qoe';
 import { MoqBufferMeter, MoqTracer } from '../lib/trace';
-import type { MoqSwitching, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
+import { MoqProbeAbr } from '../lib/moqProbe';
+import type { MoqAbr, MoqSwitching, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
 const SWITCHING_KEY = 'testbed.moqSwitching';
+const ABR_KEY = 'testbed.moqAbr';
+
+/** Algoritmo de adaptación recordado en este navegador; por defecto, el de @moq/watch. */
+function loadAbr(): MoqAbr {
+  try {
+    if (localStorage.getItem(ABR_KEY) === 'probe') return 'probe';
+  } catch (_) {}
+  return 'watch';
+}
 
 /** Variante de cambio recordada en este navegador; si no hay o no se puede leer, la original. */
 function loadSwitching(): MoqSwitching {
@@ -75,6 +85,22 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   useEffect(() => {
     onMetricsUpdate({ switching: switchingSupported === false ? null : switching });
   }, [switching, switchingSupported]);
+
+  // Adaptación: 'watch' deja decidir a @moq/watch (el comportamiento que se mide); 'probe' es el experimento de
+  // README 6.3, un controlador propio con sondeo por prioridad que pide la calidad a la librería por target.name.
+  const [abr, setAbr] = useState<MoqAbr>(loadAbr);
+  const abrRef = useRef<MoqAbr>(abr);
+  const probeAbrRef = useRef<MoqProbeAbr | null>(null);
+  const handleAbrChange = (value: MoqAbr) => {
+    setAbr(value);
+    abrRef.current = value;
+    try {
+      localStorage.setItem(ABR_KEY, value);
+    } catch (_) {}
+  };
+  useEffect(() => {
+    onMetricsUpdate({ moqAbr: abr });
+  }, [abr]);
 
   const handleLatencyChange = (newMs: number) => {
     setTargetLatencyMs(newMs);
@@ -277,9 +303,23 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
             // Calidad. En auto no se interviene: decide @moq/watch con su propia lógica (ancho de banda que
             // estima el relay y marcas "stalled" del catálogo). Solo al fijar una a mano se pide por nombre.
             const available = player.video.source.out.available.peek();
+            // El controlador del experimento vive mientras esté elegido y la calidad esté en automático
+            const probing = abrRef.current === 'probe' && qualityRef.current === 'auto';
+            if (probing && !probeAbrRef.current) {
+              probeAbrRef.current = new MoqProbeAbr(player);
+              // Acceso desde la consola, como window.moqPlayer
+              (window as any).moqProbeAbr = probeAbrRef.current;
+            }
+            if (!probing && probeAbrRef.current) {
+              probeAbrRef.current.close();
+              probeAbrRef.current = null;
+            }
+            const probeState = probeAbrRef.current?.state ?? null;
             const wanted =
               qualityRef.current === 'auto'
-                ? undefined
+                ? probeState?.current && probeState.current in available
+                  ? probeState.current
+                  : undefined
                 : Object.keys(available).find((name) => available[name].codedHeight === qualityRef.current);
             if (targetSignal.peek()?.name !== wanted) targetSignal.set(wanted ? { name: wanted } : undefined);
             const estimate = connection.probe.peek()?.estimatedRecvRate;
@@ -316,6 +356,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
               // Tasa de recepción que estima el relay con su control de congestión (mensajes PROBE)
               bandwidthEstimateKbps: estimate ? Math.round(estimate / 1000) : null,
               qualityMode: qualityRef.current === 'auto' ? 'auto' : 'manual',
+              probing: probeState ? probeState.probing : null,
+              probeCapacityKbps: probeState ? probeState.capacityKbps : null,
               status: 'playing',
             });
           } catch (_) {}
@@ -339,6 +381,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
       clearTimeout(retryTimer);
       clearInterval(metricsInterval);
       clearInterval(watchdog);
+      probeAbrRef.current?.close();
+      probeAbrRef.current = null;
       tracer?.close();
       bufferMeter?.close();
       if (playerRef.current) {
@@ -433,6 +477,20 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
 
       <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between font-mono">
         <span>Relay: {url}/live.hang</span>
+        <label
+          className="flex items-center space-x-1.5"
+          title="Experimento, no el comportamiento de @moq/watch. Librería: decide @moq/watch (la estimación del relay y su regla del 80 %). Sondeo: decide un controlador del banco que, a ratos, pide la calidad siguiente con la prioridad mínima y sube si cabe en lo que reciben las dos; baja si la actual deja de llegar a su ritmo (README 6.3). Solo actúa con Calidad en Auto. Se recuerda en este navegador."
+        >
+          <span>ABR:</span>
+          <select
+            value={abr}
+            onChange={(e) => handleAbrChange(e.target.value as MoqAbr)}
+            className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-emerald-500"
+          >
+            <option value="watch">Librería</option>
+            <option value="probe">Sondeo</option>
+          </select>
+        </label>
         <label
           className="flex items-center space-x-1.5"
           title="Experimento, no el comportamiento de @moq/watch: qué hacer al bajar de calidad. Se recuerda en este navegador. Sin corte: el original, sigue descargando la calidad anterior hasta que la nueva la alcanza. Cancelar: deja de descargar la anterior al momento y congela su última imagen hasta que la nueva la alcanza. Prioridad: sin corte, pero la nueva calidad se pide con más prioridad que la anterior. Subir de calidad es siempre sin corte. Se aplica al siguiente cambio, sin reconectar."

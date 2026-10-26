@@ -803,6 +803,46 @@ Con la bajada limitada a 6 Mbit/s, MoQ se ve casi siempre en 1080p pero con tiro
 
 Son una o dos pasadas por caso: la variación entre pasadas es grande.
 
+### 6.3. Experimento: adaptación de MoQ con sondeo por prioridad
+
+**No es el comportamiento de `@moq/watch`**: es un algoritmo de adaptación nuestro, declarado y desactivado por defecto (selector **ABR** del panel de MoQ: *Librería*, el de `@moq/watch`, o *Sondeo*). Sirve para comparar la estimación del relay (`cwnd / RTT`, sección 6 y PROTOCOLOS 4.10) con una medida que no depende de ella, en la línea de lo que sugiere MOQT (`draft-ietf-moq-transport-22`, 14.1.2): pedir la calidad alternativa con prioridad baja para sondear.
+
+**Cómo funciona** (`web/src/lib/moqProbe.ts`; no toca `@moq/watch`: le pide la calidad por `target.name`):
+
+- **Calidad actual y calidad de sondeo.** La actual va con la prioridad de vídeo de siempre. A ratos (sondeos de 4 s; cada 6 s al principio, con espera que se duplica hasta 32 s tras un sondeo fallido o una bajada) se suscribe además la siguiente con la prioridad mínima (0), sin decodificarla: solo se cuentan sus bytes y frames.
+- **Capacidad.** El relay solo le da a la de sondeo lo que sobra, así que, mientras se queda atrás, su caudal recibido es la capacidad libre: `capacidad ≈ lo que recibe la actual + lo que recibe la de sondeo`, en los 2 últimos segundos del sondeo (sin el primero). Mientras se sondea siempre hay datos pendientes: el envío lo limita la red y no hay tiempos muertos que falseen la medida, a diferencia de dash.js y de la estimación del relay.
+- **Bitrate real de la calidad siguiente.** No el del catálogo, que es el pico retenido (~1,85 veces el nominal): bytes por frame × cadencia, solo con los grupos que llegan enteros y con al menos dos (un principio de grupo empieza por el keyframe y lo inflaría). Para que lleguen enteros, la suscripción de sondeo tolera 10 s de retraso.
+- **Subir** si `0,8 × capacidad ≥ bitrate real de la siguiente` (el mismo 80 % que aplica `@moq/watch`). Tras subir, se sondea la siguiente a los 5 s.
+- **Bajar** si la actual recibe menos del 90 % de su cadencia en frames por segundo (ventana de 2 s). Si eso pasa durante un sondeo, se corta el sondeo en vez de bajar.
+- **Relevo.** Tras cada cambio no se decide nada hasta que se pinta la calidad pedida (mínimo 3 s, máximo 10 s). Arranca en la calidad más baja.
+- Funciona con cualquier opción de **Cambio** (6.1); con *Sin corte*, las bajadas pueden no completarse con el enlace lleno, así que se mide con *Prioridad*.
+
+En el panel aparece la capacidad estimada en el último sondeo; en el CSV, `moq_abr` (`watch` o `probe`), `moq_probing` y `moq_probe_capacity_kbps`. El controlador queda en `window.moqProbeAbr` para inspeccionarlo.
+
+**Medido el 26-10-2026 en local.** Escalera 1080p@4000 / 720p@2000 / 360p@700, MoQ solo, un Chrome headless nuevo por pasada sin otro tráfico en la cola, variantes fijadas antes de cargar, dos rondas en orden alterno de 60 s (medidas desde unos 10 s tras cargar). *Librería + Sin corte* es el comportamiento de serie; *Librería + Prioridad*, el experimento de 6.1; *Sondeo + Prioridad*, este.
+
+| Bajada | Variante | Calidad pintada (s de 60) | Latencia g2g mediana | Congelados | Descartes en la cola | Capacidad estimada por el sondeo |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 2 Mbit/s | Librería + Sin corte | 1080p todo el tiempo | 1,17 y 0,78 s | 52,5 y 50,1 s | 0 | — |
+| 2 Mbit/s | Librería + Prioridad | 360p todo el tiempo | 226 y 124 ms | 0,2 y 0,2 s | 0 | — |
+| 2 Mbit/s | Sondeo + Prioridad | 360p (53 y 60), 720p (7 y 0) | 253 y 212 ms | 1,2 y 0 s | 9 y 19 | 0,84-1,88 Mbit/s |
+| 5 Mbit/s | Librería + Sin corte | 720p (48 y 47), 1080p (11 y 13) | 259 y 454 ms | 2,5 y 6,6 s | 0 | — |
+| 5 Mbit/s | Librería + Prioridad | 720p todo el tiempo | 252 y 233 ms | 0,4 y 0,2 s | 0 | — |
+| 5 Mbit/s | Sondeo + Prioridad | 720p (25 y 34), 360p (31 y 12), 1080p (4 y 14) | 178 y 221 ms | 0,6 y 0 s | 45 y 33 | 4,56-4,91 Mbit/s |
+| 10 Mbit/s | Librería + Sin corte | 1080p todo el tiempo | 105 y 229 ms | 0 y 0 s | 0 y 20 | — |
+| 10 Mbit/s | Librería + Prioridad | 1080p todo el tiempo | 128 y 277 ms | 0 y 0,3 s | 41 y 4 | — |
+| 10 Mbit/s | Sondeo + Prioridad | 720p (39 y 39), 1080p (21 y 21) | 233 y 252 ms | 0,4 y 0,8 s | 530 y 546 | 8,85-9,81 Mbit/s (y 2,5-3,6 en el primer sondeo) |
+| Sin límite | Librería + Sin corte | 1080p todo el tiempo | 51 y 50 ms | 0 | 0 | — |
+| Sin límite | Librería + Prioridad | 1080p todo el tiempo | 52 y 53 ms | 0 | 0 | — |
+| Sin límite | Sondeo + Prioridad | 1080p (53 y 37), 720p (7 y 23) | 48 y 43 ms | 0 | 0 | 3,2-5,9 Mbit/s |
+
+- **La medida de capacidad funciona.** Con el enlace limitado, el sondeo estima entre el 85 y el 98 % de la tasa real (4,6-4,9 Mbit/s con 5; 8,9-9,8 con 10), sin el inflado de la estimación del relay (8-14 Mbit/s con 5, sección 6). Sin límite no hay capacidad que medir: la de sondeo se pone al día y lo recibido es solo el bitrate de las dos calidades.
+- **Como algoritmo de adaptación no mejora a `@moq/watch` con el cambio Prioridad** en estas condiciones estáticas. Con 2 Mbit/s empatan (360p, sin congelados apreciables). Con 5 Mbit/s el sondeo oscila: 1080p@4000 queda justo en el límite (capacidad × 0,8 ≈ 3,7-3,9 Mbit/s frente a un bitrate real de 3,8-4), sube por la variación entre grupos, no aguanta, baja, y alguna bajada encadenada lo deja en 360p hasta 31 s; la librería se queda quieta en 720p. Con 10 Mbit/s y sin límite pierde por el arranque: empieza en la calidad más baja y tarda 7-39 s en llegar a 1080p, que la librería elige desde el principio.
+- **El sondeo tiene un coste en la red**: con 10 Mbit/s la cola descartó 530-546 paquetes por minuto (frente a 4-41 sin sondeo), porque durante el sondeo el relay llena el enlace. No llegó a congelar la imagen más de 0,8 s por minuto, pero confirma que la prioridad solo protege a la calidad actual en el relay, no en la cola del cuello de botella.
+- Lo que sí da buen resultado en todas las condiciones es el cambio *Prioridad* de 6.1, que no cambia qué calidad se elige, solo cómo se hace el relevo al bajar.
+
+Son dos pasadas por caso, con la red fija; el sondeo podría compararse mejor con perfiles que cambian en el tiempo, que el banco aún no tiene. Los parámetros (margen, duración e intervalo de los sondeos, arranque en la calidad más baja) son una primera elección, no están ajustados.
+
 ## 7. Recuperación automática
 
 La plataforma se recupera sola de reinicios y caídas, sin recargar la pestaña:
@@ -845,6 +885,7 @@ Desde el panel de control:
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |
 | Fragmento CMAF | 100 (por defecto), 200, 500, 1000 ms | `-frag_duration`; unidad de entrega chunked |
 | Latencia objetivo DASH | 0,05 a 6,0 s (0,3 s al abrir) | `liveDelay` de dash.js, con catch-up LoL+ |
+| ABR MoQ (experimento) | Librería (por defecto) o Sondeo | Quién decide la calidad: `@moq/watch` o el controlador con sondeo por prioridad (sección 6.3). Solo con Calidad en Auto. Se recuerda en el navegador. En el CSV, `moq_abr`, `moq_probing` y `moq_probe_capacity_kbps` |
 | Cambio MoQ (experimento) | Sin corte (por defecto), Cancelar o Prioridad | Qué hace `@moq/watch` con la calidad anterior al bajar (sección 6.1). Solo con el parche de `web/patches/`. Se recuerda en el navegador. En el CSV, `moq_switching` |
 | ABR DASH | Por defecto (al abrir), L2A o LoL+ | Reglas de adaptación de dash.js en Auto: las de fábrica, o una de sus reglas de baja latencia en solitario (sección 6). Cambiarlo recrea el reproductor. En el CSV, `dash_abr` |
 | Umbral de búfer vacío DASH | 0 a 1 s, por defecto 0,3 s (el de fábrica) | `buffer.stallThreshold` y `lowLatencyStallThreshold` de dash.js: por debajo, declara el búfer vacío, fuerza la calidad más baja y la corrección de latencia lo da por parado. No detiene el vídeo. En el CSV, `dash_stall_threshold_s` |
