@@ -72,6 +72,16 @@ function sweep(param: SweepParam, values: number[], baseRttMs: number, queueMs: 
   });
 }
 
+// Columnas de la tabla de condiciones, en el orden de cada sentido
+const LINK_COLUMNS: { key: keyof LinkProfile; label: string; unit: string; hint: string }[] = [
+  { key: 'rate_kbit', label: 'Ancho de banda', unit: 'kbit/s', hint: 'Vacío = sin límite' },
+  { key: 'delay_ms', label: 'Retardo', unit: 'ms', hint: 'En este sentido; el RTT es la suma de los dos' },
+  { key: 'jitter_ms', label: 'Jitter', unit: 'ms', hint: 'Variación del retardo; no puede superarlo y desordena paquetes' },
+  { key: 'loss_pct', label: 'Pérdida', unit: '%', hint: 'Aleatoria e independiente por paquete' },
+  { key: 'queue_ms', label: 'Cola', unit: 'ms', hint: 'Búfer del cuello de botella; solo actúa con ancho de banda limitado' },
+];
+const DIRECTION_LABEL = { down: 'Bajada (servidor → navegador)', up: 'Subida (navegador → servidor)' };
+
 const numbers = (text: string) =>
   text
     .split(/[,;\s]+/)
@@ -317,15 +327,28 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
         {networks.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead className="text-[10px] text-slate-500 uppercase">
+              <thead className="text-[11px] text-slate-400">
                 <tr>
-                  <th className="py-1 pr-2 font-medium">Nombre</th>
+                  <th rowSpan={2} className="py-1 pr-2 font-medium align-bottom">Nombre</th>
                   {(['down', 'up'] as const).map((d) => (
-                    <th key={d} className="py-1 pr-2 font-medium" colSpan={5}>
-                      {d === 'down' ? 'Bajada (servidor → navegador)' : 'Subida'}: kbit/s · retardo · jitter · pérdida % · cola
+                    <th key={d} colSpan={LINK_COLUMNS.length} className={`py-1 px-2 font-semibold text-slate-300 text-center border-b border-slate-700 ${d === 'up' ? 'border-l' : ''}`}>
+                      {DIRECTION_LABEL[d]}
                     </th>
                   ))}
-                  <th />
+                  <th rowSpan={2} />
+                </tr>
+                <tr>
+                  {(['down', 'up'] as const).map((d) =>
+                    LINK_COLUMNS.map((c, j) => (
+                      <th
+                        key={`${d}-${c.key}`}
+                        title={c.hint}
+                        className={`pt-1 pb-1.5 font-medium whitespace-nowrap ${d === 'up' && j === 0 ? 'border-l border-slate-700 pl-2' : 'pl-0'} pr-1`}
+                      >
+                        {c.label} <span className="text-slate-500 font-normal">({c.unit})</span>
+                      </th>
+                    )),
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -333,16 +356,16 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
                   <tr key={i} className="border-t border-slate-800/60">
                     <td className="py-1 pr-2">
                       <input
-                        className={`${input} w-40`}
+                        className={`${input} w-48`}
                         value={n.label}
                         onChange={(e) => setNetworks((all) => all.map((m, j) => (j === i ? { ...m, label: e.target.value } : m)))}
                       />
                     </td>
                     {(['down', 'up'] as const).map((d) =>
-                      (['rate_kbit', 'delay_ms', 'jitter_ms', 'loss_pct', 'queue_ms'] as const).map((k) => (
-                        <td key={`${d}-${k}`} className="py-1 pr-1">
+                      LINK_COLUMNS.map(({ key: k }, j) => (
+                        <td key={`${d}-${k}`} className={`py-1 pr-1 ${d === 'up' && j === 0 ? 'border-l border-slate-700 pl-2' : ''}`}>
                           <input
-                            className={`${input} w-16`}
+                            className={`${input} w-24`}
                             type="number"
                             min={0}
                             step={k === 'loss_pct' ? 0.1 : 1}
