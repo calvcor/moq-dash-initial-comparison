@@ -149,7 +149,7 @@ class Campaigns:
         # mounted_at_ms: cuándo creó el trabajador los reproductores de la prueba montada, en reloj del servidor
         self.worker = {"id": None, "seen": 0.0, "mounted": None, "mounted_at_ms": None, "info": {}}
         # Los pone main.py
-        self.apply_stream: Callable[[dict], None] = lambda config: None
+        self.apply_stream: Callable[..., None] = lambda config, restart=False: None
         self.apply_network: Callable[[dict], None] = lambda profile: None
         self.stop_stream: Callable[[], None] = lambda: None
         self.snapshot: Callable[[], dict] = lambda: {}
@@ -228,8 +228,16 @@ class Campaigns:
         plan = campaign["plan"]
         pending = [r for r in campaign["runs"] if r["state"] == "pending"]
         per_run = plan["warmup_s"] + plan["measure_s"] + OVERHEAD_S + UPLOAD_GRACE_S
-        restarts = len({r["stream"] for r in pending})
+        restarts = len(pending) if self.restarts_each_run(plan) else len({r["stream"] for r in pending})
         return len(pending) * per_run + restarts * plan["stream_settle_s"]
+
+    @staticmethod
+    def restarts_each_run(plan: dict, stream: Optional[int] = None) -> bool:
+        """Contenido igual en cada prueba: la fuente se reinicia antes de cada una. Con la cámara no aplica."""
+        if plan.get("content", "continuous") != "restart":
+            return False
+        streams = plan["streams"] if stream is None else [plan["streams"][stream]]
+        return any(s.get("source", "file") == "file" for s in streams)
 
     def create(self, plan: dict) -> dict:
         with self.lock:
@@ -532,9 +540,11 @@ class Campaigns:
             try:
                 stream = plan["streams"][run["stream"]]
                 snap = self.snapshot()
-                if applied_stream != run["stream"] or not snap.get("running"):
-                    self.log(campaign, f"Emisión {run['stream'] + 1} de {len(plan['streams'])}")
-                    self.apply_stream(stream)
+                restart = self.restarts_each_run(plan, run["stream"])
+                if restart or applied_stream != run["stream"] or not snap.get("running"):
+                    if applied_stream != run["stream"]:
+                        self.log(campaign, f"Emisión {run['stream'] + 1} de {len(plan['streams'])}")
+                    self.apply_stream(stream, restart=restart)
                     applied_stream = run["stream"]
                     if not self.wait(plan["stream_settle_s"], campaign):
                         self.requeue(campaign, run)
@@ -552,6 +562,8 @@ class Campaigns:
                 self.requeue(campaign, run)
                 break
             before = self.snapshot()
+            with self.lock:
+                run["source_started_ms"] = before.get("source_started_ms")
 
             # 2. El trabajador monta reproductores nuevos y avisa
             with self.lock:
@@ -687,6 +699,7 @@ class Campaigns:
             "network_label": network["label"], "target_label": target["label"],
             "players_run": "|".join(run["players"]),
             "quality": plan["quality"],
+            "content": plan.get("content", "continuous"),
             # Ajustes de los reproductores de la campaña (también en cada fila de samples.csv)
             **(plan.get("player_options") or {}),
             "invalid_reasons": "; ".join(run["invalid_reasons"]),
@@ -706,6 +719,40 @@ class Campaigns:
                 row = {**base, "player": player, "server_restarts": summary["server"]["restarts"],
                        "ingest_anomalies": summary["server"]["ingest_anomalies"], **values}
                 f.write(json.dumps(row) + "\n")
+
+    # Columnas de cada reproductor que se devuelven en las series (las mismas del CSV de muestras)
+    SERIES_FIELDS = ("g2g_ms", "kbps", "height", "stall_ms", "frametime_p95_ms")
+
+    def series(self, cid: str, ids: list[str]) -> dict:
+        """Por prueba, sus filas del último intento (calentamiento y medida) con el tiempo relativo.
+
+        t_s: segundos desde que arrancó la fuente si la prueba la reinició (el segundo del vídeo, el mismo en
+        todas), o desde el inicio de la medida si no (en el calentamiento, negativo)."""
+        campaign = self.campaigns[cid]
+        runs = {r["id"]: r for r in campaign["runs"] if r["id"] in ids}
+        out = {rid: {"aligned": "measure", "rows": []} for rid in runs}
+        try:
+            with open(self.path(cid, "samples.jsonl")) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    run = runs.get(row.get("run_id"))
+                    if run is None or row.get("run_started_ms") != run["started_ms"]:
+                        continue
+                    restarted = self.restarts_each_run(campaign["plan"], run["stream"]) and run.get("source_started_ms")
+                    zero = run["source_started_ms"] if restarted else run["measure_start_ms"]
+                    if zero is None:
+                        continue
+                    out[run["id"]]["aligned"] = "source" if restarted else "measure"
+                    point = {"t_s": round((row["t_server_ms"] - zero) / 1000, 1), "phase": row["phase"]}
+                    for p in run["players"]:
+                        for field in self.SERIES_FIELDS:
+                            point[f"{p}_{field}"] = row.get(f"{p}_{field}")
+                    out[run["id"]]["rows"].append(point)
+        except OSError:
+            pass
+        return out
 
     def export_csv(self, cid: str, name: str) -> str:
         """runs.jsonl o samples.jsonl en CSV, con la unión de todas las columnas en orden de aparición."""

@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import type { Campaign, CampaignRun, PlayerId } from '../types';
+import { CampaignSeries } from './CampaignSeries';
 
 ChartJS.register(CategoryScale, LinearScale, LogarithmicScale, PointElement, LineElement, Tooltip, Legend);
 
@@ -240,6 +241,8 @@ export const CampaignResults: React.FC<{ campaign: Campaign }> = ({ campaign }) 
           </Panel>
         )}
       </div>
+
+      <CampaignSeries campaign={campaign} runs={[...tests, ...controls]} />
     </div>
   );
 };

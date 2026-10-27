@@ -204,6 +204,10 @@ class CampaignRequest(BaseModel):
     # Una prueba de control (sin restricción de red) cada tantas; 0 = ninguna
     control_every: int = Field(10, ge=0, le=1000)
     max_attempts: int = Field(2, ge=1, le=5)
+    # continuous: la fuente sigue emitiendo entre pruebas y cada una ve el tramo del bucle que toque; restart:
+    # se reinicia antes de cada prueba y todas ven el vídeo desde el principio (con la cámara no hay contenido
+    # que repetir y se emite de continuo)
+    content: Literal["continuous", "restart"] = "continuous"
     # Margen tras reiniciar la emisión antes de montar los reproductores
     stream_settle_s: float = Field(15, ge=0, le=120)
     seed: Optional[int] = None
@@ -771,13 +775,14 @@ def post_start(config: Optional[StreamConfig] = None):
     campaign_guard()
     return start_pipeline(config)
 
-def start_pipeline(config: Optional[StreamConfig] = None):
+def start_pipeline(config: Optional[StreamConfig] = None, restart_source: bool = False):
+    """restart_source reinicia la fuente aunque la configuración no cambie (el vídeo vuelve al principio)."""
     global current_config, desired_running
     wanted = config.source if config else current_config.source
     if wanted == "file" and source.state["state"] != "ready":
         raise HTTPException(status_code=409, detail="El vídeo fuente todavía se está descargando")
     with lifecycle:
-        need_restart_master = False
+        need_restart_master = restart_source
         if config:
             if (config.renditions != current_config.renditions or config.gop_size != current_config.gop_size
                     or config.source != current_config.source):
@@ -1053,6 +1058,13 @@ def export_campaign(cid: str, name: Literal["runs", "samples"]):
         headers={"Content-Disposition": f'attachment; filename="campaign-{cid}-{name}.csv"'},
     )
 
+@app.get("/api/campaigns/{cid}/series")
+def campaign_series(cid: str, runs: str):
+    """Filas segundo a segundo de las pruebas pedidas (ids separados por comas), para compararlas en una gráfica."""
+    campaign_or_404(cid)
+    ids = [r for r in runs.split(",") if r][:20]
+    return campaigns.series(cid, ids)
+
 class WorkerBeat(BaseModel):
     """Latido del trabajador de campañas: quién es y qué prueba tiene montada (None si ninguna)."""
     worker_id: str = Field(..., min_length=1, max_length=80)
@@ -1074,6 +1086,9 @@ def campaign_snapshot() -> dict:
         "config": current_config.model_dump(),
         "network": (network or {}).get("profile"),
         "restarts": dict(restarts),
+        # Cuándo arrancó la fuente: con la emisión reiniciada en cada prueba, el segundo del vídeo es la hora
+        # menos esto (más el arranque de FFmpeg, igual en todas)
+        "source_started_ms": int(master_start_time * 1000) if alive("master_source") else None,
         "anomalies": {name: count_anomalies(name) for name in log_state},
         "versions": dict(versions.installed),
     }
@@ -1145,7 +1160,7 @@ def on_startup():
         resume=lambda config: start_pipeline(StreamConfig(**config)),
     )
     versions.start()
-    campaigns.apply_stream = lambda config: start_pipeline(StreamConfig(**config))
+    campaigns.apply_stream = lambda config, restart=False: start_pipeline(StreamConfig(**config), restart_source=restart)
     campaigns.apply_network = lambda profile: set_network(NetworkProfile(**profile))
     campaigns.stop_stream = stop_pipeline
     campaigns.snapshot = campaign_snapshot

@@ -44,7 +44,7 @@ function optionsText(plan: Campaign['plan']): string {
     parts.push(`DASH: ABR ${ABR_LABEL[o.dash_abr]}, salto al directo ${o.dash_max_drift_s ? `${o.dash_max_drift_s} s` : 'nunca'}, búfer mínimo ${o.dash_playback_buffer_min_s} s`);
   if (plan.players.includes('moq')) parts.push(`MoQ: adaptación ${ABR_LABEL[o.moq_abr]}, cambio ${SWITCHING_LABEL[o.moq_switching]}`);
   if (plan.players.includes('rtc')) parts.push('WebRTC');
-  return `${parts.join(' · ')} · ${plan.player_mode === 'each' ? 'de uno en uno' : 'a la vez'} · calidad ${plan.quality ? `${plan.quality}p` : 'auto'}`;
+  return `${parts.join(' · ')} · ${plan.player_mode === 'each' ? 'de uno en uno' : 'a la vez'} · calidad ${plan.quality ? `${plan.quality}p` : 'auto'} · contenido ${plan.content === 'restart' ? 'desde el principio en cada prueba' : 'continuo'}`;
 }
 
 const fmt = (v: number | null | undefined, digits = 0) => (v === null || v === undefined ? '--' : v.toFixed(digits));
@@ -385,7 +385,7 @@ export const CampaignPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
-      <div className="max-w-[1800px] mx-auto space-y-4">
+      <div className="w-full space-y-4">
         <header className="flex flex-wrap items-center gap-4 pb-4 border-b border-slate-800">
           <a href="/" className="text-slate-400 hover:text-white flex items-center gap-1 text-xs">
             <ArrowLeft className="w-4 h-4" /> Dashboard

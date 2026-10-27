@@ -326,6 +326,8 @@ export interface CampaignPlan {
   measure_s: number;
   control_every: number;
   max_attempts: number;
+  // continuous: la fuente sigue entre pruebas; restart: se reinicia antes de cada una (mismo tramo del vídeo)
+  content?: 'continuous' | 'restart';
   stream_settle_s: number;
   seed: number | null;
 }

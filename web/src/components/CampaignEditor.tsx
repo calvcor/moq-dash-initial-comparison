@@ -155,6 +155,7 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, initial, editId
   const [controlEvery, setControlEvery] = useState(initial?.control_every ?? 10);
   const [maxAttempts, setMaxAttempts] = useState(initial?.max_attempts ?? 2);
   const [settle, setSettle] = useState(initial?.stream_settle_s ?? 15);
+  const [content, setContent] = useState<'continuous' | 'restart'>(initial?.content ?? 'continuous');
   // Al duplicar, sorteo nuevo (la semilla vacía la elige el servidor); al editar, la misma
   const [seed, setSeed] = useState(editId && initial?.seed != null ? String(initial.seed) : '');
   const [error, setError] = useState<string | null>(null);
@@ -167,7 +168,9 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, initial, editId
   const groups = playerMode === 'together' ? 1 : players.length;
   const tests = streams.length * repetitions * networks.length * (targets?.length ?? 0) * groups;
   const controls = controlEvery ? Math.ceil(tests / controlEvery) * groups : 0;
-  const etaS = (tests + controls) * (warmup + measure + RUN_OVERHEAD_S) + streams.length * settle;
+  // Con la cámara no se reinicia por prueba: no hay contenido que repetir
+  const restartEachRun = content === 'restart' && streams.some((s) => s.source === 'file');
+  const etaS = (tests + controls) * (warmup + measure + RUN_OVERHEAD_S) + (restartEachRun ? tests + controls : streams.length) * settle;
 
   const setStream = (i: number, patch: Partial<Stream>) => setStreams((all) => all.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const setLadder = (i: number, text: string) => {
@@ -199,6 +202,7 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, initial, editId
       measure_s: measure,
       control_every: controlEvery,
       max_attempts: maxAttempts,
+      content,
       stream_settle_s: settle,
       seed: seed.trim() === '' ? null : Number(seed),
     };
@@ -316,7 +320,20 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, initial, editId
       {/* Emisiones */}
       <section className="space-y-2">
         <h3 className="font-semibold text-slate-200">Emisión</h3>
-        <p className="text-slate-500">Cada emisión es un bloque: la fuente solo se reinicia al pasar de una a otra.</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            <span className={label}>Contenido</span>
+            <select className={input} value={content} onChange={(e) => setContent(e.target.value as 'continuous' | 'restart')}>
+              <option value="continuous">Continuo: cada prueba sigue donde acabó la anterior</option>
+              <option value="restart">El mismo en cada prueba: la fuente se reinicia antes de cada una</option>
+            </select>
+          </label>
+        </div>
+        <p className="text-slate-500">
+          {content === 'restart'
+            ? `Cada prueba ve el vídeo desde el principio, con el margen tras reiniciar (${settle} s) más en cada una. El instante exacto en que empieza a medir varía unos segundos con lo que tarde el montaje. Con la cámara no hay contenido que repetir y se emite de continuo.`
+            : 'Cada emisión es un bloque: la fuente solo se reinicia al pasar de una a otra, y cada prueba ve el tramo del bucle que le toque.'}
+        </p>
         {streams.map((s, i) => (
           <div key={i} className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
