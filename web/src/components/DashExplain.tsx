@@ -59,8 +59,16 @@ function latencySection({ targetLatency, maxDrift, stallThreshold, catchupMode }
       </li>
       {lolp ? (
         <li>
-          <b>Corrección (modo LoL+):</b> si el búfer baja de 0,5 s (<code>playbackBufferMin</code>), frena hasta 0,5×
-          para rellenarlo; si no, acelera o frena entre 0,5× y 1,5× según lo lejos que esté del objetivo.
+          <b>Corrección (modo LoL+):</b> si el búfer baja de 0,5 s (<code>playbackBufferMin</code>), frena para
+          rellenarlo, más cuanto menos búfer (0,77× con 0,3 s; 0,58× vacío); si no, acelera o frena entre 0,5× y 1,5×
+          según lo lejos que esté del objetivo.
+          {targetLatency < 0.5 && (
+            <>
+              {' '}
+              Con el objetivo en {s(targetLatency)} el búfer no llega a 0,5 s, así que frena casi siempre y la latencia
+              queda por encima del objetivo (deducción del código, sin medir).
+            </>
+          )}
         </li>
       ) : (
         <li>
@@ -90,7 +98,8 @@ function latencySection({ targetLatency, maxDrift, stallThreshold, catchupMode }
         )}
       </li>
       <li>
-        <b>Búfer vacío</b> (por debajo de {s(stallThreshold)}): dash.js lo anota y la corrección deja de acelerar. No baja
+        <b>Búfer vacío</b> (por debajo de {s(stallThreshold)}): dash.js lo anota
+        {lolp ? ' (la corrección no lo mira: usa los 0,5 s de arriba)' : ' y la corrección deja de acelerar'}. No baja
         la calidad (la regla que lo haría no actúa en baja latencia) ni detiene el vídeo: el vídeo se congela solo cuando
         el navegador se queda sin datos. Con un objetivo bajo, el búfer ronda este valor todo el rato y cualquier retraso
         de un fragmento lo vacía.

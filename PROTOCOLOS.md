@@ -269,20 +269,25 @@ cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
 - **`liveDelay`** (el slider "Latencia objetivo", 0,3 s al abrir la página) es esa distancia. Todo lo que hay
   entre el punto de reproducción y el directo es búfer.
 - **Catch-up** (`liveCatchup`). Si la latencia real se desvía del objetivo, `dash.js` la corrige
-  **cambiando la velocidad de reproducción**: hasta un 50 % más rápido o más lento por defecto. El
-  testbed pide el modo `liveCatchupModeLoLp`, pero **es una errata desde el primer commit**: dash.js
-  5.2.1 solo reconoce `liveCatchupModeLoLP` (con P mayúscula) y, con cualquier otro valor, aplica su
-  modo por defecto. Así que lo que se ha medido siempre es el modo por defecto, que mira solo la
-  latencia y, mientras el búfer está "vacío", no corrige (reproduce a 1×). El modo LoL+, que además
-  frena por debajo de 0,5 s de búfer, no se ha usado nunca (corregido el 27-10-2026; comprobado en el
-  reproductor con `getSettings()` y leído del código de `CatchupController`).
+  **cambiando la velocidad de reproducción**: hasta un 50 % más rápido o más lento por defecto. Aquí
+  está en modo LoL+ (`liveCatchupModeLoLP`): si el búfer baja de `playbackBufferMin` (0,5 s), frena
+  para rellenarlo, más cuanto menos búfer (0,77× con 0,3 s, 0,58× vacío); si no, corrige según la
+  latencia. Con un objetivo por debajo de 0,5 s el búfer no llega a ese mínimo y frena casi siempre:
+  la latencia queda por encima del objetivo (deducción del código, sin medir).
+
+  > **Hasta el 27-10-2026 el modo LoL+ no estuvo activo nunca.** El testbed pedía
+  > `liveCatchupModeLoLp` (p minúscula), que dash.js 5.2.1 no reconoce, y aplicaba su modo por
+  > defecto: mira solo la latencia y, mientras el búfer está "vacío" (umbral de abajo), no corrige y
+  > reproduce a 1×. Comprobado en el reproductor con `getSettings()` y leído de `CatchupController`.
+  > Todas las medidas de DASH anteriores se hicieron con el modo por defecto y **no son comparables**
+  > con las posteriores.
 - **`maxDrift`** (el slider "Salto al directo", 1,5 s por defecto aquí; 12 s es el valor por defecto
   de la librería). Si el desvío supera este umbral, deja de corregir con la velocidad y **salta**
   al directo con un *seek*. El salto aborta las descargas en curso y abre peticiones nuevas.
 - **Búfer "vacío".** Si el búfer baja de un umbral (0,3 s de fábrica; `lowLatencyStallThreshold` en
   baja latencia, `stallThreshold` fuera de ella), `dash.js` lo declara vacío. Eso **no detiene el
-  vídeo** ni baja la calidad: la corrección de latencia da la reproducción por parada (deja de
-  acelerar) y sus métricas registran un rebuffering. (Hasta el 27-10-2026 aquí se decía que la regla
+  vídeo** ni baja la calidad: sus métricas registran un rebuffering y, en el modo de corrección por
+  defecto (no en LoL+, que usa `playbackBufferMin`), la corrección deja de acelerar. (Hasta el 27-10-2026 aquí se decía que la regla
   de búfer insuficiente fuerza la calidad más baja: no es así en baja latencia, ver 3.6.) El vídeo solo se congela de verdad
   cuando el navegador se queda sin datos. (`dash.js` puede detenerlo al cruzar el umbral, pero esa
   opción, `syntheticStallEvents`, viene desactivada.) Con la latencia objetivo en 0,3 s, el búfer
@@ -435,7 +440,7 @@ testbed:
 | :--- | :--- | :--- | :--- |
 | `streaming.delay.liveDelay` | Sin fijar; lo deduce del manifiesto | Slider, 0,05 a 6 s (0,3 s al abrir) | Distancia al directo. |
 | `streaming.liveCatchup.enabled` | Automático | `true` | Activa la corrección de latencia. |
-| `streaming.liveCatchup.mode` | `liveCatchupModeDefault` | `liveCatchupModeLoLp` (errata: dash.js no lo reconoce y aplica `liveCatchupModeDefault`, ver 3.5) | Algoritmo de corrección. LoL+ (`liveCatchupModeLoLP`) miraría la latencia y también el búfer. |
+| `streaming.liveCatchup.mode` | `liveCatchupModeDefault` | `liveCatchupModeLoLP` (hasta el 27-10-2026, por una errata, el por defecto: ver 3.5) | Algoritmo de corrección. LoL+ mira la latencia y también el búfer. |
 | `streaming.liveCatchup.maxDrift` | 12 s | Slider, 0 a 10 s (1,5 s al abrir) | Desvío a partir del cual salta al directo en vez de corregir con la velocidad. |
 | `streaming.retryAttempts` | Menos | 15 para manifiesto, inicialización y segmentos | Reintentos ante un fallo de descarga. |
 | `streaming.retryIntervals` | — | 1000 ms | Espera entre reintentos. |
@@ -447,13 +452,12 @@ Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
 | Ajuste | Valor | Efecto |
 | :--- | :--- | :--- |
 | `streaming.liveCatchup.playbackRate` | −0,5 a +0,5 | Cuánto puede frenar o acelerar: entre 0,5× y 1,5×. |
-| `streaming.liveCatchup.playbackBufferMin` | 0,5 s | En modo LoL+, por debajo de este búfer la librería frena la reproducción. Sin efecto aquí: el modo efectivo es el por defecto. |
-| `streaming.buffer.stallThreshold`, `lowLatencyStallThreshold` | 0,3 s | Por debajo de este búfer lo declara vacío: la corrección de latencia lo da por parado y deja de acelerar. No baja la calidad ni detiene el vídeo. Configurable desde el panel. |
+| `streaming.liveCatchup.playbackBufferMin` | 0,5 s | En modo LoL+, por debajo de este búfer la librería frena la reproducción. |
+| `streaming.buffer.stallThreshold`, `lowLatencyStallThreshold` | 0,3 s | Por debajo de este búfer lo declara vacío y lo anota en sus métricas (en el modo de corrección por defecto, además, deja de acelerar). No baja la calidad ni detiene el vídeo. Configurable desde el panel. |
 | `streaming.utcSynchronization.enabled` | `true` | Sincronización de reloj con el servidor. |
 
-La elección del testbed que se aparta de `dash.js` de fábrica y conviene declarar es el `maxDrift` de
-1,5 s. El modo `liveCatchupModeLoLp` se pretendía como segunda, pero por la errata de 3.5 no tiene
-efecto.
+Dos de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo
+de corrección LoL+ (efectivo desde el 27-10-2026, ver 3.5) y el `maxDrift` de 1,5 s.
 
 **Lo que el testbed añade alrededor**, sin tocar la librería:
 

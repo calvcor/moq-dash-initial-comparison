@@ -7,9 +7,10 @@ import { DashTracer } from '../lib/trace';
 import { DashExplain } from './DashExplain';
 import type { DashAbr, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
 
-// Modo de corrección de latencia que se le pide a dash.js. Errata desde el primer commit: dash.js 5.2.1 solo
-// reconoce 'liveCatchupModeLoLP' (con P mayúscula), así que con este valor aplica su modo por defecto.
-const CATCHUP_MODE = 'liveCatchupModeLoLp';
+// Modo de corrección de latencia de dash.js: LoL+, que además de la latencia mira el búfer y frena por debajo
+// de playbackBufferMin (0,5 s). Hasta el 27-10-2026 aquí ponía 'liveCatchupModeLoLp', que dash.js no reconoce,
+// y se aplicaba su modo por defecto: las medidas de DASH anteriores y posteriores no son comparables.
+const CATCHUP_MODE = 'liveCatchupModeLoLP';
 
 interface DashPlayerProps {
   url: string;
@@ -47,7 +48,8 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // Desvío respecto al objetivo a partir del cual dash.js deja de corregir con la velocidad de
   // reproducción y salta al directo, abortando las descargas en curso. 0 = no saltar nunca.
   const [maxDrift, setMaxDrift] = useState<number>(1.5);
-  // Nivel de búfer por debajo del cual dash.js lo declara vacío: la corrección de latencia deja de acelerar
+  // Nivel de búfer por debajo del cual dash.js lo declara vacío: lo anota en sus métricas (en el modo de
+  // corrección por defecto, además, deja de acelerar; en LoL+ el que cuenta es playbackBufferMin, 0,5 s).
   // y se anota en sus métricas. No baja la calidad: la regla insufficientBufferRule no actúa en modo de baja
   // latencia, que es el de este MPD (availabilityTimeComplete="false"). Tampoco detiene el vídeo: eso solo
   // lo hace el navegador al quedarse sin datos. 0,3 s es el valor de fábrica.
@@ -457,7 +459,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
       {/* Umbral de búfer vacío (buffer.stallThreshold y lowLatencyStallThreshold) */}
       <div
         className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
-        title="Si el búfer baja de este nivel, dash.js lo declara vacío: la corrección de latencia deja de acelerar y se registra un rebuffering en sus métricas. No baja la calidad: la regla de búfer insuficiente no actúa en modo de baja latencia, que es el de este MPD. No detiene el vídeo: eso solo ocurre cuando el navegador se queda sin datos. Con una latencia objetivo baja el búfer ronda este valor. 0,3 s es el valor de fábrica de dash.js."
+        title="Si el búfer baja de este nivel, dash.js lo declara vacío y registra un rebuffering en sus métricas. No cambia la velocidad: la corrección de latencia (modo LoL+) frena por su cuenta cuando el búfer baja de 0,5 s. No baja la calidad: la regla de búfer insuficiente no actúa en modo de baja latencia, que es el de este MPD. No detiene el vídeo: eso solo ocurre cuando el navegador se queda sin datos. Con una latencia objetivo baja el búfer ronda este valor. 0,3 s es el valor de fábrica de dash.js."
       >
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
           <span className="text-slate-400 font-medium whitespace-nowrap">Umbral de búfer vacío:</span>
