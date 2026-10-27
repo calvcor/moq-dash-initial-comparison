@@ -427,6 +427,14 @@ export function App() {
           </div>
         )}
 
+        {serverStatus?.campaign_preview && (
+          <div className="px-4 py-3 rounded-xl border border-sky-500/40 bg-sky-950/40 text-xs text-sky-200">
+            Vista previa de la prueba <span className="font-mono">{serverStatus.campaign_preview.run}</span> abierta en la página de campañas: la red y
+            la emisión son las de esa prueba hasta que se cierre, y entonces vuelven a como estaban.{' '}
+            <a href="/campaign" className="underline hover:text-white">Ir a la campaña</a>
+          </div>
+        )}
+
         {/* Panel de Mandos */}
         <ControlPanel
           status={serverStatus}

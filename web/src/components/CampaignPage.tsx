@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Copy, Download, FlaskConical, Pause, Pencil, Play, RotateCcw, Settings2, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Download, Eye, FlaskConical, Pause, Pencil, Play, RotateCcw, Settings2, Square, Trash2, X } from 'lucide-react';
 import { CampaignEditor, DEFAULT_PLAYER_OPTIONS, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
 import { CampaignResults } from './CampaignResults';
+import { CampaignPreview, stopPreview, type Preview } from './CampaignPreview';
 import type { Campaign, CampaignPlan, CampaignRun, PlayerId, ServerStatus } from '../types';
 
 // Página de campañas de medida (/campaign; README, 4.8): editor, monitor y, en la misma pestaña o en otra
@@ -61,7 +62,7 @@ async function call(path: string, method = 'GET', payload?: unknown): Promise<an
   return body;
 }
 
-const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void }> = ({ campaign, onChanged }) => {
+const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void; onPreview: (run: CampaignRun) => void }> = ({ campaign, onChanged, onPreview }) => {
   const plan = campaign.plan;
   const runs = campaign.runs ?? [];
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +128,16 @@ const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void }> = ({ ca
                   : run.players.map((p) => PLAYER_SHORT[p]).join(' + ')}
               </td>
               <td className="py-1 pr-2 font-sans">
+                <div className="flex items-center gap-3">
+                {campaign.state !== 'running' && (
+                  <button
+                    className="flex items-center gap-1 text-sky-300 hover:text-sky-200"
+                    title="Ver en directo los reproductores con los ajustes de esta prueba, aplicando su red y su emisión. No se mide ni se graba nada; al cerrar, la red y la emisión vuelven a como estaban"
+                    onClick={() => onPreview(run)}
+                  >
+                    <Eye className="w-3 h-3" /> Ver
+                  </button>
+                )}
                 {(run.state === 'done' || run.state === 'invalid') && !repeated.has(run.id) && (
                   <button
                     className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200"
@@ -140,6 +151,7 @@ const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void }> = ({ ca
                     <RotateCcw className="w-3 h-3" /> Repetir
                   </button>
                 )}
+                </div>
               </td>
             </tr>
           ))}
@@ -158,7 +170,8 @@ const Monitor: React.FC<{
   onChanged: () => void;
   onDeleted: () => void;
   onEdit: (mode: EditorMode) => void;
-}> = ({ campaign, lean, onChanged, onDeleted, onEdit }) => {
+  onPreview: (run: CampaignRun) => void;
+}> = ({ campaign, lean, onChanged, onDeleted, onEdit, onPreview }) => {
   const [error, setError] = useState<string | null>(null);
   const [showRuns, setShowRuns] = useState(!lean);
   // Con el trabajador en esta pestaña, las gráficas van plegadas: no se dibujan mientras mide
@@ -346,7 +359,7 @@ const Monitor: React.FC<{
       <button className="text-indigo-300 hover:text-indigo-200" onClick={() => setShowRuns((v) => !v)}>
         {showRuns ? 'Ocultar las pruebas ▴' : 'Ver las pruebas ▾'}
       </button>
-      {showRuns && <RunsTable campaign={campaign} onChanged={onChanged} />}
+      {showRuns && <RunsTable campaign={campaign} onChanged={onChanged} onPreview={onPreview} />}
 
       <button className="block text-indigo-300 hover:text-indigo-200" onClick={() => setShowResults((v) => !v)}>
         {showResults ? 'Ocultar los resultados ▴' : 'Ver los resultados ▾'}
@@ -361,6 +374,20 @@ export const CampaignPage: React.FC = () => {
   const [list, setList] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Campaign | null>(null);
+  // Vista previa de una prueba: el servidor aplica su red y su emisión y aquí se montan sus reproductores
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const openPreview = async (run: CampaignRun) => {
+    if (!selected) return;
+    try {
+      const body = await call(`/api/campaigns/${selected.id}/runs/${run.id}/preview`, 'POST');
+      setPreview({ ...body, settle_s: selected.plan.stream_settle_s });
+      setPreviewError(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      setPreviewError((e as Error).message);
+    }
+  };
   // Editor abierto (y con qué plan); null, el monitor
   const [editor, setEditor] = useState<EditorMode | null>(null);
   const editing = editor !== null;
@@ -447,6 +474,17 @@ export const CampaignPage: React.FC = () => {
 
         {worker && <CampaignWorker />}
 
+        {preview && (
+          <CampaignPreview
+            preview={preview}
+            onClose={() => {
+              stopPreview();
+              setPreview(null);
+            }}
+          />
+        )}
+        {previewError && <p className="text-xs text-rose-400">Vista previa: {previewError}</p>}
+
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-slate-400">Campañas:</span>
           {list.map((c) => (
@@ -487,6 +525,7 @@ export const CampaignPage: React.FC = () => {
             lean={worker}
             onChanged={refresh}
             onEdit={setEditor}
+            onPreview={openPreview}
             onDeleted={() => {
               setSelectedId(null);
               refresh();

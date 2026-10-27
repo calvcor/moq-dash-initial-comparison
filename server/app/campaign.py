@@ -148,6 +148,8 @@ class Campaigns:
         self.rows: dict[str, list[dict]] = {}
         # mounted_at_ms: cuándo creó el trabajador los reproductores de la prueba montada, en reloj del servidor
         self.worker = {"id": None, "seen": 0.0, "mounted": None, "mounted_at_ms": None, "info": {}}
+        # Vista previa de una prueba (preview): su red y su emisión aplicadas, y cómo estaba todo antes
+        self.preview: Optional[dict] = None
         # Los pone main.py
         self.apply_stream: Callable[..., None] = lambda config, restart=False: None
         self.apply_network: Callable[[dict], None] = lambda profile: None
@@ -331,6 +333,8 @@ class Campaigns:
                 raise RuntimeError(f"Ya hay otra campaña en marcha ({self.active})")
             if campaign["state"] not in ("ready", "paused"):
                 raise RuntimeError(f"La campaña está {campaign['state']}")
+            # Antes de anotar lo que habrá que restaurar, se deshace la vista previa que hubiera
+            self.stop_preview()
             # reopened: una campaña terminada o cancelada a la que se le ha pedido repetir una prueba; lo de
             # entonces ya se restauró y puede haber cambiado
             if campaign["restore"] is None or campaign.pop("reopened", False):
@@ -417,20 +421,87 @@ class Campaigns:
         phase = run["state"]
         out = {"campaign": campaign["id"], "run": run["id"], "phase": phase}
         if phase in ("mounting", "warmup", "measuring", "closing"):
-            target = plan["targets"][run["target"]]
-            out.update(
-                players=run["players"],
-                targets={p: target.get(f"{p}_ms") for p in PLAYERS},
-                target_label=target["label"],
-                network_label="control (sin restricción)" if run["network"] is None else plan["networks"][run["network"]]["label"],
-                quality=plan["quality"],
-                # Las campañas anteriores a estas opciones no las tienen: el trabajador usa entonces sus valores por defecto
-                options=plan.get("player_options") or {},
-                kind=run["kind"],
-                rep=run["rep"],
-                ends_ms=self.phase_end_ms(run, plan),
-            )
+            out.update(self.run_settings(plan, run), ends_ms=self.phase_end_ms(run, plan))
         return out
+
+    @staticmethod
+    def run_settings(plan: dict, run: dict) -> dict:
+        """Lo que necesitan los reproductores de una prueba (el trabajador y la vista previa)."""
+        target = plan["targets"][run["target"]]
+        return dict(
+            players=run["players"],
+            targets={p: target.get(f"{p}_ms") for p in PLAYERS},
+            target_label=target["label"],
+            network_label="control (sin restricción)" if run["network"] is None else plan["networks"][run["network"]]["label"],
+            quality=plan["quality"],
+            # Las campañas anteriores a estas opciones no las tienen: el trabajador usa entonces sus valores por defecto
+            options=plan.get("player_options") or {},
+            kind=run["kind"],
+            rep=run["rep"],
+        )
+
+    # --- vista previa ---
+
+    @staticmethod
+    def same_stream(stream: Optional[dict], config: Optional[dict]) -> bool:
+        """La emisión ya es esa (la cadencia no cuenta: con la cámara la fija el servidor)."""
+        if not stream or not config:
+            return False
+        ladder = lambda c: [(r["height"], r["bitrate_kbps"]) for r in c.get("renditions") or []]
+        return ladder(stream) == ladder(config) and all(
+            config.get(k) == v for k, v in stream.items() if k not in ("fps", "renditions"))
+
+    def start_preview(self, cid: str, run_id: str) -> dict:
+        """Aplica la red y la emisión de una prueba para verla en directo, sin medir ni grabar nada.
+
+        Lo que había antes se guarda (el de la primera vista previa si se encadenan) y stop_preview lo
+        restaura. La emisión solo se toca si es distinta: reaplicarla reinicia los empaquetadores."""
+        with self.lock:
+            if self.active and self.campaigns[self.active]["state"] == "running":
+                raise RuntimeError("Hay una campaña en marcha: la vista previa cambiaría su red y su emisión")
+            campaign = self.campaigns[cid]
+            run = self.find_run(campaign, run_id)
+            if run is None:
+                raise KeyError(run_id)
+            plan = campaign["plan"]
+            previous = self.preview
+        snap = self.snapshot()
+        restore = previous["restore"] if previous else {
+            "running": snap.get("running"), "config": snap.get("config"), "network": snap.get("network")}
+        stream = plan["streams"][run["stream"]]
+        changed = not snap.get("running") or not self.same_stream(stream, snap.get("config"))
+        if changed:
+            self.apply_stream(stream)
+        self.apply_network(UNRESTRICTED if run["network"] is None else plan["networks"][run["network"]]["profile"])
+        with self.lock:
+            self.preview = {"campaign": cid, "run": run_id, "started_ms": int(time.time() * 1000), "restore": restore}
+        logger.info(f"Campañas: vista previa de {cid}/{run_id}")
+        return {"campaign": cid, "run": run_id, "phase": "preview", "stream_changed": changed, **self.run_settings(plan, run)}
+
+    def stop_preview(self) -> bool:
+        """Deshace la vista previa: la red y la emisión vuelven a como estaban. False si no había."""
+        with self.lock:
+            preview, self.preview = self.preview, None
+        if not preview:
+            return False
+        restore = preview["restore"]
+        try:
+            self.apply_network(restore.get("network") or UNRESTRICTED)
+        except Exception as e:
+            logger.warning(f"Campañas: no se pudo restaurar la red tras la vista previa: {e}")
+        try:
+            if restore.get("running") is False:
+                self.stop_stream()
+            elif restore.get("config") and not self.same_stream(restore["config"], self.snapshot().get("config")):
+                self.apply_stream(restore["config"])
+        except Exception as e:
+            logger.warning(f"Campañas: no se pudo restaurar la emisión tras la vista previa: {e}")
+        logger.info(f"Campañas: fin de la vista previa de {preview['campaign']}/{preview['run']}")
+        return True
+
+    def preview_view(self) -> Optional[dict]:
+        with self.lock:
+            return {k: v for k, v in self.preview.items() if k != "restore"} if self.preview else None
 
     @staticmethod
     def phase_end_ms(run: dict, plan: dict) -> Optional[int]:

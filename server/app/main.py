@@ -593,6 +593,8 @@ def get_status():
         "dash_availability_drift_ms": origin.drift_ms,
         "network": router_call(),
         "campaign": campaigns.running(),
+        # Vista previa de una prueba con su red y su emisión aplicadas (README, 4.8)
+        "campaign_preview": campaigns.preview_view(),
     }
 
 @app.post("/api/network")
@@ -1050,6 +1052,22 @@ def repeat_campaign_run(cid: str, rid: str):
         raise HTTPException(status_code=404, detail=f"No existe la prueba {rid}")
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+@app.post("/api/campaigns/{cid}/runs/{rid}/preview")
+def preview_campaign_run(cid: str, rid: str):
+    """Aplica la red y la emisión de una prueba para verla en directo; no mide ni graba nada."""
+    campaign_or_404(cid)
+    try:
+        return campaigns.start_preview(cid, rid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"No existe la prueba {rid}")
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+@app.post("/api/campaigns-preview/stop")
+def stop_campaign_preview():
+    """Fin de la vista previa: la red y la emisión vuelven a como estaban antes de empezarla."""
+    return {"stopped": campaigns.stop_preview()}
 
 @app.delete("/api/campaigns/{cid}")
 def delete_campaign(cid: str):

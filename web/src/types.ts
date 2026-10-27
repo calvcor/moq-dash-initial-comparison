@@ -84,6 +84,7 @@ export interface ServerStatus {
   source?: { state: 'ready' | 'downloading' | 'extracting' | 'error'; progress_pct: number; error: string | null };
   camera?: CameraState;
   campaign?: CampaignBrief | null; // campaña en marcha (README, 4.8)
+  campaign_preview?: { campaign: string; run: string; started_ms: number } | null; // vista previa de una prueba (README, 4.8)
 }
 
 // Cámara RTSP (GET /api/camera y /api/status): nunca incluye la URL, que puede llevar credenciales
