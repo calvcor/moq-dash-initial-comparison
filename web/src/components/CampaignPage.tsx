@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, Copy, Download, FlaskConical, Pause, Pencil, Play, Settings2, Square, Trash2, X } from 'lucide-react';
 import { CampaignEditor, DEFAULT_PLAYER_OPTIONS, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
+import { CampaignResults } from './CampaignResults';
 import type { Campaign, CampaignPlan, CampaignRun, PlayerId, ServerStatus } from '../types';
 
 // Página de campañas de medida (/campaign; README, 4.8): editor, monitor y, en la misma pestaña o en otra
@@ -124,6 +125,8 @@ const Monitor: React.FC<{
 }> = ({ campaign, lean, onChanged, onDeleted, onEdit }) => {
   const [error, setError] = useState<string | null>(null);
   const [showRuns, setShowRuns] = useState(!lean);
+  // Con el trabajador en esta pestaña, las gráficas van plegadas: no se dibujan mientras mide
+  const [showResults, setShowResults] = useState(!lean);
   // Nombre en edición; null si no se está editando
   const [draftName, setDraftName] = useState<string | null>(null);
   const saveName = async () => {
@@ -307,6 +310,11 @@ const Monitor: React.FC<{
         {showRuns ? 'Ocultar las pruebas ▴' : 'Ver las pruebas ▾'}
       </button>
       {showRuns && <RunsTable campaign={campaign} />}
+
+      <button className="block text-indigo-300 hover:text-indigo-200" onClick={() => setShowResults((v) => !v)}>
+        {showResults ? 'Ocultar los resultados ▴' : 'Ver los resultados ▾'}
+      </button>
+      {showResults && <CampaignResults campaign={campaign} />}
     </div>
   );
 };

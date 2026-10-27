@@ -53,7 +53,7 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 | Router | `router/agent.py` | DNAT + tc/netem, una cola por protocolo y sentido |
 | Entrada HTTP | `edge/nginx.conf` | Único puerto HTTP (80) |
 | Dashboard | `web/` (React + Vite) | Reproductores (cada uno se puede apagar; el CSV registra los activos en `players`), medidor, esquema de etapas, CSV |
-| Campañas | `server/app/campaign.py` | Baterías desatendidas; el servidor lleva red y emisión, el navegador es el trabajador (README, 4.8). Mientras corre, la API manual responde 409 |
+| Campañas | `server/app/campaign.py`, `web/src/components/Campaign*.tsx`, `scripts/campaign-worker.mjs` | Baterías desatendidas; el servidor lleva red y emisión, el navegador (la página o Chrome headless con el script) es el trabajador (README, 4.8). Mientras corre, la API manual responde 409 |
 | Versiones | `server/app/versions.py`, `web/src/components/VersionsPanel.tsx` | Instalado frente a última publicada |
 
 ## Desarrollo local

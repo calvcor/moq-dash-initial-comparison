@@ -573,13 +573,14 @@ En el servidor (bucle a 60 fps, escalera 1080/720/540, 30 s, sin red emulada, lo
 
 ### 4.8. Campañas de medida
 
-Baterías de pruebas desatendidas para estudiar cómo se comportan las tres implementaciones con distintas condiciones de red y latencias objetivo. Hechas la fase 1 (el servidor, `server/app/campaign.py`) y la 2 (la página `/campaign`, enlazada desde la cabecera del dashboard); faltan las gráficas de resultados y un script para lanzar el trabajador en Chrome headless (fase 3).
+Baterías de pruebas desatendidas para estudiar cómo se comportan las tres implementaciones con distintas condiciones de red y latencias objetivo. El servidor la lleva (`server/app/campaign.py`); se maneja desde la página `/campaign`, enlazada desde la cabecera del dashboard, y el trabajador puede ser esa misma página o Chrome headless lanzado por `scripts/campaign-worker.mjs`.
 
-**La página `/campaign`** tiene tres partes:
+**La página `/campaign`** tiene cuatro partes:
 
 - **Editor** (**+ Nueva campaña**): emisiones (fuente, escalera `altura@kbps`, GOP, segmento, fragmento CMAF —de 1 frame, `frag_duration` 0, a 1 s, como en el panel de control—, audio en WebRTC; una por bloque), condiciones de red (barridos de un parámetro sobre una base común —RTT y jitter repartidos por igual entre los dos sentidos, pérdida en los dos, ancho de banda solo en la bajada— o los perfiles del panel de red, todo editable en una tabla), latencias objetivo (`auto, 100, 300…`: el mismo valor para los tres reproductores; valores distintos por rama solo por la API) protocolos y reproductores (qué protocolos se prueban, con los ajustes de cada uno, todos a la vez o de uno en uno, y calidad) y diseño (repeticiones, duraciones, control, intentos, semilla). Estima el número de pruebas y la duración con la misma cuenta que el servidor. La campaña se crea sin arrancar.
 - **Monitor**: estado, barra de progreso (válidas e inválidas), tiempo restante, prueba en curso, trabajador, eventos y la tabla de pruebas con su resultado (p50/p95 de glass-to-glass, fracción del tiempo parado y cambios de calidad por reproductor). Arrancar o reanudar, pausa, cancelar, borrar y descargar los dos CSV. El lápiz junto al nombre lo cambia (Intro guarda, Esc cancela), en cualquier estado: no toca el plan ni las medidas, que van por el id. **Duplicar** abre el editor con el plan de la campaña para crear otra (repetirla o variar algo; la original no cambia): con la semilla vacía, para un sorteo nuevo, salvo que se escriba la de la original. **Editar**, solo mientras está lista (nunca arrancada), cambia su plan y vuelve a sortear las pruebas con la misma semilla; una que ya ha medido no se edita, para no mezclar pruebas de dos planes: se duplica. Los objetivos distintos por rama (creados por la API) se conservan al duplicar o editar mientras no se toque su texto.
 - **Trabajador** (casilla **Esta pestaña es el trabajador**, o abrir `/campaign?worker=1`): monta los reproductores de cada prueba y sube sus filas. Pide al navegador que no apague la pantalla (Wake Lock) y avisa de que la pestaña tiene que quedar visible. Con él activo, el monitor se consulta menos y la tabla de pruebas va plegada, para no cargar el navegador que mide. Un solo trabajador a la vez: otro que se conecte espera.
+- **Resultados** (en el monitor, **Ver los resultados**): una gráfica por latencia objetivo con las condiciones de red en el eje horizontal, o una por condición de red con los objetivos en el eje. Por protocolo, un punto por prueba válida (cada repetición) y una línea por la mediana de las repeticiones; en las métricas de latencia, el objetivo pedido como trazo discontinuo (si es numérico e igual en los tres). Métricas: glass-to-glass p50 y p95, tiempo parado, segundos con latencia medida, bitrate, altura media, cambios de calidad, mediana del p95 del tiempo en pantalla y arranque; escala lineal o logarítmica (con DASH en `auto`, a unos 8 s, la logarítmica deja ver a los demás). Aparte, las pruebas de control en orden de ejecución, para ver la deriva. Solo pruebas terminadas y válidas. Con el trabajador en la misma pestaña van plegadas, para no dibujar mientras se mide.
 
 Con una campaña en marcha, el dashboard no monta sus reproductores y muestra un aviso: en otra pestaña o en otro equipo compartirían la cola de emulación con los del trabajador.
 
@@ -610,7 +611,15 @@ Los reproductores son siempre nuevos porque MoQ en auto solo calcula su objetivo
 **Resultados.** `runs.csv`: una fila por prueba (también las inválidas) y reproductor, con la condición (`network_label`, `target_label`, perfil de red), la validez y el resumen de la medida: muestras y cobertura, p50/p95/media/σ/mín/máx de glass-to-glass, paradas y su tiempo (`stall_ratio`), bitrate, fps, mediana del p95 del tiempo en pantalla, búfer, altura media y fracción del tiempo en la más alta, cambios de calidad, recreaciones del reproductor, descartes del router y, en WebRTC, paquetes perdidos. `samples.csv`: todas las filas de cada segundo con la condición delante; `in_summary` marca las que entran en el resumen de una prueba válida (las de un intento interrumpido conservan el `run_id`, con otro `run_started_ms`). Se mide lo que hacen las implementaciones tal como vienen: la campaña no toca su comportamiento.
 
 > [!NOTE]
-> Comprobado en local el 23-10-2026 con un trabajador simulado (un script que inventa las filas): aplicación de la red en cada prueba, repetición de una prueba inválida, reanudación tras reiniciar el orquestador, restauración al terminar y exportación. El 27-10-2026, con la página como trabajador en Chrome headless y los tres reproductores reales: una campaña de cinco pruebas (RTT 40 ms y 6 Mbit/s × auto y 500 ms) pasó por todas las fases, aplicó los objetivos a cada reproductor y devolvió la red y la emisión a como estaban. Las cifras de esas pruebas cortas (30 s) no son resultados: solo comprueban el mecanismo.
+**Trabajador desatendido.** Para dejar el equipo midiendo sin una pestaña a la vista:
+
+```bash
+node scripts/campaign-worker.mjs --url https://moq-dash.mininet.duckdns.org
+```
+
+Lanza Chrome headless (con las banderas de la sección de verificación de CLAUDE.md y un perfil desechable) en `/campaign?worker=1` y lo vigila cada 10 s: si Chrome termina, lo vuelve a lanzar; si la pestaña se cuelga o, con una campaña en marcha, el servidor lleva 60 s sin latido del trabajador, recarga la página. La prueba interrumpida la repite el servidor. En macOS impide que el equipo se duerma (`caffeinate`) mientras corre. Ctrl+C cierra Chrome y borra el perfil. Opciones: `--url` (por defecto `http://localhost`), `--chrome` (o la variable `CHROME`), `--port` (depuración remota, 9400) e `--insecure` (por IP sin HTTPS, p. ej. `--url http://10.20.40.90 --insecure`). Necesita Node 22. Un solo trabajador a la vez: con otra pestaña trabajadora conectada, espera.
+
+> Comprobado en local el 23-10-2026 con un trabajador simulado (un script que inventa las filas): aplicación de la red en cada prueba, repetición de una prueba inválida, reanudación tras reiniciar el orquestador, restauración al terminar y exportación. El 27-10-2026, con la página como trabajador en Chrome headless y los tres reproductores reales: una campaña de cinco pruebas (RTT 40 ms y 6 Mbit/s × auto y 500 ms) pasó por todas las fases, aplicó los objetivos a cada reproductor y devolvió la red y la emisión a como estaban. Las cifras de esas pruebas cortas (30 s) no son resultados: solo comprueban el mecanismo. Ese mismo día, con `scripts/campaign-worker.mjs` como trabajador (12 pruebas: RTT 0 y 100 ms × auto y 300 ms × 2 repeticiones, más 2 de control), matando Chrome a mitad de dos pruebas: el script lo volvió a lanzar en unos 10 s, las dos pruebas quedaron inválidas por falta de filas y se repitieron al final de su bloque.
 
 ---
 
@@ -975,6 +984,8 @@ moq-dash-initial-comparison/
 ├── router/                       # (MediaMTX no tiene carpeta: se configura por variables en docker-compose.yml)
 │   ├── Dockerfile
 │   └── agent.py                  # Reenvío IP, emulación con tc y agente de control
+├── scripts/
+│   └── campaign-worker.mjs       # Trabajador de campañas en Chrome headless (sección 4.8)
 ├── server/
 │   ├── Dockerfile
 │   ├── nginx.conf                # Proxy sin búfer hacia el origen
@@ -1008,6 +1019,7 @@ moq-dash-initial-comparison/
             ├── MetricsDashboard.tsx
             ├── CampaignPage.tsx  # /campaign: lista, monitor y trabajador
             ├── CampaignEditor.tsx
+            ├── CampaignResults.tsx # Gráficas de resultados de una campaña
             └── CampaignWorker.tsx # Monta los reproductores de cada prueba y sube sus filas
 ```
 
