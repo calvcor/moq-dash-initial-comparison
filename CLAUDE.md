@@ -28,6 +28,8 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 2. **El medidor no debe alterar lo que mide.** Un lector de timecode que copiaba la imagen entera
    saturó el hilo principal y degradó MoQ; todas las medidas anteriores al 9-10-2026 quedaron
    invalidadas. Cualquier instrumentación nueva en el navegador debe ser barata y asíncrona.
+   El tiempo parado anterior al 28-10-2026 no contaba los tramos sin imagen en el `<video>` e infravaloraba
+   mucho a DASH con pérdidas (README, tabla de métricas): no se mezcla con el posterior.
 3. **No rellenes con valores supuestos.** Sin medida se muestra `--` y en el CSV queda vacío.
 4. **Declara las variables de confusión** en vez de ocultarlas: BBRv3 (relay) frente a CUBIC (DASH),
    WebRTC sin adaptación, sin audio salvo con `rtc_audio` (el vídeo se sincroniza con el búfer del audio: poco con el bucle,

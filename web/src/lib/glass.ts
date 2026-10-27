@@ -28,6 +28,11 @@ export function grabFromVideo(video: HTMLVideoElement | null): VideoFrame | null
 
 const WINDOW_MS = 1000;
 const FPS_WINDOW_MS = 2000;
+// Parón: STALL_MS o más sin frame nuevo, haya imagen en pantalla o no, desde que se crea el medidor (el arranque
+// cuenta: en las campañas cae en el calentamiento, que no entra en el resumen). Hasta el 28-10-2026
+// solo se contaba un timecode legible y repetido: el tiempo sin imagen que leer (un <video> con readyState < 2,
+// el búfer de MSE vacío o el reproductor recreándose) no contaba, y eso dejaba fuera la mayor parte de los
+// parones de DASH con pérdidas (README, 4.8).
 const STALL_MS = 150; // ~9 frames a 60 fps sin imagen nueva
 const SAMPLER_GAP_MS = 250; // el propio muestreo se detuvo (pestaña oculta, hilo bloqueado)
 
@@ -127,7 +132,9 @@ export class GlassMeter {
   }
 
   snapshot(): GlassSnapshot {
-    const counters = { stalls: this.#stalls, stallMs: Math.round(this.#stallMs) };
+    // El parón en curso cuenta ya: si no, uno abierto al acabar la medida se perdería entero
+    const open = this.#inStall ? this.#lastTick - this.#lastChange : 0;
+    const counters = { stalls: this.#stalls, stallMs: Math.round(this.#stallMs + open) };
     // Con el muestreo parado (pestaña oculta) no hay medida actual
     if (performance.now() - this.#lastTick > SAMPLER_GAP_MS) {
       return { latencyMs: null, fps: null, frameTimeSdMs: null, frameTimeP95Ms: null, frameTimeMaxMs: null, frameTimes: [], ...counters };
@@ -157,9 +164,19 @@ export class GlassMeter {
     };
   }
 
+  /** En este refresco no hay frame nuevo: sin imagen, ilegible o el mismo timecode. */
+  #noNewFrame(t: number) {
+    if (!this.#inStall && t - this.#lastChange > STALL_MS) {
+      this.#inStall = true;
+      this.#stalls++;
+    }
+  }
+
   async #sample(t: number) {
     // Si el muestreo estuvo parado no se puede distinguir un congelado real: no se cuenta
     if (t - this.#lastTick > SAMPLER_GAP_MS) {
+      // Lo que llevaba el parón hasta el último muestreo sí se sabe (y ya se ha mostrado): se conserva
+      if (this.#inStall) this.#stallMs += this.#lastTick - this.#lastChange;
       this.#lastChange = t;
       this.#inStall = false;
       this.#changeValid = false;
@@ -172,7 +189,7 @@ export class GlassMeter {
     // La lectura es asíncrona: si la anterior no ha terminado, este frame de pantalla se salta
     if (this.#reading) return;
     const frame = this.#grab();
-    if (!frame) return;
+    if (!frame) return this.#noNewFrame(t);
     this.#reading = true;
     const height = frame.displayHeight;
     let code: number | null = null;
@@ -184,16 +201,10 @@ export class GlassMeter {
     }
     if (code === null) {
       if (this.#log) this.#log.unreadable++;
-      return;
+      return this.#noNewFrame(t);
     }
 
-    if (code === this.#lastCode) {
-      if (!this.#inStall && t - this.#lastChange > STALL_MS) {
-        this.#inStall = true;
-        this.#stalls++;
-      }
-      return;
-    }
+    if (code === this.#lastCode) return this.#noNewFrame(t);
 
     if (this.#inStall) {
       this.#stallMs += t - this.#lastChange;
