@@ -218,9 +218,16 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
               <span className={label}>Segmento (s)</span>
               <input className={input} type="number" step={0.5} min={0.25} value={s.seg_duration} onChange={(e) => setStream(i, { seg_duration: Number(e.target.value) })} />
             </label>
-            <label className="flex flex-col gap-1 w-20">
-              <span className={label}>Fragmento (s)</span>
-              <input className={input} type="number" step={0.05} min={0} value={s.frag_duration} onChange={(e) => setStream(i, { frag_duration: Number(e.target.value) })} />
+            <label className="flex flex-col gap-1" title="Fragmento CMAF de LL-DASH. 1 frame es frag_duration = 0 en la API y en el CSV (-frag_type every_frame)">
+              <span className={label}>Fragmento CMAF</span>
+              <select className={input} value={s.frag_duration} onChange={(e) => setStream(i, { frag_duration: Number(e.target.value) })}>
+                {/* Las mismas opciones que el panel de control; una duración distinta (de la configuración en curso) también se conserva */}
+                {[...new Set([0, 0.1, 0.2, 0.5, 1, s.frag_duration])].map((f) => (
+                  <option key={f} value={f}>
+                    {f === 0 ? `1 frame (${s.source === 'camera' ? 'el de la cámara' : '16,7 ms a 60 fps'})` : `${Math.round(f * 1000)} ms`}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex items-center gap-1.5 pb-1">
               <input type="checkbox" checked={s.rtc_audio} onChange={(e) => setStream(i, { rtc_audio: e.target.checked })} />
