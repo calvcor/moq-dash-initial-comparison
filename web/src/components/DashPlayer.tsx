@@ -48,12 +48,10 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // Desvío respecto al objetivo a partir del cual dash.js deja de corregir con la velocidad de
   // reproducción y salta al directo, abortando las descargas en curso. 0 = no saltar nunca.
   const [maxDrift, setMaxDrift] = useState<number>(1.5);
-  // Nivel de búfer por debajo del cual dash.js lo declara vacío: lo anota en sus métricas (en el modo de
-  // corrección por defecto, además, deja de acelerar; en LoL+ el que cuenta es playbackBufferMin, 0,5 s).
-  // y se anota en sus métricas. No baja la calidad: la regla insufficientBufferRule no actúa en modo de baja
-  // latencia, que es el de este MPD (availabilityTimeComplete="false"). Tampoco detiene el vídeo: eso solo
-  // lo hace el navegador al quedarse sin datos. 0,3 s es el valor de fábrica.
-  const [stallThreshold, setStallThreshold] = useState<number>(0.3);
+  // Búfer mínimo de la corrección LoL+ (liveCatchup.playbackBufferMin): por debajo, dash.js frena la
+  // reproducción para rellenarlo, más cuanto menos búfer, y no persigue el objetivo hasta superarlo. Hace de
+  // suelo de la latencia. 0 = no frenar nunca por búfer. 0,5 s es el valor de fábrica.
+  const [playbackBufferMin, setPlaybackBufferMin] = useState<number>(0.5);
   const [showExplain, setShowExplain] = useState(false);
 
   // Actualizar liveDelay en caliente si el reproductor está activo
@@ -132,16 +130,14 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           },
         };
 
-  const stallSettings = (sec: number) => ({ streaming: { buffer: { stallThreshold: sec, lowLatencyStallThreshold: sec } } });
-
-  const handleStallThresholdChange = (newSec: number) => {
-    setStallThreshold(newSec);
-    if (playerRef.current) playerRef.current.updateSettings(stallSettings(newSec));
+  const handlePlaybackBufferMinChange = (newSec: number) => {
+    setPlaybackBufferMin(newSec);
+    if (playerRef.current) playerRef.current.updateSettings({ streaming: { liveCatchup: { playbackBufferMin: newSec } } });
   };
 
   useEffect(() => {
-    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift, stallThresholdSec: stallThreshold, abr });
-  }, [targetLatency, maxDrift, stallThreshold, abr]);
+    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift, playbackBufferMinSec: playbackBufferMin, abr });
+  }, [targetLatency, maxDrift, playbackBufferMin, abr]);
 
   useEffect(() => {
     const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
@@ -241,6 +237,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           liveCatchup: {
             enabled: true,
             maxDrift,
+            playbackBufferMin,
             mode: CATCHUP_MODE,
           },
           retryAttempts: {
@@ -254,7 +251,6 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           },
         },
       });
-      player.updateSettings(stallSettings(stallThreshold));
       player.updateSettings(abrSettings(abr));
 
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
@@ -430,6 +426,33 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
         </div>
       </div>
 
+      {/* Búfer mínimo de la corrección LoL+ (liveCatchup.playbackBufferMin) */}
+      <div
+        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
+        title="Corrección de latencia LoL+ (liveCatchup.playbackBufferMin): si el búfer baja de este nivel, dash.js frena la reproducción para rellenarlo (más cuanto menos búfer, hasta casi 0,5×) y no persigue la latencia objetivo hasta superarlo. Como la latencia nunca es menor que el búfer, hace de suelo: con un objetivo por debajo de este valor, la latencia queda por encima del objetivo. 0 = no frenar nunca por búfer. 0,5 s es el valor de fábrica de dash.js."
+      >
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <span className="text-slate-400 font-medium whitespace-nowrap">Búfer mínimo:</span>
+          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">
+            {playbackBufferMin === 0 ? 'sin frenar' : `${playbackBufferMin.toFixed(2)}s`}
+            {playbackBufferMin === 0.5 && ' (de fábrica)'}
+          </span>
+        </div>
+        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
+          <span className="text-[10px] text-slate-500 font-mono">0s</span>
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={playbackBufferMin}
+            onChange={(e) => handlePlaybackBufferMinChange(Math.round(parseFloat(e.target.value) * 100) / 100)}
+            className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          />
+          <span className="text-[10px] text-slate-500 font-mono">2s</span>
+        </div>
+      </div>
+
       {/* Umbral de salto al directo (liveCatchup.maxDrift) */}
       <div
         className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
@@ -453,30 +476,6 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
             className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
           <span className="text-[10px] text-slate-500 font-mono">10s</span>
-        </div>
-      </div>
-
-      {/* Umbral de búfer vacío (buffer.stallThreshold y lowLatencyStallThreshold) */}
-      <div
-        className="px-4 py-2.5 bg-slate-900 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs"
-        title="Si el búfer baja de este nivel, dash.js lo declara vacío y registra un rebuffering en sus métricas. No cambia la velocidad: la corrección de latencia (modo LoL+) frena por su cuenta cuando el búfer baja de 0,5 s. No baja la calidad: la regla de búfer insuficiente no actúa en modo de baja latencia, que es el de este MPD. No detiene el vídeo: eso solo ocurre cuando el navegador se queda sin datos. Con una latencia objetivo baja el búfer ronda este valor. 0,3 s es el valor de fábrica de dash.js."
-      >
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
-          <span className="text-slate-400 font-medium whitespace-nowrap">Umbral de búfer vacío:</span>
-          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">{`${stallThreshold.toFixed(2)}s`}{stallThreshold === 0.3 && ' (de fábrica)'}</span>
-        </div>
-        <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
-          <span className="text-[10px] text-slate-500 font-mono">0s</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={stallThreshold}
-            onChange={(e) => handleStallThresholdChange(Math.round(parseFloat(e.target.value) * 100) / 100)}
-            className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-          />
-          <span className="text-[10px] text-slate-500 font-mono">1s</span>
         </div>
       </div>
 
@@ -539,8 +538,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
             quality={quality}
             targetLatency={targetLatency}
             maxDrift={maxDrift}
-            stallThreshold={stallThreshold}
-            catchupMode={CATCHUP_MODE}
+            playbackBufferMin={playbackBufferMin}
           />
         </div>
       )}

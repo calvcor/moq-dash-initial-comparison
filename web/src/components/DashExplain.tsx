@@ -12,13 +12,10 @@ interface Props {
   quality: number | 'auto';
   targetLatency: number;
   maxDrift: number;
-  stallThreshold: number;
-  /** Valor que se le pasa a dash.js en streaming.liveCatchup.mode. */
-  catchupMode: string;
+  /** Búfer mínimo de la corrección LoL+ (liveCatchup.playbackBufferMin). */
+  playbackBufferMin: number;
 }
 
-/** Valor que dash.js 5.2.1 reconoce para la corrección LoL+ (Constants.LIVE_CATCHUP_MODE_LOLP). */
-const LOLP_MODE = 'liveCatchupModeLoLP';
 /** Búfer a partir del cual las reglas de fábrica cambian la de caudal por BOLA (abr.hybridSwitchBufferTime). */
 const BOLA_ON_S = 12;
 
@@ -47,45 +44,46 @@ const THROUGHPUT = (
   </li>
 );
 
+/** Velocidad que pone la corrección LoL+ con el búfer por debajo del mínimo (CatchupController, playbackRate ±0,5). */
+const lolpRate = (buffer: number, min: number) => 0.5 + 1 / (1 + Math.exp(-5 * (buffer - min)));
+const x = (rate: number) => `${rate.toFixed(2).replace('.', ',')}×`;
+
 /** Cómo persigue la latencia objetivo; igual con calidad automática o fija. */
-function latencySection({ targetLatency, maxDrift, stallThreshold, catchupMode }: Props): React.ReactNode {
-  const lolp = catchupMode === LOLP_MODE;
+function latencySection({ targetLatency, maxDrift, playbackBufferMin }: Props): React.ReactNode {
+  const min = playbackBufferMin;
   return (
     <Section title="Latencia">
       <li>
         <b>Objetivo fijo</b> ({s(targetLatency)}, el slider): dash.js se coloca a esa distancia del directo y no la cambia
         por su cuenta, ni con la red lenta ni tras una parada (README 5). Todo lo que hay entre la reproducción y el
-        directo es búfer.
+        directo es búfer, así que la latencia nunca es menor que el búfer.
       </li>
-      {lolp ? (
+      {min > 0 ? (
         <li>
-          <b>Corrección (modo LoL+):</b> si el búfer baja de 0,5 s (<code>playbackBufferMin</code>), frena para
-          rellenarlo, más cuanto menos búfer (0,77× con 0,3 s; 0,58× vacío); si no, acelera o frena entre 0,5× y 1,5×
-          según lo lejos que esté del objetivo.
-          {targetLatency < 0.5 && (
+          <b>Corrección (modo LoL+), búfer por debajo del mínimo</b> ({s(min)}, el slider): frena para rellenarlo, más
+          cuanto menos búfer ({x(lolpRate(min / 2, min))} con {s(min / 2)}; {x(lolpRate(0, min))} vacío), y no persigue el
+          objetivo hasta superarlo.
+          {targetLatency < min && (
             <>
               {' '}
-              Con el objetivo en {s(targetLatency)} el búfer no llega a 0,5 s, así que frena casi siempre y la latencia
-              queda por encima del objetivo (deducción del código, sin medir).
+              <span className="text-amber-300">
+                Con el objetivo ({s(targetLatency)}) por debajo del mínimo, el búfer no llega a él: frena casi siempre y
+                la latencia queda por encima del objetivo, en torno al mínimo más lo que tarda en llegar cada fragmento
+                (deducción del código, sin medir).
+              </span>
             </>
           )}
         </li>
       ) : (
         <li>
-          <b>Corrección (modo por defecto de dash.js):</b> acelera o frena entre 0,5× y 1,5× según lo lejos que esté del
-          objetivo, sin mirar el búfer; mientras el búfer está por debajo del umbral de búfer vacío ({s(stallThreshold)})
-          no corrige y reproduce a 1×.
-          {catchupMode !== 'liveCatchupModeDefault' && (
-            <>
-              {' '}
-              <span className="text-amber-300">
-                El banco pide <code>{catchupMode}</code>, que dash.js no reconoce (el modo LoL+ es{' '}
-                <code>{LOLP_MODE}</code>): aplica este.
-              </span>
-            </>
-          )}
+          <b>Corrección (modo LoL+), búfer mínimo en 0:</b> no frena nunca por búfer; solo corrige la latencia, aunque el
+          búfer esté a punto de vaciarse.
         </li>
       )}
+      <li>
+        <b>Corrección, búfer por encima del mínimo:</b> si la latencia se aparta más de un 2 % del objetivo, acelera o
+        frena entre 0,5× y 1,5× según lo lejos que esté; si no, reproduce a 1×.
+      </li>
       <li>
         <b>Salto al directo:</b>{' '}
         {maxDrift > 0 ? (
@@ -98,11 +96,7 @@ function latencySection({ targetLatency, maxDrift, stallThreshold, catchupMode }
         )}
       </li>
       <li>
-        <b>Búfer vacío</b> (por debajo de {s(stallThreshold)}): dash.js lo anota
-        {lolp ? ' (la corrección no lo mira: usa los 0,5 s de arriba)' : ' y la corrección deja de acelerar'}. No baja
-        la calidad (la regla que lo haría no actúa en baja latencia) ni detiene el vídeo: el vídeo se congela solo cuando
-        el navegador se queda sin datos. Con un objetivo bajo, el búfer ronda este valor todo el rato y cualquier retraso
-        de un fragmento lo vacía.
+        El vídeo se congela solo cuando el navegador se queda sin datos; ninguna regla de dash.js lo detiene antes.
       </li>
     </Section>
   );
