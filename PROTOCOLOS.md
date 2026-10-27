@@ -1,40 +1,12 @@
 # Cómo funcionan los tres mecanismos de entrega: LL-DASH, Media over QUIC y WebRTC
 
-Este documento explica, de extremo a extremo, cómo viaja el vídeo en cada una de las tres ramas del
-testbed. La parte de Media over QUIC (MoQ) es la más detallada: usa su terminología propia y baja
-hasta lo que hacen exactamente las versiones instaladas aquí.
+Este documento explica, de extremo a extremo, cómo viaja el vídeo en cada una de las tres ramas del testbed. La parte de Media over QUIC (MoQ) es la más detallada: usa su terminología propia y baja hasta lo que hacen exactamente las versiones instaladas aquí.
 
-**De dónde sale la información.** Lo que se afirma sobre el comportamiento concreto de este testbed
-está leído del código fuente de las librerías instaladas, de la configuración del proyecto y de los
-registros del servidor desplegado (9 de octubre de 2026). Cuando algo es una deducción y no una
-comprobación directa, se dice.
+**De dónde sale la información.** Lo que se afirma sobre el comportamiento concreto de este testbed está leído del código fuente de las librerías instaladas, de la configuración del proyecto y de los registros del servidor desplegado (9 de octubre de 2026). Cuando algo es una deducción y no una comprobación directa, se dice.
 
-> **Versiones desplegadas:** relay 0.17.3 y publicador 0.14.3 desde el 13 de octubre de 2026; relay
-> 0.17.4 desde el 14 de octubre y 0.17.5 desde el 15. El publicador estuvo en 0.14.3 hasta el 15 de
-> octubre, cuando pasó a 0.14.5: el 0.14.4 acumula retraso en su entrada sin parar, y el 0.14.5 se queda
-> atrás en cuanto hay un espectador (medido el 15 de octubre; ver el commit de esa fecha). Desde el 19 de
-> octubre: relay 0.17.7, publicador 0.14.7 (sin ese problema), `@moq/watch` 0.6.3, `@moq/net` 0.4.4 y
-> `@moq/hang` 0.5.3. Desde el 23 de octubre, relay 0.17.8: solo retroportes de correcciones (TLS, límites
-> al analizar certificados y rutas); en el servidor, con el bucle, la escalera 1080/720/540 y WebRTC de
-> control, la latencia y los frames de MoQ no cambiaron de forma apreciable: p50 de 86 ms y 59 fps antes;
-> 66 y 109 ms, 49,5 y 59,5 fps en dos pasadas después (WebRTC, que no pasa por el relay, 54 ms antes y
-> 67-75 después). Una pasada antes y dos después, de 45 s: la variación entre pasadas es mayor que la
-> diferencia. Desde el 21 de octubre, el servidor usa un publicador compilado desde la rama
-> principal de moq (`git@bc64b9c`, `MOQ_CLI_FROM=git`; su `--version` dice 0.14.2), que no tiene el límite
-> de ~2 MB/s de entrada de la 0.14.7: con la escalera 2000/1000/350 y un espectador, espera p95 en su
-> entrada de 1 ms frente a 1,2-3,5 s y ningún cambio de calidad en 40 s frente a 34-54 (ver 4.14). Las
-> medidas de MoQ anteriores y posteriores a ese día no son comparables. Desde el 22 de octubre, el
-> dashboard del servidor usa también `@moq/watch` y sus `@moq/*` compilados desde ese mismo commit
-> (`git@bc64b9c`, `MOQ_WATCH_FROM=git`), como ya se hacía en local: el reproductor de MoQ cambia, así que
-> las medidas de MoQ del servidor anteriores y posteriores tampoco son comparables entre sí. Desde el 23 de octubre, ese `@moq/watch` lleva
-> además el parche del experimento de cambio de calidad (README, 6.1; versión `git@bc64b9c+switching`):
-> con su opción por defecto (`seamless`) se comporta como sin parche. Lo que este documento describe se observó con las
-> de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
+> **Versiones desplegadas:** relay 0.17.3 y publicador 0.14.3 desde el 13 de octubre de 2026; relay 0.17.4 desde el 14 de octubre y 0.17.5 desde el 15. El publicador estuvo en 0.14.3 hasta el 15 de octubre, cuando pasó a 0.14.5: el 0.14.4 acumula retraso en su entrada sin parar, y el 0.14.5 se queda atrás en cuanto hay un espectador (medido el 15 de octubre; ver el commit de esa fecha). Desde el 19 de octubre: relay 0.17.7, publicador 0.14.7 (sin ese problema), `@moq/watch` 0.6.3, `@moq/net` 0.4.4 y `@moq/hang` 0.5.3. Desde el 23 de octubre, relay 0.17.8: solo retroportes de correcciones (TLS, límites al analizar certificados y rutas); en el servidor, con el bucle, la escalera 1080/720/540 y WebRTC de control, la latencia y los frames de MoQ no cambiaron de forma apreciable: p50 de 86 ms y 59 fps antes; 66 y 109 ms, 49,5 y 59,5 fps en dos pasadas después (WebRTC, que no pasa por el relay, 54 ms antes y 67-75 después). Una pasada antes y dos después, de 45 s: la variación entre pasadas es mayor que la diferencia. Desde el 21 de octubre, el servidor usa un publicador compilado desde la rama principal de moq (`git@bc64b9c`, `MOQ_CLI_FROM=git`; su `--version` dice 0.14.2), que no tiene el límite de ~2 MB/s de entrada de la 0.14.7: con la escalera 2000/1000/350 y un espectador, espera p95 en su entrada de 1 ms frente a 1,2-3,5 s y ningún cambio de calidad en 40 s frente a 34-54 (ver 4.14). Las medidas de MoQ anteriores y posteriores a ese día no son comparables. Desde el 22 de octubre, el dashboard del servidor usa también `@moq/watch` y sus `@moq/*` compilados desde ese mismo commit (`git@bc64b9c`, `MOQ_WATCH_FROM=git`), como ya se hacía en local: el reproductor de MoQ cambia, así que las medidas de MoQ del servidor anteriores y posteriores tampoco son comparables entre sí. Desde el 23 de octubre, ese `@moq/watch` lleva además el parche del experimento de cambio de calidad (README, 6.1; versión `git@bc64b9c+switching`): con su opción por defecto (`seamless`) se comporta como sin parche. Lo que este documento describe se observó con las de la tabla (0.17.2 y 0.14.2) salvo que se indique otra cosa. Las versiones en uso se ven en la cabecera del dashboard y quedan en el CSV.
 
-> **Audio:** desde el 22 de octubre de 2026 la fuente codifica el audio en **Opus** (antes, AAC-LC), para
-> que las tres ramas lleven el mismo: en MoQ la pista pasa de `1.aac` a `1.opus` y en el MPD de
-> `mp4a.40.2` a `opus`. Los ejemplos de MPD, catálogo y MPEG-TS de los anexos se capturaron con AAC y se
-> dejan así; la estructura es la misma.
+> **Audio:** desde el 22 de octubre de 2026 la fuente codifica el audio en **Opus** (antes, AAC-LC), para que las tres ramas lleven el mismo: en MoQ la pista pasa de `1.aac` a `1.opus` y en el MPD de `mp4a.40.2` a `opus`. Los ejemplos de MPD, catálogo y MPEG-TS de los anexos se capturaron con AAC y se dejan así; la estructura es la misma.
 
 | Componente                                                | Versión comprobada    |
 | :-------------------------------------------------------- | :-------------------- |
@@ -67,10 +39,7 @@ comprobación directa, se dice.
 
 ## 1. Lo que comparten las tres ramas
 
-Las tres ramas reciben **exactamente el mismo vídeo codificado**. Hay un único proceso FFmpeg (la
-"fuente maestra") que lee Big Buck Bunny a ritmo real, quema el timecode y la etiqueta de calidad,
-codifica con x264 y reparte el resultado por tres puertos UDP locales. A partir de ahí nadie vuelve a
-codificar: cada rama solo **reempaqueta** los mismos bytes H.264 en su propio formato.
+Las tres ramas reciben **exactamente el mismo vídeo codificado**. Hay un único proceso FFmpeg (la "fuente maestra") que lee Big Buck Bunny a ritmo real, quema el timecode y la etiqueta de calidad, codifica con x264 y reparte el resultado por tres puertos UDP locales. A partir de ahí nadie vuelve a codificar: cada rama solo **reempaqueta** los mismos bytes H.264 en su propio formato.
 
 ```
                           ┌─ UDP 5001 ─ tsgate ─ ffmpeg (-f dash) ─ PUT ─▶ origen en memoria ─▶ nginx ─▶ router ─▶ navegador (dash.js)
@@ -78,34 +47,18 @@ Fichero ─▶ FFmpeg ────────┼─ UDP 5002 ─ tsgate ─ moq
 (x264, 1 a 5 calidades)   └─ UDP 5003 ─ tsgate ─ ffmpeg (-f rtsp) ─ RTSP ▶ MediaMTX ──────────────────▶ router ─▶ navegador (RTCPeerConnection)
 ```
 
-Hay una cuarta salida, UDP 5004, que no va a ninguna rama: la graba `recorder.py` durante las pruebas
-de QoE, para calcular después el VMAF con el vídeo tal como salió del codificador (README, sección 4.7).
+Hay una cuarta salida, UDP 5004, que no va a ninguna rama: la graba `recorder.py` durante las pruebas de QoE, para calcular después el VMAF con el vídeo tal como salió del codificador (README, sección 4.7).
 
-En lugar del fichero, la fuente puede leer una **cámara RTSP** (README, sección 3.1b). Lo de después no
-cambia: misma escalera, mismo timecode y mismas salidas. Hay además una quinta, UDP 5005, con cada frame
-tal como entra en la escalera, casi sin pérdidas, que hace de original para el VMAF porque no hay fichero
-con el que comparar. Con la cámara la emisión va a los fps de la cámara, el contenido no se repite entre
-pruebas y la latencia medida empieza, como siempre, al quemar el timecode: no incluye el tramo de la
-cámara al servidor.
+En lugar del fichero, la fuente puede leer una **cámara RTSP** (README, sección 3.1b). Lo de después no cambia: misma escalera, mismo timecode y mismas salidas. Hay además una quinta, UDP 5005, con cada frame tal como entra en la escalera, casi sin pérdidas, que hace de original para el VMAF porque no hay fichero con el que comparar. Con la cámara la emisión va a los fps de la cámara, el contenido no se repite entre pruebas y la latencia medida empieza, como siempre, al quemar el timecode: no incluye el tramo de la cámara al servidor.
 
 Consecuencias para la comparación:
 
-- **La codificación no es una variable.** Mismo códec (H.264 *baseline*, `ultrafast`, `zerolatency`,
-  sin B-frames), mismo GOP, mismo bitrate. Las diferencias de latencia entre ramas vienen del
-  empaquetado, del transporte y del reproductor.
-- **La ingesta no se degrada.** El tramo codificador → servidor de cada rama va por la red interna
-  de Docker. El router que emula la red solo actúa entre los servidores finales y el navegador.
-- **`tsgate.py`** es una compuerta que deja pasar el flujo MPEG-TS a cada empaquetador empezando
-  justo en un keyframe, y de paso apunta a qué hora salió cada frame del codificador. No altera los
-  datos.
-- **La latencia se mide igual en las tres**, leyendo un timecode que la fuente quema en la imagen.
-  El método, incluido el reparto por etapas, está en el
-  [Anexo D](#anexo-d-cómo-se-mide-la-latencia).
+- **La codificación no es una variable.** Mismo códec (H.264 *baseline*, `ultrafast`, `zerolatency`, sin B-frames), mismo GOP, mismo bitrate. Las diferencias de latencia entre ramas vienen del empaquetado, del transporte y del reproductor.
+- **La ingesta no se degrada.** El tramo codificador → servidor de cada rama va por la red interna de Docker. El router que emula la red solo actúa entre los servidores finales y el navegador.
+- **`tsgate.py`** es una compuerta que deja pasar el flujo MPEG-TS a cada empaquetador empezando justo en un keyframe, y de paso apunta a qué hora salió cada frame del codificador. No altera los datos.
+- **La latencia se mide igual en las tres**, leyendo un timecode que la fuente quema en la imagen. El método, incluido el reparto por etapas, está en el [Anexo D](#anexo-d-cómo-se-mide-la-latencia).
 
-El formato intermedio entre la fuente y los empaquetadores es **MPEG-TS**: un contenedor de paquetes
-fijos de 188 bytes pensado para emisión, que permite engancharse al flujo en cualquier momento. Solo
-existe dentro del servidor; ninguna rama lo envía al navegador. Su funcionamiento y el papel que
-cumple aquí se explican en el [Anexo C](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed).
+El formato intermedio entre la fuente y los empaquetadores es **MPEG-TS**: un contenedor de paquetes fijos de 188 bytes pensado para emisión, que permite engancharse al flujo en cualquier momento. Solo existe dentro del servidor; ninguna rama lo envía al navegador. Su funcionamiento y el papel que cumple aquí se explican en el [Anexo C](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed).
 
 ---
 
@@ -115,38 +68,26 @@ Cuatro ideas que aparecen en las tres ramas y que conviene tener claras antes.
 
 ### 2.1. Frames, keyframes y GOP
 
-Un vídeo comprimido no guarda cada imagen completa. Guarda de vez en cuando una imagen entera (un
-**keyframe**, o frame IDR) y, entre medias, solo las diferencias respecto a la anterior (frames
-**delta**, o P-frames). El conjunto de un keyframe y todos los delta que dependen de él es un **GOP**
-(*Group of Pictures*).
+Un vídeo comprimido no guarda cada imagen completa. Guarda de vez en cuando una imagen entera (un **keyframe**, o frame IDR) y, entre medias, solo las diferencias respecto a la anterior (frames **delta**, o P-frames). El conjunto de un keyframe y todos los delta que dependen de él es un **GOP** (*Group of Pictures*).
 
 Dos consecuencias que condicionan todo lo demás:
 
-- **Solo se puede empezar a decodificar en un keyframe.** Quien llega a mitad de un GOP tiene que
-  esperar al siguiente keyframe o recibir el GOP desde su principio.
-- **Si se pierde un frame, los siguientes del mismo GOP no sirven**, porque dependen de él. Lo
-  perdido no se recupera hasta el siguiente keyframe (o hasta que se retransmita).
+- **Solo se puede empezar a decodificar en un keyframe.** Quien llega a mitad de un GOP tiene que esperar al siguiente keyframe o recibir el GOP desde su principio.
+- **Si se pierde un frame, los siguientes del mismo GOP no sirven**, porque dependen de él. Lo perdido no se recupera hasta el siguiente keyframe (o hasta que se retransmita).
 
 Aquí el GOP por defecto es de 60 frames a 60 fps: un keyframe por segundo.
 
 ### 2.2. Transporte fiable y no fiable
 
-- **TCP** entrega todos los bytes y en orden. Si un paquete se pierde, todo lo que venía detrás
-  espera a que se retransmita, aunque ya haya llegado. Eso es el **bloqueo de cabeza de línea**
-  (*head-of-line blocking*).
-- **UDP** entrega paquetes sueltos sin garantías: pueden perderse o llegar desordenados, y nadie
-  espera a nadie.
-- **QUIC** va sobre UDP y ofrece **muchos streams independientes** dentro de una misma conexión.
-  Cada stream es fiable y ordenado por dentro, pero una pérdida en un stream no detiene a los demás.
-  Además permite **cancelar** un stream (dejar de retransmitirlo) y **priorizar** unos sobre otros.
+- **TCP** entrega todos los bytes y en orden. Si un paquete se pierde, todo lo que venía detrás espera a que se retransmita, aunque ya haya llegado. Eso es el **bloqueo de cabeza de línea** (*head-of-line blocking*).
+- **UDP** entrega paquetes sueltos sin garantías: pueden perderse o llegar desordenados, y nadie espera a nadie.
+- **QUIC** va sobre UDP y ofrece **muchos streams independientes** dentro de una misma conexión. Cada stream es fiable y ordenado por dentro, pero una pérdida en un stream no detiene a los demás. Además permite **cancelar** un stream (dejar de retransmitirlo) y **priorizar** unos sobre otros.
 
-Esta es la diferencia de fondo entre las tres ramas: DASH usa un flujo fiable único (TCP), WebRTC
-paquetes sueltos (UDP con retransmisión selectiva) y MoQ muchos flujos fiables cancelables (QUIC).
+Esta es la diferencia de fondo entre las tres ramas: DASH usa un flujo fiable único (TCP), WebRTC paquetes sueltos (UDP con retransmisión selectiva) y MoQ muchos flujos fiables cancelables (QUIC).
 
 ### 2.3. Control de congestión
 
-Es el algoritmo con el que el **emisor** decide a qué ritmo puede enviar sin saturar la red. Cada
-rama usa uno distinto, y eso afecta al resultado tanto como el protocolo:
+Es el algoritmo con el que el **emisor** decide a qué ritmo puede enviar sin saturar la red. Cada rama usa uno distinto, y eso afecta al resultado tanto como el protocolo:
 
 | Rama | Quién lo ejecuta | Algoritmo |
 | :--- | :--- | :--- |
@@ -154,15 +95,11 @@ rama usa uno distinto, y eso afecta al resultado tanto como el protocolo:
 | MoQ | El relay (QUIC) | BBRv3 por defecto (`--quic-congestion-control delay`); alternativa `loss` |
 | WebRTC | MediaMTX | No adapta el envío: reenvía el flujo tal cual llega |
 
-Con un 1 % de pérdida, CUBIC reduce su ventana en cada pérdida y se queda por debajo del bitrate
-del vídeo; BBR estima el ancho de banda real y apenas se inmuta. Es una variable de confusión: parte
-de lo que se observa "en MoQ" frente a "en DASH" con pérdidas es BBR frente a CUBIC.
+Con un 1 % de pérdida, CUBIC reduce su ventana en cada pérdida y se queda por debajo del bitrate del vídeo; BBR estima el ancho de banda real y apenas se inmuta. Es una variable de confusión: parte de lo que se observa "en MoQ" frente a "en DASH" con pérdidas es BBR frente a CUBIC.
 
 ### 2.4. Búfer y directo
 
-El **directo** (*live edge*) es el instante más reciente del contenido que ya existe. El reproductor
-siempre va algo por detrás, y esa distancia es media ya recibida y aún no mostrada: el **búfer**.
-Es el colchón contra las irregularidades de la red y, a la vez, la mayor parte de la latencia.
+El **directo** (*live edge*) es el instante más reciente del contenido que ya existe. El reproductor siempre va algo por detrás, y esa distancia es media ya recibida y aún no mostrada: el **búfer**. Es el colchón contra las irregularidades de la red y, a la vez, la mayor parte de la latencia.
 
 ---
 
@@ -170,15 +107,9 @@ Es el colchón contra las irregularidades de la red y, a la vez, la mayor parte 
 
 ### 3.1. La idea
 
-DASH (*Dynamic Adaptive Streaming over HTTP*) trata el vídeo como una **colección de ficheros
-pequeños** servidos por un servidor web normal. El reproductor descarga un índice, calcula qué
-fichero toca en cada momento y lo pide por HTTP. Toda la inteligencia está en el cliente; el
-servidor solo sirve ficheros. Por eso escala tan bien con CDN: cualquier caché HTTP vale.
+DASH (*Dynamic Adaptive Streaming over HTTP*) trata el vídeo como una **colección de ficheros pequeños** servidos por un servidor web normal. El reproductor descarga un índice, calcula qué fichero toca en cada momento y lo pide por HTTP. Toda la inteligencia está en el cliente; el servidor solo sirve ficheros. Por eso escala tan bien con CDN: cualquier caché HTTP vale.
 
-El precio es la latencia. En DASH clásico un fichero (un **segmento**) no se puede pedir hasta que
-está completo, y el reproductor necesita varios por delante. Con segmentos de 2 a 6 s salen latencias
-de 10 a 30 s. **LL-DASH** (*Low-Latency DASH*) es el conjunto de técnicas para reducir eso sin
-abandonar HTTP.
+El precio es la latencia. En DASH clásico un fichero (un **segmento**) no se puede pedir hasta que está completo, y el reproductor necesita varios por delante. Con segmentos de 2 a 6 s salen latencias de 10 a 30 s. **LL-DASH** (*Low-Latency DASH*) es el conjunto de técnicas para reducir eso sin abandonar HTTP.
 
 ### 3.2. Las piezas
 
@@ -191,15 +122,10 @@ abandonar HTTP.
 
 **Los segmentos.** Dos tipos de fichero por cada Representation:
 
-- **Segmento de inicialización** (`init-stream0.m4s`): cabeceras (`ftyp` + `moov`) con la
-  configuración del decodificador. Se descarga una vez.
-- **Segmentos de media** (`chunk-stream0-00042.m4s`): el vídeo en sí, numerados. Cada uno empieza por
-  un keyframe.
+- **Segmento de inicialización** (`init-stream0.m4s`): cabeceras (`ftyp` + `moov`) con la configuración del decodificador. Se descarga una vez.
+- **Segmentos de media** (`chunk-stream0-00042.m4s`): el vídeo en sí, numerados. Cada uno empieza por un keyframe.
 
-**CMAF** (*Common Media Application Format*) es el formato de esos ficheros: MP4 fragmentado. Lo
-relevante para la baja latencia es que un segmento CMAF se compone de **chunks** (aquí llamados
-**fragmentos**): pares `moof` + `mdat`, cada uno con unos pocos frames y decodificable en cuanto
-llega, sin esperar al resto del segmento.
+**CMAF** (*Common Media Application Format*) es el formato de esos ficheros: MP4 fragmentado. Lo relevante para la baja latencia es que un segmento CMAF se compone de **chunks** (aquí llamados **fragmentos**): pares `moof` + `mdat`, cada uno con unos pocos frames y decodificable en cuanto llega, sin esperar al resto del segmento.
 
 ```
 Segmento de 2 s  =  [moof][mdat] [moof][mdat] [moof][mdat] ... (20 fragmentos de 100 ms)
@@ -210,13 +136,9 @@ Segmento de 2 s  =  [moof][mdat] [moof][mdat] [moof][mdat] ... (20 fragmentos de
 
 Tres mecanismos, que tienen que darse a la vez:
 
-1. **Codificación en fragmentos.** El empaquetador cierra un fragmento cada `frag_duration` y lo
-   emite de inmediato, en vez de esperar al segmento entero.
-2. **Transferencia *chunked*.** El servidor sirve un segmento **mientras todavía se está
-   escribiendo**: la respuesta HTTP no declara longitud y va soltando fragmentos conforme existen
-   (`Transfer-Encoding: chunked`). El reproductor pide el segmento en curso y lo recibe a goteo.
-3. **Anuncio de disponibilidad adelantada.** El manifiesto le dice al reproductor que puede pedir un
-   segmento antes de que esté completo.
+1. **Codificación en fragmentos.** El empaquetador cierra un fragmento cada `frag_duration` y lo emite de inmediato, en vez de esperar al segmento entero.
+2. **Transferencia *chunked*.** El servidor sirve un segmento **mientras todavía se está escribiendo**: la respuesta HTTP no declara longitud y va soltando fragmentos conforme existen (`Transfer-Encoding: chunked`). El reproductor pide el segmento en curso y lo recibe a goteo.
+3. **Anuncio de disponibilidad adelantada.** El manifiesto le dice al reproductor que puede pedir un segmento antes de que esté completo.
 
 En el manifiesto eso se reduce a tres campos:
 
@@ -226,86 +148,41 @@ En el manifiesto eso se reduce a tres campos:
 | `availabilityTimeOffset="1.900"` | El segmento se puede pedir 1,9 s antes de estar completo: en cuanto existe su primer fragmento (2 s − 0,1 s). |
 | `availabilityTimeComplete="false"` | Avisa de que lo que se sirve puede estar incompleto. Es la señal de baja latencia. |
 
-Como las direcciones se calculan con el reloj, **si el reloj del reproductor o la hora de inicio
-están mal, el reproductor pide segmentos que aún no existen o va más atrasado de lo que cree**. Por
-eso el manifiesto indica también de dónde sacar la hora (`UTCTiming`), y el origen del testbed
-recalibra la hora de inicio midiendo cuándo se abre realmente cada segmento.
+Como las direcciones se calculan con el reloj, **si el reloj del reproductor o la hora de inicio están mal, el reproductor pide segmentos que aún no existen o va más atrasado de lo que cree**. Por eso el manifiesto indica también de dónde sacar la hora (`UTCTiming`), y el origen del testbed recalibra la hora de inicio midiendo cuándo se abre realmente cada segmento.
 
-El manifiesto completo, con todos sus campos explicados y ejemplos de cálculo, está en el
-[Anexo A](#anexo-a-el-manifiesto-mpd-campo-a-campo).
+El manifiesto completo, con todos sus campos explicados y ejemplos de cálculo, está en el [Anexo A](#anexo-a-el-manifiesto-mpd-campo-a-campo).
 
 ### 3.4. El recorrido en este testbed
 
-1. **Empaquetado.** `ffmpeg -f dash -streaming 1 -ldash 1` lee el MPEG-TS, copia el vídeo sin
-   recodificar y produce fragmentos CMAF. Las opciones relevantes:
-   - `-seg_duration` y `-frag_duration`: los dos mandos del panel. Con la opción "1 frame" se usa
-     `-frag_type every_frame` en vez de `-frag_duration`: un fragmento por frame.
-   - `-use_template 1 -use_timeline 0`: URL calculadas por número, sin lista de segmentos. Es
-     condición para que el manifiesto anuncie `availabilityTimeOffset`.
-   - `-adaptation_sets "id=0,streams=v id=1,streams=a"`: todas las calidades de vídeo en un mismo
-     AdaptationSet, para que el reproductor pueda conmutar entre ellas.
-   - `-method PUT -http_persistent 1`: sube cada fichero por HTTP PUT *chunked* a medida que lo
-     genera.
-2. **Origen.** Un servidor en memoria dentro del orquestador (`origin.py`) recibe esos PUT y sirve
-   los GET. Si un GET llega mientras el PUT sigue abierto, reenvía los bytes según entran.
+1. **Empaquetado.** `ffmpeg -f dash -streaming 1 -ldash 1` lee el MPEG-TS, copia el vídeo sin recodificar y produce fragmentos CMAF. Las opciones relevantes:
+   - `-seg_duration` y `-frag_duration`: los dos mandos del panel. Con la opción "1 frame" se usa `-frag_type every_frame` en vez de `-frag_duration`: un fragmento por frame.
+   - `-use_template 1 -use_timeline 0`: URL calculadas por número, sin lista de segmentos. Es condición para que el manifiesto anuncie `availabilityTimeOffset`.
+   - `-adaptation_sets "id=0,streams=v id=1,streams=a"`: todas las calidades de vídeo en un mismo AdaptationSet, para que el reproductor pueda conmutar entre ellas.
+   - `-method PUT -http_persistent 1`: sube cada fichero por HTTP PUT *chunked* a medida que lo genera.
+2. **Origen.** Un servidor en memoria dentro del orquestador (`origin.py`) recibe esos PUT y sirve los GET. Si un GET llega mientras el PUT sigue abierto, reenvía los bytes según entran.
 3. **Entrega.** nginx reenvía sin búfer (`proxy_buffering off`). Hay dos caminos:
-   - **Directo** (con `DASH_HOST` configurado): el navegador conecta por HTTPS y HTTP/1.1 al puerto
-     8443 del servidor, que el router reenvía al nginx de DASH. La conexión TCP del propio navegador
-     atraviesa la red emulada, como en MoQ y WebRTC.
-   - **A través del punto de entrada**: el navegador conecta al nginx de entrada (o a un proxy
-     externo), que abre otra conexión, esa sí por el router. La red emulada actúa sobre esa segunda
-     conexión, no sobre la del navegador.
-4. **Reproducción.** `dash.js` descarga con `fetch` leyendo el cuerpo a trozos, y va metiendo cada
-   fragmento en el `SourceBuffer` de **MSE** (*Media Source Extensions*). A partir de ahí decodifica
-   y pinta el elemento `<video>` del navegador. El reproductor se explica en 3.8.
+   - **Directo** (con `DASH_HOST` configurado): el navegador conecta por HTTPS y HTTP/1.1 al puerto 8443 del servidor, que el router reenvía al nginx de DASH. La conexión TCP del propio navegador atraviesa la red emulada, como en MoQ y WebRTC.
+   - **A través del punto de entrada**: el navegador conecta al nginx de entrada (o a un proxy externo), que abre otra conexión, esa sí por el router. La red emulada actúa sobre esa segunda conexión, no sobre la del navegador.
+4. **Reproducción.** `dash.js` descarga con `fetch` leyendo el cuerpo a trozos, y va metiendo cada fragmento en el `SourceBuffer` de **MSE** (*Media Source Extensions*). A partir de ahí decodifica y pinta el elemento `<video>` del navegador. El reproductor se explica en 3.8.
 
-En esta rama se hace una petición HTTP por segmento y por componente: una de vídeo y una de audio
-cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
+En esta rama se hace una petición HTTP por segmento y por componente: una de vídeo y una de audio cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
 
 ### 3.5. El reproductor: latencia objetivo y búfer
 
 `dash.js` no reproduce lo último que tiene, sino que se coloca a una distancia fija del directo:
 
-- **`liveDelay`** (el slider "Latencia objetivo", 0,3 s al abrir la página) es esa distancia. Todo lo que hay
-  entre el punto de reproducción y el directo es búfer.
-- **Catch-up** (`liveCatchup`). Si la latencia real se desvía del objetivo, `dash.js` la corrige
-  **cambiando la velocidad de reproducción**: hasta un 50 % más rápido o más lento por defecto. Aquí
-  está en modo LoL+ (`liveCatchupModeLoLP`): si el búfer baja de `playbackBufferMin` (el slider
-  "Búfer mínimo": 0 al abrir la página, 0,5 s de fábrica), frena para rellenarlo, más cuanto menos búfer (con 0,5 s de
-  mínimo, 0,77× con 0,3 s de búfer y 0,58× vacío) y no persigue el objetivo hasta superarlo; si no,
-  corrige según la latencia (a 1× si está a menos de un 2 % del objetivo). Como la latencia nunca es
-  menor que el búfer, el mínimo hace de suelo: con un objetivo por debajo de él, el búfer no llega a
-  superarlo, frena casi siempre y la latencia queda por encima del objetivo (deducción del código, sin
-  medir). Con el mínimo en 0 no frena nunca por búfer.
+- **`liveDelay`** (el slider "Latencia objetivo", 0,3 s al abrir la página) es esa distancia. Todo lo que hay entre el punto de reproducción y el directo es búfer.
+- **Catch-up** (`liveCatchup`). Si la latencia real se desvía del objetivo, `dash.js` la corrige **cambiando la velocidad de reproducción**: hasta un 50 % más rápido o más lento por defecto. Aquí está en modo LoL+ (`liveCatchupModeLoLP`): si el búfer baja de `playbackBufferMin` (el slider "Búfer mínimo": 0 al abrir la página, 0,5 s de fábrica), frena para rellenarlo, más cuanto menos búfer (con 0,5 s de mínimo, 0,77× con 0,3 s de búfer y 0,58× vacío) y no persigue el objetivo hasta superarlo; si no, corrige según la latencia (a 1× si está a menos de un 2 % del objetivo). Como la latencia nunca es menor que el búfer, el mínimo hace de suelo: con un objetivo por debajo de él, el búfer no llega a superarlo, frena casi siempre y la latencia queda por encima del objetivo (deducción del código, sin medir). Con el mínimo en 0 no frena nunca por búfer.
 
-  > **Hasta el 27-10-2026 el modo LoL+ no estuvo activo nunca.** El testbed pedía
-  > `liveCatchupModeLoLp` (p minúscula), que dash.js 5.2.1 no reconoce, y aplicaba su modo por
-  > defecto: mira solo la latencia y, mientras el búfer está "vacío" (umbral de abajo), no corrige y
-  > reproduce a 1×. En ese modo el umbral de búfer vacío sí influía, y por eso el panel lo tuvo como
-  > slider hasta ese día; lo ha sustituido el búfer mínimo. Comprobado en el reproductor con `getSettings()` y leído de `CatchupController`.
-  > Todas las medidas de DASH anteriores se hicieron con el modo por defecto y **no son comparables**
-  > con las posteriores.
-- **`maxDrift`** (el slider "Salto al directo", 1,5 s por defecto aquí; 12 s es el valor por defecto
-  de la librería). Si el desvío supera este umbral, deja de corregir con la velocidad y **salta**
-  al directo con un *seek*. El salto aborta las descargas en curso y abre peticiones nuevas.
-- **Búfer "vacío".** Si el búfer baja de un umbral (0,3 s de fábrica; `lowLatencyStallThreshold` en
-  baja latencia, `stallThreshold` fuera de ella), `dash.js` lo declara vacío. Eso **no detiene el
-  vídeo** ni baja la calidad: sus métricas registran un rebuffering y, en el modo de corrección por
-  defecto (no en LoL+, que usa `playbackBufferMin`), la corrección deja de acelerar. Con LoL+ y este
-  MPD no cambia la reproducción: lo demás que reacciona a él (BOLA, la regla de búfer insuficiente, la
-  parada sintética, CMCD) está inactivo aquí. Por eso se deja en su valor de fábrica. (Hasta el 27-10-2026 aquí se decía que la regla
-  de búfer insuficiente fuerza la calidad más baja: no es así en baja latencia, ver 3.6.) El vídeo solo se congela de verdad
-  cuando el navegador se queda sin datos. (`dash.js` puede detenerlo al cruzar el umbral, pero esa
-  opción, `syntheticStallEvents`, viene desactivada.) Con la latencia objetivo en 0,3 s, el búfer
-  oscila justo alrededor de este umbral. Fue configurable desde el panel hasta el 27-10-2026.
+  > **Hasta el 27-10-2026 el modo LoL+ no estuvo activo nunca.** El testbed pedía `liveCatchupModeLoLp` (p minúscula), que dash.js 5.2.1 no reconoce, y aplicaba su modo por defecto: mira solo la latencia y, mientras el búfer está "vacío" (umbral de abajo), no corrige y reproduce a 1×. En ese modo el umbral de búfer vacío sí influía, y por eso el panel lo tuvo como slider hasta ese día; lo ha sustituido el búfer mínimo. Comprobado en el reproductor con `getSettings()` y leído de `CatchupController`. Todas las medidas de DASH anteriores se hicieron con el modo por defecto y **no son comparables** con las posteriores.
+- **`maxDrift`** (el slider "Salto al directo", 1,5 s por defecto aquí; 12 s es el valor por defecto de la librería). Si el desvío supera este umbral, deja de corregir con la velocidad y **salta** al directo con un *seek*. El salto aborta las descargas en curso y abre peticiones nuevas.
+- **Búfer "vacío".** Si el búfer baja de un umbral (0,3 s de fábrica; `lowLatencyStallThreshold` en baja latencia, `stallThreshold` fuera de ella), `dash.js` lo declara vacío. Eso **no detiene el vídeo** ni baja la calidad: sus métricas registran un rebuffering y, en el modo de corrección por defecto (no en LoL+, que usa `playbackBufferMin`), la corrección deja de acelerar. Con LoL+ y este MPD no cambia la reproducción: lo demás que reacciona a él (BOLA, la regla de búfer insuficiente, la parada sintética, CMCD) está inactivo aquí. Por eso se deja en su valor de fábrica. (Hasta el 27-10-2026 aquí se decía que la regla de búfer insuficiente fuerza la calidad más baja: no es así en baja latencia, ver 3.6.) El vídeo solo se congela de verdad cuando el navegador se queda sin datos. (`dash.js` puede detenerlo al cruzar el umbral, pero esa opción, `syntheticStallEvents`, viene desactivada.) Con la latencia objetivo en 0,3 s, el búfer oscila justo alrededor de este umbral. Fue configurable desde el panel hasta el 27-10-2026.
 
-Con latencias objetivo muy bajas el búfer es casi nulo: cualquier retraso de un fragmento lo vacía.
-Es la razón de que DASH necesite del orden de segundos para ser estable.
+Con latencias objetivo muy bajas el búfer es casi nulo: cualquier retraso de un fragmento lo vacía. Es la razón de que DASH necesite del orden de segundos para ser estable.
 
 ### 3.6. Adaptación de calidad (ABR)
 
-Decide **solo el cliente**. `dash.js` mide a qué velocidad descarga y cómo está el búfer, y elige la
-Representation. Las reglas activas por defecto en esta versión son:
+Decide **solo el cliente**. `dash.js` mide a qué velocidad descarga y cómo está el búfer, y elige la Representation. Las reglas activas por defecto en esta versión son:
 
 | Regla | Qué mira |
 | :--- | :--- |
@@ -315,19 +192,9 @@ Representation. Las reglas activas por defecto en esta versión son:
 | `switchHistoryRule` | Evita oscilar entre calidades. |
 | `abandonRequestsRule` | Abandona una descarga en curso si va demasiado lenta. |
 
-En la práctica, con el MPD del testbed, **decide la regla de caudal** (leído del código de dash.js
-5.2.1, corregido el 27-10-2026). El MPD declara `availabilityTimeComplete="false"`, así que dash.js va
-en modo de baja latencia, y en ese modo `insufficientBufferRule` no se ejecuta. BOLA solo releva a la
-de caudal con 12 s de búfer o más (`hybridSwitchBufferTime`; vuelve por debajo de 6 s), más que el
-máximo del slider de latencia. La de caudal elige la calidad más alta cuyo bitrate nominal no pase de
-0,9 veces el caudal estimado, sin histéresis, antes de pedir cada segmento. Cada regla propone una
-calidad y gana la más baja. La pestaña "Cómo funciona" del reproductor lo resume según las opciones
-elegidas.
+En la práctica, con el MPD del testbed, **decide la regla de caudal** (leído del código de dash.js 5.2.1, corregido el 27-10-2026). El MPD declara `availabilityTimeComplete="false"`, así que dash.js va en modo de baja latencia, y en ese modo `insufficientBufferRule` no se ejecuta. BOLA solo releva a la de caudal con 12 s de búfer o más (`hybridSwitchBufferTime`; vuelve por debajo de 6 s), más que el máximo del slider de latencia. La de caudal elige la calidad más alta cuyo bitrate nominal no pase de 0,9 veces el caudal estimado, sin histéresis, antes de pedir cada segmento. Cada regla propone una calidad y gana la más baja. La pestaña "Cómo funciona" del reproductor lo resume según las opciones elegidas.
 
-Las reglas específicas de baja latencia (`l2ARule`, `loLPRule`) existen pero están desactivadas por
-defecto. El selector **ABR** del panel permite elegir una de ellas: dash.js documenta que están
-probadas en solitario, así que el testbed activa solo la elegida y apaga las demás, como hace su
-ejemplo de baja latencia. Por defecto se dejan las de fábrica. Queda en el CSV como `dash_abr`.
+Las reglas específicas de baja latencia (`l2ARule`, `loLPRule`) existen pero están desactivadas por defecto. El selector **ABR** del panel permite elegir una de ellas: dash.js documenta que están probadas en solitario, así que el testbed activa solo la elegida y apaga las demás, como hace su ejemplo de baja latencia. Por defecto se dejan las de fábrica. Queda en el CSV como `dash_abr`.
 
 | Opción | Reglas activas |
 | :--- | :--- |
@@ -335,61 +202,30 @@ ejemplo de baja latencia. Por defecto se dejan las de fábrica. Queda en el CSV 
 | L2A | Solo `l2ARule` (*Learn2Adapt*, aprendizaje en línea sobre el caudal y el búfer). |
 | LoL+ | Solo `loLPRule` (*Low-on-Latency+*, que pondera calidad, latencia, búfer y cambios). |
 
-Cambiar de opción recrea el reproductor: dash.js sí aplica un cambio de reglas en caliente, pero su
-ejemplo de baja latencia pide recargar, porque las dos reglas guardan estado desde el arranque.
+Cambiar de opción recrea el reproductor: dash.js sí aplica un cambio de reglas en caliente, pero su ejemplo de baja latencia pide recargar, porque las dos reglas guardan estado desde el arranque.
 
-Medido el 23-10-2026 con las reglas de fábrica, 2 Mbit/s de bajada y objetivo de 0,3 s (README,
-sección 6): dash.js estimó 2,4-2,8 Mbit/s, se quedó en 720p@2000, que no cabe, con el búfer en torno a
-0 s y 11 s congelados en un minuto. En local (DASH por el proxy, escalera 4000/2000/700, dos rondas alternas
-de 60 s, README, sección 6), LoL+ se quedó en 360p sin un cambio ni un congelado y con 0,31 s de
-latencia mediana; las de fábrica, casi igual (0-1 s congelados); L2A subió a 720p y se congeló 5 s en
-cada ronda. Una medida anterior en el servidor que no permitía ordenarlas se descartó: tenía otros
-reproductores en la misma cola.
+Medido el 23-10-2026 con las reglas de fábrica, 2 Mbit/s de bajada y objetivo de 0,3 s (README, sección 6): dash.js estimó 2,4-2,8 Mbit/s, se quedó en 720p@2000, que no cabe, con el búfer en torno a 0 s y 11 s congelados en un minuto. En local (DASH por el proxy, escalera 4000/2000/700, dos rondas alternas de 60 s, README, sección 6), LoL+ se quedó en 360p sin un cambio ni un congelado y con 0,31 s de latencia mediana; las de fábrica, casi igual (0-1 s congelados); L2A subió a 720p y se congeló 5 s en cada ronda. Una medida anterior en el servidor que no permitía ordenarlas se descartó: tenía otros reproductores en la misma cola.
 
 **Cómo deciden L2A y LoL+** (leído del código de dash.js 5.2.1; README, sección 6):
 
-- **L2A** mantiene una distribución de probabilidad sobre las calidades y la ajusta en cada segmento
-  con un paso de descenso de Lagrange: penaliza las calidades cuyo `velocidad × bitrate` supera la
-  última muestra de caudal (media de una sola descarga) y elige la más próxima a la media ponderada.
-  Sube como mucho un escalón, y solo si su bitrate nominal cabe en ese caudal, sin margen. No mira la
-  latencia ni el búfer. Con 5 Mbit/s y 1080p@4000 tiende a la máxima aunque sus picos no quepan.
-- **LoL+** elige con un mapa autoorganizado (una neurona por calidad, con caudal, latencia, parón y
-  cambio) cuyos pesos escoge en cada segmento maximizando un modelo de QoE (premio por bitrate,
-  penalización por parón, latencia y velocidad distinta de 1×). Antes aplica una bajada de seguridad:
-  si `búfer − bitrate × duración del segmento / caudal < 0,3 s` (`DWS_BUFFER_MIN`), baja, y en la
-  mínima se queda. Con segmentos de 2 s y objetivo de 0,3 s se cumple siempre: LoL+ no sale de la
-  mínima, haya o no límite de red. Con el objetivo a 6 s, en local y sin límite, subió a 1080p en
-  cuanto el búfer superó unos 1,5-3 s (tres pasadas).
+- **L2A** mantiene una distribución de probabilidad sobre las calidades y la ajusta en cada segmento con un paso de descenso de Lagrange: penaliza las calidades cuyo `velocidad × bitrate` supera la última muestra de caudal (media de una sola descarga) y elige la más próxima a la media ponderada. Sube como mucho un escalón, y solo si su bitrate nominal cabe en ese caudal, sin margen. No mira la latencia ni el búfer. Con 5 Mbit/s y 1080p@4000 tiende a la máxima aunque sus picos no quepan.
+- **LoL+** elige con un mapa autoorganizado (una neurona por calidad, con caudal, latencia, parón y cambio) cuyos pesos escoge en cada segmento maximizando un modelo de QoE (premio por bitrate, penalización por parón, latencia y velocidad distinta de 1×). Antes aplica una bajada de seguridad: si `búfer − bitrate × duración del segmento / caudal < 0,3 s` (`DWS_BUFFER_MIN`), baja, y en la mínima se queda. Con segmentos de 2 s y objetivo de 0,3 s se cumple siempre: LoL+ no sale de la mínima, haya o no límite de red. Con el objetivo a 6 s, en local y sin límite, subió a 1080p en cuanto el búfer superó unos 1,5-3 s (tres pasadas).
 
-El cambio de calidad ocurre **en una frontera de segmento**: el siguiente segmento se pide de otra
-Representation. Con segmentos de 2 s, esa es la granularidad de reacción.
+El cambio de calidad ocurre **en una frontera de segmento**: el siguiente segmento se pide de otra Representation. Con segmentos de 2 s, esa es la granularidad de reacción.
 
-Un problema conocido de medir caudal en baja latencia: un segmento servido a goteo tarda 2 s en
-descargarse **por definición**, vaya como vaya la red, así que "bytes / tiempo" da el bitrate del
-vídeo y no la capacidad del enlace. `dash.js` lo compensa midiendo cada fragmento por separado
-(modo `moofParsing`, la idea de ACTE), pero acumula los fragmentos que llegan en 1 ms o menos hasta
-pasar de 1 ms, y ese intervalo incluye el hueco hasta el siguiente: con la red rápida (sin límite, en
-local o en la red local del servidor) la estimación vuelve a ser unas dos veces el bitrate descargado.
-Medido el 26-10-2026: 1,65 Mbit/s en 360p sin límite, 18,7-21 Mbit/s con la red limitada a 20 Mbit/s
-(README, sección 6).
+Un problema conocido de medir caudal en baja latencia: un segmento servido a goteo tarda 2 s en descargarse **por definición**, vaya como vaya la red, así que "bytes / tiempo" da el bitrate del vídeo y no la capacidad del enlace. `dash.js` lo compensa midiendo cada fragmento por separado (modo `moofParsing`, la idea de ACTE), pero acumula los fragmentos que llegan en 1 ms o menos hasta pasar de 1 ms, y ese intervalo incluye el hueco hasta el siguiente: con la red rápida (sin límite, en local o en la red local del servidor) la estimación vuelve a ser unas dos veces el bitrate descargado. Medido el 26-10-2026: 1,65 Mbit/s en 360p sin límite, 18,7-21 Mbit/s con la red limitada a 20 Mbit/s (README, sección 6).
 
 ### 3.7. De dónde sale su latencia
 
-- **Empaquetado**: hasta un `frag_duration`, lo que tarda en cerrarse el fragmento que contiene el
-  frame.
+- **Empaquetado**: hasta un `frag_duration`, lo que tarda en cerrarse el fragmento que contiene el frame.
 - **Red**: TCP. Una pérdida detiene todo lo que viene detrás hasta la retransmisión.
-- **Búfer**: `liveDelay`. Con mucha diferencia, la partida mayor. En las medidas del testbed, de
-  3,06 s totales unos 2,8 s eran búfer.
+- **Búfer**: `liveDelay`. Con mucha diferencia, la partida mayor. En las medidas del testbed, de 3,06 s totales unos 2,8 s eran búfer.
 
 ### 3.8. El reproductor: `dash.js` por dentro
 
-El reproductor de esta rama es **`dash.js`** (versión 5.2.1), la implementación de referencia del
-DASH Industry Forum. Es una librería de JavaScript: todo lo que hace ocurre en la página, no en el
-navegador.
+El reproductor de esta rama es **`dash.js`** (versión 5.2.1), la implementación de referencia del DASH Industry Forum. Es una librería de JavaScript: todo lo que hace ocurre en la página, no en el navegador.
 
-**Qué pone el navegador y qué pone la librería.** Un navegador no sabe reproducir DASH. Sabe
-reproducir un MP4 que se le entregue, y ofrece una API para entregárselo a trozos desde JavaScript:
-**MSE** (*Media Source Extensions*). El reparto de papeles es este:
+**Qué pone el navegador y qué pone la librería.** Un navegador no sabe reproducir DASH. Sabe reproducir un MP4 que se le entregue, y ofrece una API para entregárselo a trozos desde JavaScript: **MSE** (*Media Source Extensions*). El reparto de papeles es este:
 
 | Quién | Qué hace |
 | :--- | :--- |
@@ -403,28 +239,18 @@ manifest.mpd ─▶ dash.js ─▶ fetch (segmento a goteo) ─▶ SourceBuffer 
                   └─ decide: qué pedir, qué calidad, a qué velocidad reproducir
 ```
 
-Esto marca una diferencia importante con MoQ: **`dash.js` no ve los frames**. Entrega bytes al
-navegador y a partir de ahí solo puede actuar sobre el `<video>` con los mandos que este ofrece:
-la posición (`currentTime`) y la velocidad (`playbackRate`). No puede decidir cuándo se pinta un
-frame concreto ni saltarse uno. Por eso su forma de corregir la latencia es acelerar, frenar o saltar.
+Esto marca una diferencia importante con MoQ: **`dash.js` no ve los frames**. Entrega bytes al navegador y a partir de ahí solo puede actuar sobre el `<video>` con los mandos que este ofrece: la posición (`currentTime`) y la velocidad (`playbackRate`). No puede decidir cuándo se pinta un frame concreto ni saltarse uno. Por eso su forma de corregir la latencia es acelerar, frenar o saltar.
 
 **El ciclo de reproducción:**
 
-1. **Manifiesto.** Lo descarga y lo interpreta (Anexo A). Sincroniza su reloj con el servidor
-   mediante `UTCTiming`.
-2. **Inicialización.** Crea un `MediaSource`, lo conecta al `<video>` y abre un `SourceBuffer` para
-   el vídeo y otro para el audio. Descarga el segmento de inicialización de cada uno.
+1. **Manifiesto.** Lo descarga y lo interpreta (Anexo A). Sincroniza su reloj con el servidor mediante `UTCTiming`.
+2. **Inicialización.** Crea un `MediaSource`, lo conecta al `<video>` y abre un `SourceBuffer` para el vídeo y otro para el audio. Descarga el segmento de inicialización de cada uno.
 3. **Planificación.** Calcula con el reloj qué segmento está en curso y lo pide.
-4. **Descarga a goteo.** Usa `fetch` y lee el cuerpo de la respuesta según llega, sin esperar al
-   final. Cada fragmento CMAF completo (`moof` + `mdat`) que reconoce lo pasa al `SourceBuffer`.
-5. **Reproducción.** El `<video>` avanza. `dash.js` vigila la latencia y el nivel de búfer y ajusta
-   la velocidad.
-6. **Siguiente segmento.** Cuando la respuesta termina, pide el siguiente, de la misma calidad o de
-   otra si el ABR lo decide.
+4. **Descarga a goteo.** Usa `fetch` y lee el cuerpo de la respuesta según llega, sin esperar al final. Cada fragmento CMAF completo (`moof` + `mdat`) que reconoce lo pasa al `SourceBuffer`.
+5. **Reproducción.** El `<video>` avanza. `dash.js` vigila la latencia y el nivel de búfer y ajusta la velocidad.
+6. **Siguiente segmento.** Cuando la respuesta termina, pide el siguiente, de la misma calidad o de otra si el ABR lo decide.
 
-**El modo de baja latencia** no tiene interruptor en esta versión: `dash.js` lo activa por su cuenta
-cuando el manifiesto anuncia `availabilityTimeComplete="false"`. Es lo que le hace leer la respuesta a
-goteo en el paso 4, en vez de esperar al segmento completo.
+**El modo de baja latencia** no tiene interruptor en esta versión: `dash.js` lo activa por su cuenta cuando el manifiesto anuncia `availabilityTimeComplete="false"`. Es lo que le hace leer la respuesta a goteo en el paso 4, en vez de esperar al segmento completo.
 
 **Componentes internos**, para quien lea su código o sus registros:
 
@@ -439,8 +265,7 @@ goteo en el paso 4, en vez de esperar al segmento completo.
 | `PlaybackController` | Controlar el `<video>` y calcular la latencia. |
 | `CatchupController` | Corregir la latencia con la velocidad o con un salto (3.5). |
 
-**Configuración.** `dash.js` se configura con un árbol de ajustes (`updateSettings`). Los que toca el
-testbed:
+**Configuración.** `dash.js` se configura con un árbol de ajustes (`updateSettings`). Los que toca el testbed:
 
 | Ajuste | Por defecto en `dash.js` | Aquí | Efecto |
 | :--- | :--- | :--- | :--- |
@@ -462,22 +287,15 @@ Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
 | `streaming.buffer.stallThreshold`, `lowLatencyStallThreshold` | 0,3 s | Por debajo de este búfer lo declara vacío y lo anota en sus métricas (en el modo de corrección por defecto, además, deja de acelerar). No baja la calidad ni detiene el vídeo. Con LoL+ no cambia la reproducción. |
 | `streaming.utcSynchronization.enabled` | `true` | Sincronización de reloj con el servidor. |
 
-Tres de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo
-de corrección LoL+ (efectivo desde el 27-10-2026, ver 3.5), el `playbackBufferMin` de 0 al abrir la
-página (desde el mismo día; con él, LoL+ no frena por búfer y solo corrige la latencia) y el
-`maxDrift` de 1,5 s.
+Tres de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo de corrección LoL+ (efectivo desde el 27-10-2026, ver 3.5), el `playbackBufferMin` de 0 al abrir la página (desde el mismo día; con él, LoL+ no frena por búfer y solo corrige la latencia) y el `maxDrift` de 1,5 s.
 
 **Lo que el testbed añade alrededor**, sin tocar la librería:
 
-- **Espera al manifiesto.** Antes de crear el reproductor comprueba que el manifiesto existe. El
-  origen no lo publica hasta calibrar la hora de inicio, unos segundos después de cada arranque.
-- **Silenciado.** El `<video>` está en silencio para que el navegador permita la reproducción
-  automática. `dash.js` descarga el audio igualmente.
-- **Vigilancia.** Si la imagen lleva 10 s sin cambiar, se destruye el reproductor y se crea otro. Se
-  cuenta como reinicio en las métricas (`dash_player_restarts`).
+- **Espera al manifiesto.** Antes de crear el reproductor comprueba que el manifiesto existe. El origen no lo publica hasta calibrar la hora de inicio, unos segundos después de cada arranque.
+- **Silenciado.** El `<video>` está en silencio para que el navegador permita la reproducción automática. `dash.js` descarga el audio igualmente.
+- **Vigilancia.** Si la imagen lleva 10 s sin cambiar, se destruye el reproductor y se crea otro. Se cuenta como reinicio en las métricas (`dash_player_restarts`).
 - **Calidad fija.** El selector llama a `setRepresentationForTypeById` y desactiva el ABR.
-- **Medida.** El timecode se lee del `<video>`, y los bytes descargados, de los eventos de la
-  librería y de la API de tiempos de recursos del navegador.
+- **Medida.** El timecode se lee del `<video>`, y los bytes descargados, de los eventos de la librería y de la API de tiempos de recursos del navegador.
 
 El reproductor queda accesible en la consola del navegador como `window.dashPlayer`.
 
@@ -487,36 +305,22 @@ El reproductor queda accesible en la consola del navegador como `window.dashPlay
 
 ### 4.1. Qué es
 
-MoQ es un protocolo de **publicación/suscripción** sobre QUIC pensado para media en directo. No
-describe ficheros ni conexiones punto a punto: describe **pistas con nombre** a las que uno se
-suscribe, y deja que servidores intermedios (**relays**) las repartan a muchos suscriptores sin
-entender lo que llevan dentro.
+MoQ es un protocolo de **publicación/suscripción** sobre QUIC pensado para media en directo. No describe ficheros ni conexiones punto a punto: describe **pistas con nombre** a las que uno se suscribe, y deja que servidores intermedios (**relays**) las repartan a muchos suscriptores sin entender lo que llevan dentro.
 
-La idea central es aprovechar lo que QUIC ofrece y TCP no: **cada trozo independiente de media va en
-su propio stream QUIC**. Así, cuando la red no da para todo, se puede priorizar lo nuevo y **abandonar
-lo viejo** sin que lo viejo bloquee a lo nuevo. En vez de acumular retraso (como TCP) o de romper la
-imagen (como UDP puro), MoQ descarta unidades completas y decodificables.
+La idea central es aprovechar lo que QUIC ofrece y TCP no: **cada trozo independiente de media va en su propio stream QUIC**. Así, cuando la red no da para todo, se puede priorizar lo nuevo y **abandonar lo viejo** sin que lo viejo bloquee a lo nuevo. En vez de acumular retraso (como TCP) o de romper la imagen (como UDP puro), MoQ descarta unidades completas y decodificables.
 
 ### 4.2. Dos protocolos con el mismo nombre
 
 Hay que distinguir dos cosas, porque la documentación las mezcla:
 
-- **MoQ Transport (MoQT)**: el borrador del IETF (`draft-ietf-moq-transport`). Es el estándar en
-  elaboración, grande y todavía cambiante. La librería instalada reconoce los borradores 14 a 22.
-- **moq-lite**: un subconjunto simplificado, mantenido por el proyecto `moq.dev` (el mismo que hace
-  el relay, el publicador y el reproductor que usa este testbed). Tiene menos mensajes y menos
-  opciones, y está pensado para ser compatible hacia delante con MoQT.
+- **MoQ Transport (MoQT)**: el borrador del IETF (`draft-ietf-moq-transport`). Es el estándar en elaboración, grande y todavía cambiante. La librería instalada reconoce los borradores 14 a 22.
+- **moq-lite**: un subconjunto simplificado, mantenido por el proyecto `moq.dev` (el mismo que hace el relay, el publicador y el reproductor que usa este testbed). Tiene menos mensajes y menos opciones, y está pensado para ser compatible hacia delante con MoQT.
 
-La sesión negocia cuál de los dos se usa. **En este testbed se negocia `moq-lite-06`**, tanto entre
-el publicador y el relay como entre el relay y el navegador (comprobado en el registro del relay).
-Todo lo que sigue describe moq-lite salvo que se indique; el apartado 4.13 da la correspondencia con
-los términos de MoQT.
+La sesión negocia cuál de los dos se usa. **En este testbed se negocia `moq-lite-06`**, tanto entre el publicador y el relay como entre el relay y el navegador (comprobado en el registro del relay). Todo lo que sigue describe moq-lite salvo que se indique; el apartado 4.13 da la correspondencia con los términos de MoQT.
 
 Encima del transporte hay una segunda capa:
 
-- **hang**: el formato de media del mismo proyecto. Define el **catálogo** (qué pistas hay y cómo
-  decodificarlas) y el **contenedor** (cómo se mete cada frame en el transporte). El transporte no
-  sabe nada de vídeo; hang es quien le da significado.
+- **hang**: el formato de media del mismo proyecto. Define el **catálogo** (qué pistas hay y cómo decodificarlas) y el **contenedor** (cómo se mete cada frame en el transporte). El transporte no sabe nada de vídeo; hang es quien le da significado.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -545,21 +349,17 @@ Cuatro niveles, de mayor a menor. Es el vocabulario imprescindible.
 
 Las reglas que hacen útil esta estructura:
 
-- **Un grupo empieza siempre en un punto de entrada.** En vídeo, un keyframe. Cualquier grupo se
-  puede decodificar sin tener los anteriores.
-- **Dentro de un grupo, los frames van en orden y de forma fiable.** Un frame depende de los
-  anteriores del mismo grupo.
+- **Un grupo empieza siempre en un punto de entrada.** En vídeo, un keyframe. Cualquier grupo se puede decodificar sin tener los anteriores.
+- **Dentro de un grupo, los frames van en orden y de forma fiable.** Un frame depende de los anteriores del mismo grupo.
 - **Entre grupos no hay dependencia.** Por eso un grupo se puede saltar entero sin romper nada.
 
 De ahí sale la correspondencia con QUIC, que es el corazón del protocolo:
 
 > **Un grupo = un stream QUIC unidireccional.**
 
-Los frames de un grupo viajan uno detrás de otro por su stream. Grupos distintos van por streams
-distintos y no se bloquean entre sí. Cancelar un stream es descartar un grupo.
+Los frames de un grupo viajan uno detrás de otro por su stream. Grupos distintos van por streams distintos y no se bloquean entre sí. Cancelar un stream es descartar un grupo.
 
-Sobre el conjunto está el **origin**: la tabla de broadcasts que una conexión conoce y puede servir o
-consumir. En el código aparece como `connection.origin`.
+Sobre el conjunto está el **origin**: la tabla de broadcasts que una conexión conoce y puede servir o consumir. En el código aparece como `connection.origin`.
 
 ### 4.4. Los actores
 
@@ -567,55 +367,33 @@ consumir. En el código aparece como `connection.origin`.
 - **Subscriber** (suscriptor): quien las consume. Aquí, `@moq/watch` en el navegador.
 - **Relay**: un servidor que es suscriptor hacia arriba y publicador hacia abajo. Aquí, `moq-relay`.
 
-Los roles son **por pista, no por conexión**: una misma sesión puede publicar unas pistas y
-suscribirse a otras. El relay no interpreta la media; solo mueve grupos y frames.
+Los roles son **por pista, no por conexión**: una misma sesión puede publicar unas pistas y suscribirse a otras. El relay no interpreta la media; solo mueve grupos y frames.
 
 Dos propiedades del relay que importan:
 
-- **Suscripción bajo demanda.** El relay no recibe la media del publicador hasta que alguien la pide.
-  Cuando un navegador se suscribe a `0.avc3`, el relay se suscribe a su vez al publicador. En el
-  registro del publicador se ve llegar esa suscripción con los mismos parámetros que pidió el
-  navegador (prioridad y *max age*).
-- **Reparto y caché.** Varios suscriptores de la misma pista comparten una única suscripción hacia
-  arriba. El relay conserva los grupos recientes para servir a quien llega después.
+- **Suscripción bajo demanda.** El relay no recibe la media del publicador hasta que alguien la pide. Cuando un navegador se suscribe a `0.avc3`, el relay se suscribe a su vez al publicador. En el registro del publicador se ve llegar esa suscripción con los mismos parámetros que pidió el navegador (prioridad y *max age*).
+- **Reparto y caché.** Varios suscriptores de la misma pista comparten una única suscripción hacia arriba. El relay conserva los grupos recientes para servir a quien llega después.
 
 ### 4.5. La sesión: de la URL al primer frame
 
-**1. Conexión.** El navegador abre una sesión **WebTransport** contra
-`https://<host>:4433/anon`. WebTransport es la API del navegador para usar QUIC: por debajo es una
-sesión HTTP/3 que da acceso a streams y datagramas QUIC. La ruta `/anon` es la que el relay permite
-sin autenticación (`--auth-public anon/**`); en un despliegue real iría un token JWT.
+**1. Conexión.** El navegador abre una sesión **WebTransport** contra `https://<host>:4433/anon`. WebTransport es la API del navegador para usar QUIC: por debajo es una sesión HTTP/3 que da acceso a streams y datagramas QUIC. La ruta `/anon` es la que el relay permite sin autenticación (`--auth-public anon/**`); en un despliegue real iría un token JWT.
 
-**2. Certificado.** QUIC exige TLS. El relay genera un certificado autofirmado al arrancar
-(`--listen-tls-generate`) y publica su huella SHA-256 por HTTP en `/certificate.sha256`. El
-reproductor la descarga y la pasa a WebTransport como `serverCertificateHashes`: el navegador acepta
-ese certificado concreto sin que lo firme ninguna autoridad. El navegador solo admite este mecanismo
-con certificados de validez corta (dos semanas como máximo).
+**2. Certificado.** QUIC exige TLS. El relay genera un certificado autofirmado al arrancar (`--listen-tls-generate`) y publica su huella SHA-256 por HTTP en `/certificate.sha256`. El reproductor la descarga y la pasa a WebTransport como `serverCertificateHashes`: el navegador acepta ese certificado concreto sin que lo firme ninguna autoridad. El navegador solo admite este mecanismo con certificados de validez corta (dos semanas como máximo).
 
-**3. Negociación.** Cliente y servidor acuerdan la versión del protocolo mediante el subprotocolo de
-WebTransport (`moq-lite-06`). Cada extremo abre además un stream unidireccional con un único mensaje
-**SETUP** que declara sus capacidades: entre ellas, el nivel de **PROBE** que soporta (ver 4.10).
+**3. Negociación.** Cliente y servidor acuerdan la versión del protocolo mediante el subprotocolo de WebTransport (`moq-lite-06`). Cada extremo abre además un stream unidireccional con un único mensaje **SETUP** que declara sus capacidades: entre ellas, el nivel de **PROBE** que soporta (ver 4.10).
 
-**4. Descubrimiento (ANNOUNCE).** El suscriptor abre un stream de anuncios y envía un
-**ANNOUNCE_REQUEST** con un prefijo de ruta. El relay responde con los broadcasts activos bajo ese
-prefijo y sigue informando de altas y bajas mientras el stream viva. Así sabe el reproductor que
-`live.hang` existe antes de pedir nada.
+**4. Descubrimiento (ANNOUNCE).** El suscriptor abre un stream de anuncios y envía un **ANNOUNCE_REQUEST** con un prefijo de ruta. El relay responde con los broadcasts activos bajo ese prefijo y sigue informando de altas y bajas mientras el stream viva. Así sabe el reproductor que `live.hang` existe antes de pedir nada.
 
-**5. Catálogo.** El reproductor se suscribe a la pista `catalog.json` del broadcast. Su contenido le
-dice qué pistas de media hay.
+**5. Catálogo.** El reproductor se suscribe a la pista `catalog.json` del broadcast. Su contenido le dice qué pistas de media hay.
 
-**6. Suscripción a la media (SUBSCRIBE).** Elegida una calidad, abre un stream bidireccional con un
-mensaje **SUBSCRIBE**: broadcast, nombre de la pista, **prioridad** y ***max age***. Lo que se ve en
-el registro del publicador:
+**6. Suscripción a la media (SUBSCRIBE).** Elegida una calidad, abre un stream bidireccional con un mensaje **SUBSCRIBE**: broadcast, nombre de la pista, **prioridad** y ***max age***. Lo que se ve en el registro del publicador:
 
 ```
 Subscribe { id: 16, broadcast: "live.hang", track: "catalog.json", priority: 100, max_age: 0ns  }
 Subscribe { id: 17, broadcast: "live.hang", track: "0.avc3",       priority: 60,  max_age: 396ms }
 ```
 
-**7. Datos.** Por cada grupo, el publicador abre un stream unidireccional nuevo. Empieza con una
-cabecera (a qué suscripción pertenece y su número de secuencia) y sigue con los frames, cada uno
-con su tamaño y su marca de tiempo.
+**7. Datos.** Por cada grupo, el publicador abre un stream unidireccional nuevo. Empieza con una cabecera (a qué suscripción pertenece y su número de secuencia) y sigue con los frames, cada uno con su tamaño y su marca de tiempo.
 
 Los mensajes de control viajan cada uno en su propio stream bidireccional, según su tipo:
 
@@ -632,8 +410,7 @@ Cerrar el stream de una suscripción es darse de baja. No hay un mensaje aparte 
 
 ### 4.6. El catálogo
 
-Es una pista más (`catalog.json`), a la que el reproductor se suscribe y que se actualiza cuando
-cambia algo. Su parte esencial, para una calidad:
+Es una pista más (`catalog.json`), a la que el reproductor se suscribe y que se actualiza cuando cambia algo. Su parte esencial, para una calidad:
 
 ```json
 {
@@ -647,9 +424,7 @@ cambia algo. Su parte esencial, para una calidad:
 }
 ```
 
-Una **rendition** es una versión de un mismo contenido: cada calidad de vídeo es una rendition, y su
-clave en el mapa es el nombre de la pista a la que hay que suscribirse. Con varias calidades en la
-escalera aparecen `0.avc3`, `1.avc3`, etc.
+Una **rendition** es una versión de un mismo contenido: cada calidad de vídeo es una rendition, y su clave en el mapa es el nombre de la pista a la que hay que suscribirse. Con varias calidades en la escalera aparecen `0.avc3`, `1.avc3`, etc.
 
 Los campos que condicionan el comportamiento del reproductor son cuatro:
 
@@ -660,11 +435,9 @@ Los campos que condicionan el comportamiento del reproductor son cuatro:
 | `jitter` | Irregularidad con la que el publicador envía los frames. El reproductor la suma a su búfer. |
 | `delay` | Retraso de una calidad respecto a la más temprana. También se suma al búfer. |
 
-El resto describe cómo configurar el decodificador (`codec`, `description`, resolución) y cómo va
-empaquetado cada frame (`container`, que se explica a continuación).
+El resto describe cómo configurar el decodificador (`codec`, `description`, resolución) y cómo va empaquetado cada frame (`container`, que se explica a continuación).
 
-El catálogo completo, con todas sus secciones y campos explicados y con ejemplos, está en el
-[Anexo B](#anexo-b-el-catálogo-de-moq-campo-a-campo).
+El catálogo completo, con todas sus secciones y campos explicados y con ejemplos, está en el [Anexo B](#anexo-b-el-catálogo-de-moq-campo-a-campo).
 
 ### 4.7. El contenedor
 
@@ -676,34 +449,23 @@ Define qué bytes hay dentro de cada frame de MoQ. hang admite tres:
 | `cmaf` | Un fragmento CMAF (`moof` + `mdat`); el segmento de inicialización va en el catálogo. |
 | `loc` | *Low Overhead Container*, el formato del borrador del IETF. |
 
-**Este testbed usa `legacy`**: es lo que produce `moq import ts`. Esto responde a una duda habitual:
-**en la rama MoQ no hay CMAF, ni segmentos, ni fragmentos**. Los mandos "segmento" y "fragmento" del
-panel solo afectan a DASH. Cada frame de vídeo es un frame de MoQ y se envía en cuanto sale del
-codificador.
+**Este testbed usa `legacy`**: es lo que produce `moq import ts`. Esto responde a una duda habitual: **en la rama MoQ no hay CMAF, ni segmentos, ni fragmentos**. Los mandos "segmento" y "fragmento" del panel solo afectan a DASH. Cada frame de vídeo es un frame de MoQ y se envía en cuanto sale del codificador.
 
 ### 4.8. Cómo se convierte el vídeo en grupos
 
 El publicador (`moq import ts`) lee el MPEG-TS y hace lo siguiente:
 
-- Cada pista elemental del TS se convierte en una pista de MoQ (`0.avc3`, `1.aac`; con el audio Opus
-  de la fuente desde el 22-10-2026, `1.opus`).
-- `@moq/watch` solo se suscribe a la pista de audio con el sonido activado: con el reproductor
-  silenciado, el audio no viaja (comprobado el 22-10-2026: `audio.out.stats` sin bytes hasta quitar el
-  silencio).
+- Cada pista elemental del TS se convierte en una pista de MoQ (`0.avc3`, `1.aac`; con el audio Opus de la fuente desde el 22-10-2026, `1.opus`).
+- `@moq/watch` solo se suscribe a la pista de audio con el sonido activado: con el reproductor silenciado, el audio no viaja (comprobado el 22-10-2026: `audio.out.stats` sin bytes hasta quitar el silencio).
 - Cada **keyframe abre un grupo nuevo**. Por tanto **grupo = GOP**.
 - Cada frame se escribe en el grupo abierto y se envía de inmediato.
 
-Con GOP de 60 a 60 fps hay un grupo por segundo y 60 frames por grupo. Esto aclara otra duda
-frecuente: **el vídeo no llega "por grupos"**. El grupo es la unidad de *descarte* y de *entrada*,
-no la de *envío*. Los frames llegan de uno en uno, cada 16,7 ms, por el stream del grupo en curso.
-La latencia no tiene como suelo la duración de un GOP.
+Con GOP de 60 a 60 fps hay un grupo por segundo y 60 frames por grupo. Esto aclara otra duda frecuente: **el vídeo no llega "por grupos"**. El grupo es la unidad de *descarte* y de *entrada*, no la de *envío*. Los frames llegan de uno en uno, cada 16,7 ms, por el stream del grupo en curso. La latencia no tiene como suelo la duración de un GOP.
 
 Lo que el tamaño del GOP **sí** determina en MoQ:
 
-- **El tiempo de arranque y el salto inicial.** Quien se suscribe recibe el grupo en curso desde su
-  keyframe: si llega a mitad, recibe de golpe los frames ya emitidos y luego el resto a ritmo real.
-- **La granularidad del descarte.** Si la red se atasca, lo que se salta es un grupo entero: con GOP
-  de 1 s, un salto supone hasta 1 s de imagen perdida.
+- **El tiempo de arranque y el salto inicial.** Quien se suscribe recibe el grupo en curso desde su keyframe: si llega a mitad, recibe de golpe los frames ya emitidos y luego el resto a ritmo real.
+- **La granularidad del descarte.** Si la red se atasca, lo que se salta es un grupo entero: con GOP de 1 s, un salto supone hasta 1 s de imagen perdida.
 - **El cambio de calidad**, que solo puede completarse a partir de un keyframe de la nueva pista.
 
 Un GOP más corto hace todo eso más fino, a cambio de más bitrate (los keyframes son grandes).
@@ -712,8 +474,7 @@ Un GOP más corto hace todo eso más fino, a cambio de más bitrate (los keyfram
 
 Este es el mecanismo que distingue a MoQ. Tiene tres piezas.
 
-**Prioridad entre pistas.** Cada suscripción lleva una prioridad de 0 a 255; se envía primero la
-mayor. Los valores que usa hang:
+**Prioridad entre pistas.** Cada suscripción lleva una prioridad de 0 a 255; se envía primero la mayor. Los valores que usa hang:
 
 | Pista | Prioridad |
 | :--- | :--- |
@@ -722,135 +483,67 @@ mayor. Los valores que usa hang:
 | Audio | 80 |
 | Vídeo | 60 |
 
-Si el enlace no da para todo, el audio pasa antes que el vídeo: se prefiere seguir oyendo aunque la
-imagen se resienta.
+Si el enlace no da para todo, el audio pasa antes que el vídeo: se prefiere seguir oyendo aunque la imagen se resienta.
 
-**Orden entre grupos de una misma pista: el más nuevo primero.** Cuando hay varios grupos pendientes
-a la vez (porque la red va por detrás), el publicador da preferencia al más reciente. En moq-lite-06
-esto es fijo: el campo que antes permitía pedir otro orden se ha retirado. Bajo congestión se
-sacrifica el atraso, no el directo.
+**Orden entre grupos de una misma pista: el más nuevo primero.** Cuando hay varios grupos pendientes a la vez (porque la red va por detrás), el publicador da preferencia al más reciente. En moq-lite-06 esto es fijo: el campo que antes permitía pedir otro orden se ha retirado. Bajo congestión se sacrifica el atraso, no el directo.
 
-Ambos criterios se traducen en la **prioridad de envío del stream QUIC**: la prioridad de la pista
-manda y, dentro de ella, la posición del grupo.
+Ambos criterios se traducen en la **prioridad de envío del stream QUIC**: la prioridad de la pista manda y, dentro de ella, la posición del grupo.
 
-***Max age*: cuándo se da un grupo por perdido.** Es la edad máxima que puede tener un grupo que ya
-no es el último antes de saltárselo. Lo fija el suscriptor en el SUBSCRIBE y puede cambiarlo con
-SUBSCRIBE_UPDATE. Con 0, un grupo viejo se abandona en cuanto existe uno más nuevo. Cuando un grupo
-supera su *max age*, su stream se cancela: QUIC deja de retransmitirlo y el ancho de banda queda para
-el grupo siguiente.
+***Max age*: cuándo se da un grupo por perdido.** Es la edad máxima que puede tener un grupo que ya no es el último antes de saltárselo. Lo fija el suscriptor en el SUBSCRIBE y puede cambiarlo con SUBSCRIBE_UPDATE. Con 0, un grupo viejo se abandona en cuanto existe uno más nuevo. Cuando un grupo supera su *max age*, su stream se cancela: QUIC deja de retransmitirlo y el ancho de banda queda para el grupo siguiente.
 
-El reproductor fija el *max age* igual a su búfer total (ver 4.11): no tiene sentido esperar a un
-grupo más de lo que se está dispuesto a ir por detrás del directo.
+El reproductor fija el *max age* igual a su búfer total (ver 4.11): no tiene sentido esperar a un grupo más de lo que se está dispuesto a ir por detrás del directo.
 
 **El resultado visible.** Con la red justa, MoQ no acumula retraso indefinidamente. Lo que hace es:
 
 1. Los frames del grupo actual empiezan a llegar tarde. Mientras quepan en el búfer, no se nota.
 2. Si se agota el búfer, la imagen se congela.
-3. Llega el siguiente keyframe, se abre un grupo nuevo, que tiene preferencia. El anterior se
-   abandona.
+3. Llega el siguiente keyframe, se abre un grupo nuevo, que tiene preferencia. El anterior se abandona.
 4. La imagen salta hacia delante y se recupera la latencia.
 
-En las métricas eso aparece como paradas breves con la latencia volviendo a su valor, en vez de una
-latencia que crece.
+En las métricas eso aparece como paradas breves con la latencia volviendo a su valor, en vez de una latencia que crece.
 
-**Dentro de un grupo sigue habiendo bloqueo de cabeza de línea.** Un stream QUIC es fiable y
-ordenado: si se pierde un paquete, los frames siguientes *de ese grupo* esperan a la retransmisión.
-Lo que MoQ evita es que eso afecte a otros grupos y a otras pistas.
+**Dentro de un grupo sigue habiendo bloqueo de cabeza de línea.** Un stream QUIC es fiable y ordenado: si se pierde un paquete, los frames siguientes *de ese grupo* esperan a la retransmisión. Lo que MoQ evita es que eso afecte a otros grupos y a otras pistas.
 
-**Datagramas.** Desde moq-lite-05, un grupo de un solo frame puede enviarse como datagrama QUIC, sin
-fiabilidad ninguna. Sirve para media donde cada unidad es independiente (audio, por ejemplo). El
-vídeo de este testbed, con grupos de 60 frames, va por streams.
+**Datagramas.** Desde moq-lite-05, un grupo de un solo frame puede enviarse como datagrama QUIC, sin fiabilidad ninguna. Sirve para media donde cada unidad es independiente (audio, por ejemplo). El vídeo de este testbed, con grupos de 60 frames, va por streams.
 
 ### 4.10. Estimación de ancho de banda y adaptación de calidad
 
-**PROBE.** En DASH el cliente estima la red midiendo sus descargas. En MoQ quien conoce la red es el
-**emisor**, porque es quien ejecuta el control de congestión. El mensaje **PROBE** hace llegar ese
-conocimiento al receptor: el relay envía periódicamente su estimación de **bitrate de envío** y su
-**RTT** suavizado. En la librería aparecen como `connection.probe`, con los campos
-`estimatedRecvRate` y `rtt`. Es el valor que el panel muestra como "estimación de ancho de banda" de
-MoQ.
+**PROBE.** En DASH el cliente estima la red midiendo sus descargas. En MoQ quien conoce la red es el **emisor**, porque es quien ejecuta el control de congestión. El mensaje **PROBE** hace llegar ese conocimiento al receptor: el relay envía periódicamente su estimación de **bitrate de envío** y su **RTT** suavizado. En la librería aparecen como `connection.probe`, con los campos `estimatedRecvRate` y `rtt`. Es el valor que el panel muestra como "estimación de ancho de banda" de MoQ.
 
-El nivel de PROBE se declara en el SETUP: ninguno, **Report** (solo informar) o **Increase** (además
-puede enviar relleno para sondear si hay más capacidad). Este último punto importa: un control de
-congestión solo descubre capacidad que intenta usar. Si el vídeo ocupa 4 Mbit/s en un enlace de
-100, la estimación no tiene por qué reflejar los 100.
+El nivel de PROBE se declara en el SETUP: ninguno, **Report** (solo informar) o **Increase** (además puede enviar relleno para sondear si hay más capacidad). Este último punto importa: un control de congestión solo descubre capacidad que intenta usar. Si el vídeo ocupa 4 Mbit/s en un enlace de 100, la estimación no tiene por qué reflejar los 100.
 
-**La selección de rendition en `@moq/watch`.** Es lo que el testbed deja actuar sin tocar. El
-algoritmo de la versión desplegada (`git@bc64b9c`, `js/watch/src/video/source.ts`, `#runSelected`;
-idéntico en la rama principal el 23-10-2026 salvo comentarios), leído del código, es este:
+**La selección de rendition en `@moq/watch`.** Es lo que el testbed deja actuar sin tocar. El algoritmo de la versión desplegada (`git@bc64b9c`, `js/watch/src/video/source.ts`, `#runSelected`; idéntico en la rama principal el 23-10-2026 salvo comentarios), leído del código, es este:
 
-1. Descarta las renditions que el navegador no puede decodificar y las que el catálogo marca con
-   `enabled: false` (sin frames).
+1. Descarta las renditions que el navegador no puede decodificar y las que el catálogo marca con `enabled: false` (sin frames).
 2. Se queda con las de mayor `preference` (una transcodificación de compatibilidad lleva -1).
 3. Toma la estimación del relay (`estimatedRecvRate`, del PROBE) y le aplica un **margen del 80 %**.
-4. Elige la rendition de **mayor bitrate que quepa** en ese presupuesto, según el `bitrate` del
-   catálogo. Si no cabe ninguna, la de menor bitrate.
+4. Elige la rendition de **mayor bitrate que quepa** en ese presupuesto, según el `bitrate` del catálogo. Si no cabe ninguna, la de menor bitrate.
 5. Sin estimación disponible, elige la mejor por orden: mayor imagen y, a igualdad, mayor bitrate.
 
-En esa lógica no hay histéresis, temporizadores, búfer ni historial: la selección se recalcula cada
-vez que cambia la estimación. La única amortiguación es el margen del 80 %. Es una regla de caudal
-pura, del tipo de la `throughputRule` de dash.js, con la estimación del emisor en vez de la del
-cliente.
+En esa lógica no hay histéresis, temporizadores, búfer ni historial: la selección se recalcula cada vez que cambia la estimación. La única amortiguación es el margen del 80 %. Es una regla de caudal pura, del tipo de la `throughputRule` de dash.js, con la estimación del emisor en vez de la del cliente.
 
-**Corrección (23-10-2026).** Hasta esta fecha este apartado decía que también se descartaban las
-renditions marcadas `stalled`. Era cierto en `@moq/watch` 0.6.x, con el que se escribió, pero en
-`git@bc64b9c` el catálogo ya no tiene ese campo en su esquema y la selección no lo usa. Las medidas
-de 4.10 que atribuyen los cambios de calidad a las marcas `stalled` se hicieron con 0.6.2-0.6.3.
+**Corrección (23-10-2026).** Hasta esta fecha este apartado decía que también se descartaban las renditions marcadas `stalled`. Era cierto en `@moq/watch` 0.6.x, con el que se escribió, pero en `git@bc64b9c` el catálogo ya no tiene ese campo en su esquema y la selección no lo usa. Las medidas de 4.10 que atribuyen los cambios de calidad a las marcas `stalled` se hicieron con 0.6.2-0.6.3.
 
-**El bitrate con el que compara.** Lo escribe el publicador. En `moq-cli` (`git@bc64b9c`), según los
-comentarios de `rs/moq-mux`, se mide en ventanas de 1 s y se retiene el pico: se toma con la primera
-ventana, sube cuando otra lo supera y no baja nunca. Medido en el testbed: 7,4-7,5 Mbit/s para
-1080p@4000, 3,6 para 720p@2000, unas 1,85 veces el nominal. Con el margen del 80 %, mantener 1080p
-exige estimar más de 9,3 Mbit/s.
+**El bitrate con el que compara.** Lo escribe el publicador. En `moq-cli` (`git@bc64b9c`), según los comentarios de `rs/moq-mux`, se mide en ventanas de 1 s y se retiene el pico: se toma con la primera ventana, sube cuando otra lo supera y no baja nunca. Medido en el testbed: 7,4-7,5 Mbit/s para 1080p@4000, 3,6 para 720p@2000, unas 1,85 veces el nominal. Con el margen del 80 %, mantener 1080p exige estimar más de 9,3 Mbit/s.
 
-El reproductor admite además un **objetivo** (`target`) que restringe la elección: por nombre de
-pista, por píxeles, por ancho o alto máximos, o por bitrate máximo. El selector de calidad del panel
-usa solo el nombre, y solo cuando se fija una calidad a mano.
+El reproductor admite además un **objetivo** (`target`) que restringe la elección: por nombre de pista, por píxeles, por ancho o alto máximos, o por bitrate máximo. El selector de calidad del panel usa solo el nombre, y solo cuando se fija una calidad a mano.
 
-**El cambio de pista.** No hay un mensaje de "cambiar de calidad": cada calidad es una pista
-distinta, así que cambiar es **suscribirse a la nueva y darse de baja de la anterior**. El
-reproductor lo hace sin corte:
+**El cambio de pista.** No hay un mensaje de "cambiar de calidad": cada calidad es una pista distinta, así que cambiar es **suscribirse a la nueva y darse de baja de la anterior**. El reproductor lo hace sin corte:
 
 1. Se suscribe a la nueva pista sin soltar la anterior. Durante un tiempo descarga las dos.
-2. Sigue pintando la anterior hasta que la nueva ha alcanzado el mismo punto de reproducción (con
-   100 ms de tolerancia).
+2. Sigue pintando la anterior hasta que la nueva ha alcanzado el mismo punto de reproducción (con 100 ms de tolerancia).
 3. Promueve la nueva y cierra la anterior.
 
-Dos consecuencias medibles. La primera: durante el cambio se descargan dos calidades a la vez, justo
-cuando la red va peor. Si la anterior ya llena el enlace, la nueva no la alcanza nunca y el cambio no
-termina. Medido el 23-10-2026 en el servidor, con `@moq/watch` y `moq-cli` compilados desde
-`git@bc64b9c`, escalera 1080p@4000 / 720p@2000 / 540p@1200 y 2 Mbit/s de bajada: durante 60 s la
-selección fue 540p en 58 de 60 muestras y el frame pintado, 1080p en las 60, con el enlace al tope y
-10 s congelados (README, sección 6). En el bundle desplegado, la pista nueva se promociona solo cuando
-su playhead alcanza el de la activa (leído del código); no hay un plazo que suelte la anterior. Las dos
-pistas se piden con la misma prioridad (`Catalog.PRIORITY.video`, 60) y ninguna opción de la librería
-lo cambia. El testbed tiene un experimento declarado que modifica esto (README, 6.1): soltar la anterior
-o dar prioridad a la nueva al bajar elimina el atasco con 2 Mbit/s. Otro experimento (README, 6.3) sustituye la estimación del relay
-por un sondeo con la calidad siguiente a prioridad mínima: mide bien la capacidad (85-98 % de la real),
-pero como algoritmo de adaptación no mejora al de la librería con la red fija. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no
-coincidir durante un rato, o indefinidamente si la nueva nunca llega a alcanzar a la anterior. Por
-eso el testbed registra las dos por separado (`moq_selected_height` y `moq_height`).
+Dos consecuencias medibles. La primera: durante el cambio se descargan dos calidades a la vez, justo cuando la red va peor. Si la anterior ya llena el enlace, la nueva no la alcanza nunca y el cambio no termina. Medido el 23-10-2026 en el servidor, con `@moq/watch` y `moq-cli` compilados desde `git@bc64b9c`, escalera 1080p@4000 / 720p@2000 / 540p@1200 y 2 Mbit/s de bajada: durante 60 s la selección fue 540p en 58 de 60 muestras y el frame pintado, 1080p en las 60, con el enlace al tope y 10 s congelados (README, sección 6). En el bundle desplegado, la pista nueva se promociona solo cuando su playhead alcanza el de la activa (leído del código); no hay un plazo que suelte la anterior. Las dos pistas se piden con la misma prioridad (`Catalog.PRIORITY.video`, 60) y ninguna opción de la librería lo cambia. El testbed tiene un experimento declarado que modifica esto (README, 6.1): soltar la anterior o dar prioridad a la nueva al bajar elimina el atasco con 2 Mbit/s. Otro experimento (README, 6.3) sustituye la estimación del relay por un sondeo con la calidad siguiente a prioridad mínima: mide bien la capacidad (85-98 % de la real), pero como algoritmo de adaptación no mejora al de la librería con la red fija. La segunda: la calidad **seleccionada** y la calidad **pintada** pueden no coincidir durante un rato, o indefinidamente si la nueva nunca llega a alcanzar a la anterior. Por eso el testbed registra las dos por separado (`moq_selected_height` y `moq_height`).
 
-**Lo observado en el testbed con tres calidades.** El reproductor cambia de calidad varias veces por
-segundo sin que la red tenga nada que ver: la estimación del relay estuvo entre 0,35 y 3,7 Gbit/s.
-La causa es el paso 2. El publicador marca la calidad alta como `stalled` durante 10 a 60 ms, el
-reproductor salta a la siguiente, la marca se retira y vuelve.
+**Lo observado en el testbed con tres calidades.** El reproductor cambia de calidad varias veces por segundo sin que la red tenga nada que ver: la estimación del relay estuvo entre 0,35 y 3,7 Gbit/s. La causa es el paso 2. El publicador marca la calidad alta como `stalled` durante 10 a 60 ms, el reproductor salta a la siguiente, la marca se retira y vuelve.
 
-El publicador activa la marca cuando pasan más de 50 ms sin que entregue un frame de esa calidad
-(ver B.9). Se han identificado dos causas, y solo una era del testbed:
+El publicador activa la marca cuando pasan más de 50 ms sin que entregue un frame de esa calidad (ver B.9). Se han identificado dos causas, y solo una era del testbed:
 
-1. **La fuente entregaba los frames a ráfagas. Corregido el 13 de octubre de 2026.** Los frames
-   entraban al codificador cada 16,7 ms, pero salían con huecos de más de 50 ms alrededor de una vez
-   por segundo. La causa era el audio, por dos mecanismos de FFmpeg que se sumaban (ver C.9). Con el
-   arreglo, la salida es tan regular como sin audio.
-2. **El publicador no lee su entrada a ritmo constante. Sin corregir: es comportamiento de
-   `moq import`.** Aun sin ningún espectador, y con la fuente ya regular, hay frames que esperan en
-   la compuerta a que el publicador los acepte: 50 ms en el percentil 95 y más de 200 ms en el peor
-   caso, cuando en las otras dos ramas esa espera no pasa de 3 ms. Mientras no lee, el publicador
-   tampoco entrega, y su propio detector lo cuenta como un atasco.
+1. **La fuente entregaba los frames a ráfagas. Corregido el 13 de octubre de 2026.** Los frames entraban al codificador cada 16,7 ms, pero salían con huecos de más de 50 ms alrededor de una vez por segundo. La causa era el audio, por dos mecanismos de FFmpeg que se sumaban (ver C.9). Con el arreglo, la salida es tan regular como sin audio.
+2. **El publicador no lee su entrada a ritmo constante. Sin corregir: es comportamiento de `moq import`.** Aun sin ningún espectador, y con la fuente ya regular, hay frames que esperan en la compuerta a que el publicador los acepte: 50 ms en el percentil 95 y más de 200 ms en el peor caso, cuando en las otras dos ramas esa espera no pasa de 3 ms. Mientras no lee, el publicador tampoco entrega, y su propio detector lo cuenta como un atasco.
 
-Efecto del arreglo, en una comparación alternada con y sin él (sesiones de 45 s, tres calidades,
-servidor de 8 núcleos, un espectador en automático):
+Efecto del arreglo, en una comparación alternada con y sin él (sesiones de 45 s, tres calidades, servidor de 8 núcleos, un espectador en automático):
 
 | | Sin el arreglo (6 sesiones) | Con el arreglo (5 sesiones) |
 | :--- | :--- | :--- |
@@ -859,40 +552,22 @@ servidor de 8 núcleos, un espectador en automático):
 | Latencia *glass-to-glass* de MoQ | 109 a 349 ms | 96 a 109 ms |
 | Anomalías de ingesta | 0 | 0 |
 
-El arreglo quita aproximadamente un tercio de las marcas. Las que quedan se deben a la segunda
-causa, y por tanto **los cambios de calidad de MoQ con varias calidades siguen sin medir adaptación a
-la red**. Es comportamiento real de esta versión del publicador ante su propia cadencia de lectura,
-y no se ha modificado.
+El arreglo quita aproximadamente un tercio de las marcas. Las que quedan se deben a la segunda causa, y por tanto **los cambios de calidad de MoQ con varias calidades siguen sin medir adaptación a la red**. Es comportamiento real de esta versión del publicador ante su propia cadencia de lectura, y no se ha modificado.
 
-**Por qué lee así (investigado el 21-10-2026, en local).** `moq-cli` 0.14.7 no procesa más de unos
-2 MB/s de entrada (ver 4.14): cada byte le cuesta unos 0,3 µs de CPU, casi todo en el núcleo. Con tres
-calidades los keyframes llegan a la vez (unos 100 + 50 + 18 kB) y la escalera completa ronda 1 MB/s
-con picos, así que el publicador se queda atrás: en local, con un espectador de MoQ en automático,
-los frames esperaron en su entrada 572-705 ms en el percentil 95 (con una sola calidad, 0,1 ms salvo
-el keyframe). El 90 % de las marcas `stalled` llegó con un hueco de entrega al publicador en los
-150 ms anteriores, frente a un 31-33 % de instantes al azar. Y la prueba causal, sin tocar el
-publicador: la misma escalera con la mitad de bitrate, alternada dos veces con la normal.
+**Por qué lee así (investigado el 21-10-2026, en local).** `moq-cli` 0.14.7 no procesa más de unos 2 MB/s de entrada (ver 4.14): cada byte le cuesta unos 0,3 µs de CPU, casi todo en el núcleo. Con tres calidades los keyframes llegan a la vez (unos 100 + 50 + 18 kB) y la escalera completa ronda 1 MB/s con picos, así que el publicador se queda atrás: en local, con un espectador de MoQ en automático, los frames esperaron en su entrada 572-705 ms en el percentil 95 (con una sola calidad, 0,1 ms salvo el keyframe). El 90 % de las marcas `stalled` llegó con un hueco de entrega al publicador en los 150 ms anteriores, frente a un 31-33 % de instantes al azar. Y la prueba causal, sin tocar el publicador: la misma escalera con la mitad de bitrate, alternada dos veces con la normal.
 
 | Escalera, 40 s, un espectador | Marcas `stalled` | Cambios de calidad pintada | Espera p95 en la entrada |
 | :--- | :--- | :--- | :--- |
 | 4000/2000/700 kbit/s | 188 y 190 | 200 y 202 | 705 y 572 ms |
 | 2000/1000/350 kbit/s | 66 y 68 | 64 y 60 | 6 y 6 ms |
 
-Con la mitad de bytes desaparece la cola del publicador y caen dos tercios de las marcas y de los
-cambios de calidad. Las que quedan no van tan ligadas a los huecos de entrega (42-44 %, frente a un
-6-7 % al azar): hay una parte que no se explica con esto. Además, la cola del publicador suma
-cientos de ms a la latencia de MoQ con la escalera completa: esa comparación entre calidades y
-protocolos hay que hacerla sabiendo que el publicador va saturado.
+Con la mitad de bytes desaparece la cola del publicador y caen dos tercios de las marcas y de los cambios de calidad. Las que quedan no van tan ligadas a los huecos de entrega (42-44 %, frente a un 6-7 % al azar): hay una parte que no se explica con esto. Además, la cola del publicador suma cientos de ms a la latencia de MoQ con la escalera completa: esa comparación entre calidades y protocolos hay que hacerla sabiendo que el publicador va saturado.
 
-Fuera de esa comparación, en pruebas sueltas con el arreglo aplicado hubo dos sesiones en las que la
-rama MoQ se degradó mucho (latencia de varios segundos, pérdidas en su compuerta). En las once
-sesiones de la comparación no ocurrió con ninguna de las dos fuentes, así que no puedo atribuirlo
-al arreglo ni descartarlo: queda anotado como algo a vigilar.
+Fuera de esa comparación, en pruebas sueltas con el arreglo aplicado hubo dos sesiones en las que la rama MoQ se degradó mucho (latencia de varios segundos, pérdidas en su compuerta). En las once sesiones de la comparación no ocurrió con ninguna de las dos fuentes, así que no puedo atribuirlo al arreglo ni descartarlo: queda anotado como algo a vigilar.
 
 ### 4.11. El reproductor por dentro
 
-El reproductor de esta rama es **`@moq/watch`** (versión 0.6.2), la librería de JavaScript del
-proyecto `moq.dev`. Se apoya en dos API del navegador:
+El reproductor de esta rama es **`@moq/watch`** (versión 0.6.2), la librería de JavaScript del proyecto `moq.dev`. Se apoya en dos API del navegador:
 
 | Quién | Qué hace |
 | :--- | :--- |
@@ -901,18 +576,11 @@ proyecto `moq.dev`. Se apoya en dos API del navegador:
 | **WebCodecs** (`VideoDecoder`) | Decodifica cada frame comprimido y devuelve la imagen. Usa el decodificador del sistema, normalmente por hardware. |
 | Elemento **`<canvas>`** | La superficie donde la librería dibuja cada imagen. |
 
-No interviene ningún elemento `<video>` ni MSE. Es la diferencia práctica con DASH: aquí **cada frame
-pasa por código de la página**. La librería recibe el frame comprimido, lo manda decodificar, recibe
-la imagen y decide en qué momento exacto dibujarla. Por eso puede hacer cosas que `dash.js` no:
-saltarse un grupo entero, mostrar un frame en cuanto llega, o cambiar de calidad sin corte
-solapando dos pistas.
+No interviene ningún elemento `<video>` ni MSE. Es la diferencia práctica con DASH: aquí **cada frame pasa por código de la página**. La librería recibe el frame comprimido, lo manda decodificar, recibe la imagen y decide en qué momento exacto dibujarla. Por eso puede hacer cosas que `dash.js` no: saltarse un grupo entero, mostrar un frame en cuanto llega, o cambiar de calidad sin corte solapando dos pistas.
 
-El precio es que todo ese trabajo ocurre en el hilo principal de la página. Si la página está
-ocupada, el reproductor se retrasa, cosa que no le pasa a un `<video>`, que el navegador pinta por su
-cuenta. Fue lo que ocurrió con la primera versión del medidor de latencia (ver D.3).
+El precio es que todo ese trabajo ocurre en el hilo principal de la página. Si la página está ocupada, el reproductor se retrasa, cosa que no le pasa a un `<video>`, que el navegador pinta por su cuenta. Fue lo que ocurrió con la primera versión del medidor de latencia (ver D.3).
 
-El testbed usa la interfaz de programación (`Watch.Player`) sobre un `<canvas>` propio, no el
-componente web `<moq-watch>` que la librería también ofrece. Son lo mismo por dentro.
+El testbed usa la interfaz de programación (`Watch.Player`) sobre un `<canvas>` propio, no el componente web `<moq-watch>` que la librería también ofrece. Son lo mismo por dentro.
 
 La cadena de `@moq/watch`, con los nombres que tiene en el código:
 
@@ -924,22 +592,16 @@ Connection ─▶ Broadcast ─▶ Source ─▶ Decoder ───────�
                                             Sync (reloj común de vídeo, audio y subtítulos)
 ```
 
-- **Consumer** (de hang): recibe los grupos de la suscripción, los ordena por secuencia y entrega los
-  frames. Si un grupo envejece más allá del *max age*, lo salta.
-- **Decoder**: pasa cada frame a un `VideoDecoder` de **WebCodecs**. No hay MSE ni elemento
-  `<video>`: el reproductor recibe los frames decodificados uno a uno y decide cuándo pintarlos.
+- **Consumer** (de hang): recibe los grupos de la suscripción, los ordena por secuencia y entrega los frames. Si un grupo envejece más allá del *max age*, lo salta.
+- **Decoder**: pasa cada frame a un `VideoDecoder` de **WebCodecs**. No hay MSE ni elemento `<video>`: el reproductor recibe los frames decodificados uno a uno y decide cuándo pintarlos.
 - **Sync**: decide ese "cuándo". Es el búfer.
 - **Renderer**: dibuja el último frame en el canvas con `requestAnimationFrame`.
 
 **Cómo funciona Sync.** No guarda una cantidad fija de datos: mantiene una **referencia de tiempo**.
 
-- Para cada frame recibido calcula `hora de llegada − marca de tiempo del frame`. El **menor** valor
-  visto es la *referencia*: representa el frame que menos tardó en llegar, la mejor estimación del
-  directo.
-- Cada frame se muestra cuando `ahora = referencia + marca de tiempo + delay`. Hasta entonces,
-  espera decodificado.
-- El **`delay`** es por tanto la distancia que se mantiene respecto al directo: el colchón contra
-  las irregularidades de llegada.
+- Para cada frame recibido calcula `hora de llegada − marca de tiempo del frame`. El **menor** valor visto es la *referencia*: representa el frame que menos tardó en llegar, la mejor estimación del directo.
+- Cada frame se muestra cuando `ahora = referencia + marca de tiempo + delay`. Hasta entonces, espera decodificado.
+- El **`delay`** es por tanto la distancia que se mantiene respecto al directo: el colchón contra las irregularidades de llegada.
 
 El `delay` efectivo es la suma de dos partes:
 
@@ -956,13 +618,7 @@ Los tres modos de la opción `delay`:
 | Una duración | Valor fijo. **Es lo que hace el slider del testbed** al moverlo; al abrir la página está en `auto`, su extremo izquierdo. |
 | `"instant"` | Sin búfer ni espera: cada frame se pinta en cuanto se decodifica. Desactiva el audio. |
 
-**En `auto`, el búfer no sube durante la sesión** (comprobado en el código de `@moq/watch` 0.6.3 y
-medido el 21-10-2026). El RTT mínimo se guarda como mínimo acumulado (`Math.min`), así que solo puede
-bajar; y la referencia de sincronización solo se mueve hacia atrás, cuando un frame llega antes de lo
-previsto. Si la red se vuelve más lenta con la página abierta, los frames llegan "tarde" respecto a
-la referencia y se pintan en cuanto se decodifican: la latencia sube lo que añade la red, pero ya sin
-búfer frente al jitter. Al recargar, la conexión nueva mide el RTT con el retardo puesto y el búfer
-sale mucho mayor. Medido en local, sin jitter:
+**En `auto`, el búfer no sube durante la sesión** (comprobado en el código de `@moq/watch` 0.6.3 y medido el 21-10-2026). El RTT mínimo se guarda como mínimo acumulado (`Math.min`), así que solo puede bajar; y la referencia de sincronización solo se mueve hacia atrás, cuando un frame llega antes de lo previsto. Si la red se vuelve más lenta con la página abierta, los frames llegan "tarde" respecto a la referencia y se pintan en cuanto se decodifican: la latencia sube lo que añade la red, pero ya sin búfer frente al jitter. Al recargar, la conexión nueva mide el RTT con el retardo puesto y el búfer sale mucho mayor. Medido en local, sin jitter:
 
 | | `delay` de la librería | RTT del relay | Latencia real |
 | :--- | :--- | :--- | :--- |
@@ -970,24 +626,11 @@ sale mucho mayor. Medido en local, sin jitter:
 | Misma sesión tras aplicar 150 ms por sentido | 88 ms | 301 ms | 268 ms |
 | Sesión nueva con 150 ms por sentido | 444 ms | 301 ms | 625 ms |
 
-Con la misma red, MoQ mide 268 o 625 ms según se haya cambiado el perfil en caliente o se haya
-recargado, y en el primer caso no le queda margen para el jitter. En `auto` el búfer crece con el
-RTT, no con el jitter medido: con 150 ms por sentido y sin jitter reserva 444 ms.
+Con la misma red, MoQ mide 268 o 625 ms según se haya cambiado el perfil en caliente o se haya recargado, y en el primer caso no le queda margen para el jitter. En `auto` el búfer crece con el RTT, no con el jitter medido: con 150 ms por sentido y sin jitter reserva 444 ms.
 
-Ese margen de 1,25 × RTT es el que deja llegar a tiempo un paquete retransmitido. Con 150 ms por
-sentido y un 1 % de pérdida (sin jitter), durante 30 s: la sesión que conservaba el búfer calculado
-sin retardo (88 ms) pintó 23 fps de mediana, con 29 de los 30 segundos por debajo de 50 fps y 57
-congelados nuevos; la sesión recargada (444 ms) pintó 60 fps con 2 congelados, a 633 ms de latencia
-frente a 277. La latencia alta tras recargar es el precio de aguantar pérdidas; la baja sin
-recargar solo se sostiene en una red sin pérdidas ni jitter.
+Ese margen de 1,25 × RTT es el que deja llegar a tiempo un paquete retransmitido. Con 150 ms por sentido y un 1 % de pérdida (sin jitter), durante 30 s: la sesión que conservaba el búfer calculado sin retardo (88 ms) pintó 23 fps de mediana, con 29 de los 30 segundos por debajo de 50 fps y 57 congelados nuevos; la sesión recargada (444 ms) pintó 60 fps con 2 congelados, a 633 ms de latencia frente a 277. La latencia alta tras recargar es el precio de aguantar pérdidas; la baja sin recargar solo se sostiene en una red sin pérdidas ni jitter.
 
-**En la rama principal de moq el modo `auto` ya se adapta durante la sesión** (medido el 22-10-2026,
-`@moq/watch` y sus dependencias compilados desde el commit `bc64b9c`, aún sin publicar). Sustituye el
-cálculo con el RTT por un estimador copiado de NetEq (el búfer de audio de WebRTC): mide lo tarde que
-llega cada frame y toma el percentil 95 de un histograma de cubos de 20 ms, que sube enseguida y baja
-con una vida media de 20 s, con techo de unos 2 s (`doc/concept/audio-jitter.md` de moq). Un frame
-retransmitido cuenta como tardío, así que las pérdidas también lo suben. En local, misma sesión sin
-recargar, alternando con la 0.6.3 dos veces:
+**En la rama principal de moq el modo `auto` ya se adapta durante la sesión** (medido el 22-10-2026, `@moq/watch` y sus dependencias compilados desde el commit `bc64b9c`, aún sin publicar). Sustituye el cálculo con el RTT por un estimador copiado de NetEq (el búfer de audio de WebRTC): mide lo tarde que llega cada frame y toma el percentil 95 de un histograma de cubos de 20 ms, que sube enseguida y baja con una vida media de 20 s, con techo de unos 2 s (`doc/concept/audio-jitter.md` de moq). Un frame retransmitido cuenta como tardío, así que las pérdidas también lo suben. En local, misma sesión sin recargar, alternando con la 0.6.3 dos veces:
 
 | | 0.6.3: objetivo / latencia / pintados | `main`: objetivo / latencia / pintados |
 | :--- | :--- | :--- |
@@ -995,66 +638,39 @@ recargar, alternando con la 0.6.3 dos veces:
 | 150 ms por sentido | 88 ms / 189-265 ms / 60 fps | 160 ms / 342-348 ms / 58-60 fps |
 | 150 ms y 1 % de pérdida | 88 ms / 264-271 ms / 24-28 fps | 340 ms / 514-524 ms / 47-60 fps |
 
-Con la pérdida, la primera pasada tardó en subir (15 de 20 s por debajo de 50 fps) y la segunda no
-(1 de 20).
+Con la pérdida, la primera pasada tardó en subir (15 de 20 s por debajo de 50 fps) y la segunda no (1 de 20).
 
-**Mide jitter, no latencia.** El retraso de cada frame se cuenta respecto al más rápido de los últimos
-2 s de media, así que un retardo constante, aunque sea grande, no necesita búfer. Ante un salto de 0 a
-1.000 ms en la bajada (medido el 22-10-2026, misma sesión): durante unos 2 s la referencia es anterior
-al salto y los frames parecen llegar 1 s tarde, así que el objetivo sube a 1.020 ms (2 congelados,
-3,5 s parado, en la transición); se mantiene unos 20 s con la latencia en ~2,04 s (1 s de red y 1 s de
-búfer), y a los ~27 s del salto cae de golpe a 80 ms y la latencia a ~1,1 s, sin bajar de 60 fps
-pintados (es decir, saltando ese tramo); después oscila entre 20 y 40 ms con la latencia en
-~1,05 s. La caída es de golpe, no gradual: el percentil 95 no se mueve hasta que el peso de las
-observaciones altas baja del 5 %. El usuario observó un pico de 2.000 ms con el mismo salto; en esta
-medida fue de 1.020.
+**Mide jitter, no latencia.** El retraso de cada frame se cuenta respecto al más rápido de los últimos 2 s de media, así que un retardo constante, aunque sea grande, no necesita búfer. Ante un salto de 0 a 1.000 ms en la bajada (medido el 22-10-2026, misma sesión): durante unos 2 s la referencia es anterior al salto y los frames parecen llegar 1 s tarde, así que el objetivo sube a 1.020 ms (2 congelados, 3,5 s parado, en la transición); se mantiene unos 20 s con la latencia en ~2,04 s (1 s de red y 1 s de búfer), y a los ~27 s del salto cae de golpe a 80 ms y la latencia a ~1,1 s, sin bajar de 60 fps pintados (es decir, saltando ese tramo); después oscila entre 20 y 40 ms con la latencia en ~1,05 s. La caída es de golpe, no gradual: el percentil 95 no se mueve hasta que el peso de las observaciones altas baja del 5 %. El usuario observó un pico de 2.000 ms con el mismo salto; en esta medida fue de 1.020.
 
-**La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media
-"adelantada" se tolera antes de recolocar la referencia:
+**La opción `buffer`.** Es distinta del `delay` y se confunde con facilidad. Regula cuánta media "adelantada" se tolera antes de recolocar la referencia:
 
-- Con `buffer = 0` (valor por defecto de la librería), en cuanto un frame llega antes de lo previsto
-  la referencia baja y la reproducción **se pega al directo** todo lo que el `delay` permite.
+- Con `buffer = 0` (valor por defecto de la librería), en cuanto un frame llega antes de lo previsto la referencia baja y la reproducción **se pega al directo** todo lo que el `delay` permite.
 - Con `buffer > 0`, se permite que se acumule hasta esa cantidad de media por delante sin saltar.
 
 El *max age* que se envía en el SUBSCRIBE es `delay + buffer`.
 
-**Lo que ocurre en este testbed.** El reproductor se crea con `delay` = slider y `buffer` en su valor
-por defecto, 0. El slider arranca en `auto`; puesto en 200 ms, la librería resuelve:
+**Lo que ocurre en este testbed.** El reproductor se crea con `delay` = slider y `buffer` en su valor por defecto, 0. El slider arranca en `auto`; puesto en 200 ms, la librería resuelve:
 
 ```
 delay efectivo = 200 ms (slider) + 46 ms (jitter de rendition, el del audio del catálogo) = 246 ms
 max age        = 246 ms + 0 ms (buffer)                                                    = 246 ms
 ```
 
-La latencia glass-to-glass medida así es de unos 300 ms (294 y 301 ms en dos conexiones, 9 de octubre
-de 2026, Chrome headless contra el servidor, red sin restricción). La diferencia con los 246 ms es el
-resto del recorrido: codificación, publicador, relay, red, decodificación y pintado.
+La latencia glass-to-glass medida así es de unos 300 ms (294 y 301 ms en dos conexiones, 9 de octubre de 2026, Chrome headless contra el servidor, red sin restricción). La diferencia con los 246 ms es el resto del recorrido: codificación, publicador, relay, red, decodificación y pintado.
 
-**Por qué `buffer` está a 0.** Hasta esa fecha el testbed lo fijaba en 150 ms. En la misma prueba,
-con ese valor, el *max age* era de 396 ms y la latencia medida de 387 ms: unos 90 ms más para el
-mismo slider. La explicación, leída del código: al suscribirse, el reproductor recibe de golpe los
-frames ya emitidos del grupo en curso; con `buffer > 0` ese adelanto se conserva (hasta el límite de
-`buffer`) en vez de descartarse, y la reproducción queda más atrás de lo que el slider indica. Cuánto
-exactamente depende del instante de la conexión, así que la latencia dejaba de estar determinada por
-el slider. La medida con 150 ms es de una sola conexión.
+**Por qué `buffer` está a 0.** Hasta esa fecha el testbed lo fijaba en 150 ms. En la misma prueba, con ese valor, el *max age* era de 396 ms y la latencia medida de 387 ms: unos 90 ms más para el mismo slider. La explicación, leída del código: al suscribirse, el reproductor recibe de golpe los frames ya emitidos del grupo en curso; con `buffer > 0` ese adelanto se conserva (hasta el límite de `buffer`) en vez de descartarse, y la reproducción queda más atrás de lo que el slider indica. Cuánto exactamente depende del instante de la conexión, así que la latencia dejaba de estar determinada por el slider. La medida con 150 ms es de una sola conexión.
 
-Sigue habiendo un suelo que el slider no controla: el *jitter* de rendition (46 ms aquí) lo suma la
-librería por su cuenta.
+Sigue habiendo un suelo que el slider no controla: el *jitter* de rendition (46 ms aquí) lo suma la librería por su cuenta.
 
-**Visibilidad.** Por defecto la librería deja de descargar el vídeo cuando el canvas sale de la
-pantalla o la pestaña pasa a segundo plano (`visible: "20%"`). El testbed lo fija en `"always"` para
-que la medida no se interrumpa al hacer scroll.
+**Visibilidad.** Por defecto la librería deja de descargar el vídeo cuando el canvas sale de la pantalla o la pestaña pasa a segundo plano (`visible: "20%"`). El testbed lo fija en `"always"` para que la medida no se interrumpa al hacer scroll.
 
 **Lo que el testbed añade alrededor**, sin tocar la librería:
 
-- **Huella del certificado.** Antes de conectar descarga `/certificate.sha256` y se la pasa a
-  WebTransport (ver 4.5).
-- **Silenciado.** Con el reproductor en silencio, `@moq/watch` no descarga la pista de audio. Es una
-  diferencia con DASH, que la descarga siempre.
+- **Huella del certificado.** Antes de conectar descarga `/certificate.sha256` y se la pasa a WebTransport (ver 4.5).
+- **Silenciado.** Con el reproductor en silencio, `@moq/watch` no descarga la pista de audio. Es una diferencia con DASH, que la descarga siempre.
 - **Vigilancia.** 10 s sin imagen nueva y se recrea el reproductor (`moq_player_restarts`).
 - **Calidad fija.** El selector pasa el nombre de la pista en `target`; en automático no pasa nada.
-- **Medida.** El timecode se lee del frame que la librería acaba de dibujar, y los tiempos, de las
-  señales que expone.
+- **Medida.** El timecode se lee del frame que la librería acaba de dibujar, y los tiempos, de las señales que expone.
 
 El reproductor queda accesible en la consola del navegador como `window.moqPlayer`.
 
@@ -1108,9 +724,7 @@ El reproductor queda accesible en la consola del navegador como `window.moqPlaye
 
 ### 4.13. Correspondencia con MoQ Transport (IETF)
 
-Para leer los borradores del IETF o comparar con otras implementaciones. Los nombres exactos cambian
-entre borradores, así que conviene tomar esta tabla como orientación y contrastarla con el borrador
-concreto que se cite.
+Para leer los borradores del IETF o comparar con otras implementaciones. Los nombres exactos cambian entre borradores, así que conviene tomar esta tabla como orientación y contrastarla con el borrador concreto que se cite.
 
 | moq-lite | MoQ Transport | Notas |
 | :--- | :--- | :--- |
@@ -1129,29 +743,11 @@ concreto que se cite.
 
 ### 4.14. De dónde sale su latencia
 
-- **Ingesta**: del orden de milisegundos para un frame normal, pero **no para los keyframes**
-  (corregido el 21-10-2026; antes se decía sin matiz). `moq-cli` 0.14.7 procesa su entrada a unos
-  2 MB/s como máximo, con unos 0,3 µs de CPU por byte, casi todos en el núcleo (sincronización entre
-  hilos: 467.000 `futex` para 11 MB). Un keyframe de ~100 kB (12 veces un frame normal a 1080p y
-  4 Mbit/s) tarda así unos 50 ms en entrar, y el frame siguiente espera detrás. En local, con un
-  espectador: el keyframe espera 25 ms en la compuerta, el siguiente 14, y la entrega tiene un hueco
-  de ~45 ms una vez por grupo; con más carga en la máquina, 60-170 ms, y en el servidor hasta 665 ms.
-  Ocurre igual sin espectadores, con control de congestión `loss` o BBRv3, con 1 o 2 hilos de tokio
-  y con H.264 crudo (`import avc3`) en vez de MPEG-TS, así que no es la red ni el demultiplexor TS.
-  El vídeo llega al relay con un tirón por grupo, que solo se ve si el búfer del reproductor es menor.
-  **Está resuelto en la rama principal de moq, sin versión publicada todavía** (medido el 21-10-2026,
-  commit `bc64b9c`, compilado en local con LTO *thin* y solo el transporte QUIC): lee la entrada a
-  200-730 MB/s sin ritmo real, frente a 1,9-2,0 MB/s de la 0.14.7 tanto publicada como compilada con
-  esos mismos ajustes, así que la diferencia es del código y no de la compilación. En directo, con
-  un espectador: el keyframe espera 0,2-0,3 ms en la compuerta (0.14.7: 32-55 ms de mediana); con la
-  escalera de tres calidades, ningún cambio de calidad ni hueco de entrega en 40 s (0.14.7: 92-140
-  cambios y espera p95 de 117-146 ms).
+- **Ingesta**: del orden de milisegundos para un frame normal, pero **no para los keyframes** (corregido el 21-10-2026; antes se decía sin matiz). `moq-cli` 0.14.7 procesa su entrada a unos 2 MB/s como máximo, con unos 0,3 µs de CPU por byte, casi todos en el núcleo (sincronización entre hilos: 467.000 `futex` para 11 MB). Un keyframe de ~100 kB (12 veces un frame normal a 1080p y 4 Mbit/s) tarda así unos 50 ms en entrar, y el frame siguiente espera detrás. En local, con un espectador: el keyframe espera 25 ms en la compuerta, el siguiente 14, y la entrega tiene un hueco de ~45 ms una vez por grupo; con más carga en la máquina, 60-170 ms, y en el servidor hasta 665 ms. Ocurre igual sin espectadores, con control de congestión `loss` o BBRv3, con 1 o 2 hilos de tokio y con H.264 crudo (`import avc3`) en vez de MPEG-TS, así que no es la red ni el demultiplexor TS. El vídeo llega al relay con un tirón por grupo, que solo se ve si el búfer del reproductor es menor. **Está resuelto en la rama principal de moq, sin versión publicada todavía** (medido el 21-10-2026, commit `bc64b9c`, compilado en local con LTO *thin* y solo el transporte QUIC): lee la entrada a 200-730 MB/s sin ritmo real, frente a 1,9-2,0 MB/s de la 0.14.7 tanto publicada como compilada con esos mismos ajustes, así que la diferencia es del código y no de la compilación. En directo, con un espectador: el keyframe espera 0,2-0,3 ms en la compuerta (0.14.7: 32-55 ms de mediana); con la escalera de tres calidades, ningún cambio de calidad ni hueco de entrega en 40 s (0.14.7: 92-140 cambios y espera p95 de 117-146 ms).
 - **Red**: QUIC. Una pérdida retrasa solo los frames siguientes de ese grupo.
-- **Búfer**: `delay` + *jitter* de la rendition (más lo que retenga `buffer`, aquí 0). Es la mayor
-  partida: unos 200 ms de ~300 ms en las medidas del testbed.
+- **Búfer**: `delay` + *jitter* de la rendition (más lo que retenga `buffer`, aquí 0). Es la mayor partida: unos 200 ms de ~300 ms en las medidas del testbed.
 
-La parte que no es búfer suma unas decenas de milisegundos. La latencia de MoQ aquí es, casi entera,
-una decisión de configuración del reproductor.
+La parte que no es búfer suma unas decenas de milisegundos. La latencia de MoQ aquí es, casi entera, una decisión de configuración del reproductor.
 
 ---
 
@@ -1159,9 +755,7 @@ una decisión de configuración del reproductor.
 
 ### 5.1. La idea
 
-WebRTC nació para videollamadas: comunicación **interactiva**, donde llegar tarde es peor que llegar
-con defectos. No trabaja con ficheros ni con streams fiables, sino con **paquetes sueltos sobre UDP**,
-y prefiere mostrar una imagen degradada antes que esperar.
+WebRTC nació para videollamadas: comunicación **interactiva**, donde llegar tarde es peor que llegar con defectos. No trabaja con ficheros ni con streams fiables, sino con **paquetes sueltos sobre UDP**, y prefiere mostrar una imagen degradada antes que esperar.
 
 No es un protocolo, sino una pila de varios, todos obligatorios:
 
@@ -1183,37 +777,21 @@ No es un protocolo, sino una pila de varios, todos obligatorios:
 
 ### 5.2. Establecer la sesión
 
-**Señalización con SDP.** Los dos extremos tienen que acordar códecs, direcciones y claves antes de
-enviar nada. Lo hacen intercambiando dos textos en formato **SDP**: una **oferta** y una
-**respuesta**. WebRTC no dice cómo transportarlos.
+**Señalización con SDP.** Los dos extremos tienen que acordar códecs, direcciones y claves antes de enviar nada. Lo hacen intercambiando dos textos en formato **SDP**: una **oferta** y una **respuesta**. WebRTC no dice cómo transportarlos.
 
-**WHEP** (*WebRTC-HTTP Egress Protocol*) es la forma estándar de hacerlo para reproducir: un único
-`POST` HTTP con la oferta en el cuerpo, y la respuesta en la contestación. En el testbed va a
-`/rtc/live/whep`, a través del nginx de entrada. **Solo la señalización pasa por HTTP**; la media va
-después directa por UDP.
+**WHEP** (*WebRTC-HTTP Egress Protocol*) es la forma estándar de hacerlo para reproducir: un único `POST` HTTP con la oferta en el cuerpo, y la respuesta en la contestación. En el testbed va a `/rtc/live/whep`, a través del nginx de entrada. **Solo la señalización pasa por HTTP**; la media va después directa por UDP.
 
-**ICE.** Es el procedimiento para encontrar un camino de red entre los dos extremos. Cada uno reúne
-**candidatos** (direcciones IP y puertos por los que se le podría alcanzar), los intercambia en el
-SDP, y prueba combinaciones hasta que una funciona. Normalmente hacen falta servidores **STUN** (para
-descubrir la IP pública) y **TURN** (para retransmitir cuando no hay camino directo).
+**ICE.** Es el procedimiento para encontrar un camino de red entre los dos extremos. Cada uno reúne **candidatos** (direcciones IP y puertos por los que se le podría alcanzar), los intercambia en el SDP, y prueba combinaciones hasta que una funciona. Normalmente hacen falta servidores **STUN** (para descubrir la IP pública) y **TURN** (para retransmitir cuando no hay camino directo).
 
-Aquí es más sencillo: el servidor tiene una dirección alcanzable y la anuncia directamente como
-candidato (`MTX_WEBRTCADDITIONALHOSTS`, que toma el valor de `MOQ_HOST`). No hay STUN ni TURN. Todo
-el tráfico va por un único puerto UDP, el 8189.
+Aquí es más sencillo: el servidor tiene una dirección alcanzable y la anuncia directamente como candidato (`MTX_WEBRTCADDITIONALHOSTS`, que toma el valor de `MOQ_HOST`). No hay STUN ni TURN. Todo el tráfico va por un único puerto UDP, el 8189.
 
-**DTLS y SRTP.** Sobre el camino elegido se hace un saludo **DTLS** (TLS adaptado a UDP) del que
-salen las claves. La media se cifra con **SRTP**. La huella del certificado viaja en el SDP, así que
-no hace falta ninguna autoridad certificadora.
+**DTLS y SRTP.** Sobre el camino elegido se hace un saludo **DTLS** (TLS adaptado a UDP) del que salen las claves. La media se cifra con **SRTP**. La huella del certificado viaja en el SDP, así que no hace falta ninguna autoridad certificadora.
 
 ### 5.3. Cómo viaja la media
 
-**RTP.** Cada paquete lleva una cabecera con un **número de secuencia** (para detectar pérdidas y
-reordenar), una **marca de tiempo** (para saber cuándo se muestra) y un identificador de flujo
-(**SSRC**).
+**RTP.** Cada paquete lleva una cabecera con un **número de secuencia** (para detectar pérdidas y reordenar), una **marca de tiempo** (para saber cuándo se muestra) y un identificador de flujo (**SSRC**).
 
-Un frame de vídeo no cabe en un paquete UDP (unos 1200 bytes útiles), así que se **trocea**. Un
-keyframe de 1080p puede ocupar decenas de paquetes. El frame solo puede decodificarse cuando han
-llegado todos.
+Un frame de vídeo no cabe en un paquete UDP (unos 1200 bytes útiles), así que se **trocea**. Un keyframe de 1080p puede ocupar decenas de paquetes. El frame solo puede decodificarse cuando han llegado todos.
 
 **RTCP.** Es el canal de vuelta. El receptor informa al emisor de lo que le llega:
 
@@ -1230,56 +808,30 @@ A diferencia de TCP y QUIC, aquí la retransmisión es **selectiva y con plazo**
 
 1. Falta un paquete. El receptor envía un NACK.
 2. Si la retransmisión llega a tiempo de mostrar el frame, no se nota nada.
-3. Si no llega a tiempo, el frame se descarta. Los siguientes dependen de él, así que la imagen se
-   congela.
-4. El receptor envía un PLI para pedir un keyframe. En una videollamada, el codificador genera uno
-   de inmediato y la imagen vuelve.
+3. Si no llega a tiempo, el frame se descarta. Los siguientes dependen de él, así que la imagen se congela.
+4. El receptor envía un PLI para pedir un keyframe. En una videollamada, el codificador genera uno de inmediato y la imagen vuelve.
 
-En este testbed el paso 4 tiene una limitación (ver también la variable de confusión 7 de 6.4): **MediaMTX no codifica, solo reenvía**. No puede
-fabricar un keyframe a petición, así que el receptor tiene que esperar al siguiente keyframe del
-flujo, que llega cada GOP (1 s). No he comprobado si MediaMTX traslada el PLI de alguna forma al
-origen; por cómo está montada la ingesta (RTSP desde un FFmpeg que copia), no hay nadie que pueda
-atenderlo.
+En este testbed el paso 4 tiene una limitación (ver también la variable de confusión 7 de 6.4): **MediaMTX no codifica, solo reenvía**. No puede fabricar un keyframe a petición, así que el receptor tiene que esperar al siguiente keyframe del flujo, que llega cada GOP (1 s). No he comprobado si MediaMTX traslada el PLI de alguna forma al origen; por cómo está montada la ingesta (RTSP desde un FFmpeg que copia), no hay nadie que pueda atenderlo.
 
 ### 5.5. El búfer de jitter
 
-Los paquetes llegan con separaciones irregulares y a veces desordenados. El **búfer de jitter** los
-retiene lo justo para reordenarlos, esperar retransmisiones y entregar los frames a ritmo constante.
+Los paquetes llegan con separaciones irregulares y a veces desordenados. El **búfer de jitter** los retiene lo justo para reordenarlos, esperar retransmisiones y entregar los frames a ritmo constante.
 
-Es **adaptativo y lo gestiona el navegador**: mide la variación de los tiempos de llegada y ajusta su
-tamaño continuamente. Con buena red baja a decenas de milisegundos; si la red empeora, crece solo.
-En las medidas del testbed estaba entre 55 y 95 ms.
+Es **adaptativo y lo gestiona el navegador**: mide la variación de los tiempos de llegada y ajusta su tamaño continuamente. Con buena red baja a decenas de milisegundos; si la red empeora, crece solo. En las medidas del testbed estaba entre 55 y 95 ms.
 
-La aplicación solo puede **sugerir** un mínimo con `jitterBufferTarget` (el slider "Búfer objetivo").
-El navegador lo trata como una pista, no como una orden. En "auto" no se pide nada.
+La aplicación solo puede **sugerir** un mínimo con `jitterBufferTarget` (el slider "Búfer objetivo"). El navegador lo trata como una pista, no como una orden. En "auto" no se pide nada.
 
 ### 5.6. Control de congestión y adaptación
 
-En una videollamada, el emisor estima el ancho de banda con la realimentación TWCC (algoritmo **GCC**,
-*Google Congestion Control*) y **ordena al codificador que cambie de bitrate** sobre la marcha. La
-adaptación ocurre en el codificador, no eligiendo entre versiones ya hechas. Para repartir a muchos
-se usa **simulcast** (el emisor manda varias calidades y un servidor elige cuál reenviar a cada uno)
-o **SVC** (un flujo en capas).
+En una videollamada, el emisor estima el ancho de banda con la realimentación TWCC (algoritmo **GCC**, *Google Congestion Control*) y **ordena al codificador que cambie de bitrate** sobre la marcha. La adaptación ocurre en el codificador, no eligiendo entre versiones ya hechas. Para repartir a muchos se usa **simulcast** (el emisor manda varias calidades y un servidor elige cuál reenviar a cada uno) o **SVC** (un flujo en capas).
 
-**Nada de eso se usa aquí.** El testbed envía una sola calidad, la más alta, sin recodificar. Si el
-enlace no da para ella, no hay calidad inferior a la que bajar: se pierden paquetes y la imagen se
-congela. Es una decisión deliberada de alcance, y hay que tenerla presente al comparar: **la rama
-WebRTC no tiene adaptación de calidad**, las otras dos sí.
+**Nada de eso se usa aquí.** El testbed envía una sola calidad, la más alta, sin recodificar. Si el enlace no da para ella, no hay calidad inferior a la que bajar: se pierden paquetes y la imagen se congela. Es una decisión deliberada de alcance, y hay que tenerla presente al comparar: **la rama WebRTC no tiene adaptación de calidad**, las otras dos sí.
 
 ### 5.7. El recorrido en este testbed
 
-1. **Ingesta.** `ffmpeg -c:v copy -an -f rtsp` publica el vídeo por RTSP (sobre TCP) en MediaMTX.
-   Sin audio por defecto. Con la opción `rtc_audio`, también el audio Opus de la fuente, sin recodificar
-   (`-c:a copy`). Entonces el navegador sincroniza audio y vídeo: el búfer de jitter objetivo del vídeo
-   sube hasta el del audio (comprobado con `getStats()` el 22-10-2026). Con el bucle el audio pide ~40 ms
-   y la latencia sube poco (de 59-71 a 79-120 ms); con la cámara, cuyo audio llega con más jitter, pide
-   225-315 ms y la latencia sube 100-200 ms (README, sección 3.4b). Una conexión abierta en los primeros
-   segundos de la emisión queda además 45-55 ms por encima toda la sesión; por eso el dashboard espera a
-   que la emisión lleve unos segundos publicada antes de conectar. Hasta ese día la fuente codificaba en
-   AAC, que WebRTC no admite.
+1. **Ingesta.** `ffmpeg -c:v copy -an -f rtsp` publica el vídeo por RTSP (sobre TCP) en MediaMTX. Sin audio por defecto. Con la opción `rtc_audio`, también el audio Opus de la fuente, sin recodificar (`-c:a copy`). Entonces el navegador sincroniza audio y vídeo: el búfer de jitter objetivo del vídeo sube hasta el del audio (comprobado con `getStats()` el 22-10-2026). Con el bucle el audio pide ~40 ms y la latencia sube poco (de 59-71 a 79-120 ms); con la cámara, cuyo audio llega con más jitter, pide 225-315 ms y la latencia sube 100-200 ms (README, sección 3.4b). Una conexión abierta en los primeros segundos de la emisión queda además 45-55 ms por encima toda la sesión; por eso el dashboard espera a que la emisión lleve unos segundos publicada antes de conectar. Hasta ese día la fuente codificaba en AAC, que WebRTC no admite.
 2. **Servidor.** MediaMTX reparte el H.264 en paquetes RTP y los envía a cada navegador conectado.
-3. **Navegador.** `RTCPeerConnection` recibe, reordena, decodifica y pinta en un `<video>`. Todo lo
-   hace el navegador; la aplicación solo lee estadísticas con `getStats()`. Se explica en 5.9.
+3. **Navegador.** `RTCPeerConnection` recibe, reordena, decodifica y pinta en un `<video>`. Todo lo hace el navegador; la aplicación solo lee estadísticas con `getStats()`. Se explica en 5.9.
 
 Que la fuente no use B-frames (`zerolatency`) importa aquí: WebRTC en navegadores no los admite bien.
 
@@ -1289,14 +841,11 @@ Que la fuente no use B-frames (`zerolatency`) importa aquí: WebRTC en navegador
 - **Red**: UDP directo, sin esperas por orden.
 - **Búfer de jitter**: decenas de milisegundos, adaptativo.
 
-En las medidas del testbed, entre 145 y 185 ms en total. Es la rama con menos latencia y también la
-que menos margen tiene.
+En las medidas del testbed, entre 145 y 185 ms en total. Es la rama con menos latencia y también la que menos margen tiene.
 
 ### 5.9. El reproductor: `RTCPeerConnection` por dentro
 
-En esta rama **no hay librería de reproducción**. El reproductor es el propio navegador, a través de
-la API estándar `RTCPeerConnection`. La página se limita a establecer la sesión y a conectar el
-resultado a un elemento `<video>`; son unas cuarenta líneas de código.
+En esta rama **no hay librería de reproducción**. El reproductor es el propio navegador, a través de la API estándar `RTCPeerConnection`. La página se limita a establecer la sesión y a conectar el resultado a un elemento `<video>`; son unas cuarenta líneas de código.
 
 Es la diferencia de fondo con las otras dos ramas:
 
@@ -1315,20 +864,16 @@ UDP ─▶ ICE ─▶ DTLS/SRTP ─▶ RTP ─▶ búfer de jitter ─▶ decodi
                             └─▶ RTCP hacia el servidor: NACK, PLI, informes de recepción
 ```
 
-Recibe los paquetes, los descifra, reconstruye cada frame a partir de sus trozos, pide las
-retransmisiones que falten, decide cuánto retener cada frame, lo decodifica y lo pinta.
+Recibe los paquetes, los descifra, reconstruye cada frame a partir de sus trozos, pide las retransmisiones que falten, decide cuánto retener cada frame, lo decodifica y lo pinta.
 
 **Lo que hace la página**, paso a paso:
 
 1. **Crea la conexión**, sin servidores STUN ni TURN: `new RTCPeerConnection()`.
-2. **Declara qué quiere recibir**: un único flujo de vídeo, solo de recepción
-   (`addTransceiver('video', { direction: 'recvonly' })`).
+2. **Declara qué quiere recibir**: un único flujo de vídeo, solo de recepción (`addTransceiver('video', { direction: 'recvonly' })`).
 3. **Genera la oferta SDP** y espera a que el navegador reúna sus candidatos ICE, hasta 2 s.
-4. **La envía por WHEP**: un `POST` a `/rtc/live/whep` con la oferta en el cuerpo
-   (`Content-Type: application/sdp`).
+4. **La envía por WHEP**: un `POST` a `/rtc/live/whep` con la oferta en el cuerpo (`Content-Type: application/sdp`).
 5. **Aplica la respuesta SDP** que devuelve MediaMTX.
-6. **Conecta el vídeo**: cuando el navegador avisa de que llega la pista, la asigna al `<video>`
-   (`video.srcObject`).
+6. **Conecta el vídeo**: cuando el navegador avisa de que llega la pista, la asigna al `<video>` (`video.srcObject`).
 
 A partir del paso 5, navegador y MediaMTX completan solos ICE y DTLS y empieza a llegar el vídeo.
 
@@ -1351,13 +896,9 @@ v=0
                                         (la dirección del servidor, puerto UDP 8189) y mi huella"
 ```
 
-El testbed usa la variante **sin *trickle***: en vez de ir enviando los candidatos ICE según
-aparecen, espera a tenerlos todos y los manda dentro de la oferta. Es más simple y cuesta como mucho
-esos 2 s al conectar. Al cerrar, la página cierra la conexión sin avisar a MediaMTX por HTTP; el
-servidor la da por terminada cuando deja de recibir tráfico.
+El testbed usa la variante **sin *trickle***: en vez de ir enviando los candidatos ICE según aparecen, espera a tenerlos todos y los manda dentro de la oferta. Es más simple y cuesta como mucho esos 2 s al conectar. Al cerrar, la página cierra la conexión sin avisar a MediaMTX por HTTP; el servidor la da por terminada cuando deja de recibir tráfico.
 
-**Lo que se negocia.** En la respuesta de MediaMTX capturada en una prueba, el vídeo H.264 se
-acordó con estos mecanismos de realimentación:
+**Lo que se negocia.** En la respuesta de MediaMTX capturada en una prueba, el vídeo H.264 se acordó con estos mecanismos de realimentación:
 
 | Mecanismo | Qué permite |
 | :--- | :--- |
@@ -1365,8 +906,7 @@ acordó con estos mecanismos de realimentación:
 | `nack pli` | Que pida un keyframe nuevo. |
 | `transport-cc` | Que informe de los tiempos de llegada, para estimar el ancho de banda. |
 
-No se negoció la extensión de retardo de reproducción, con la que un servidor puede imponer un búfer
-mínimo o máximo al receptor. El búfer queda entero a criterio del navegador.
+No se negoció la extensión de retardo de reproducción, con la que un servidor puede imponer un búfer mínimo o máximo al receptor. El búfer queda entero a criterio del navegador.
 
 **Los mandos disponibles.** Solo hay uno con efecto sobre la reproducción:
 
@@ -1376,8 +916,7 @@ mínimo o máximo al receptor. El búfer queda entero a criterio del navegador.
 
 No hay selector de calidad ni ABR en la página: MediaMTX envía un único flujo.
 
-**Lo que la página puede leer.** `getStats()` devuelve las estadísticas internas del navegador. El
-testbed las consulta cada 500 ms y usa estas:
+**Lo que la página puede leer.** `getStats()` devuelve las estadísticas internas del navegador. El testbed las consulta cada 500 ms y usa estas:
 
 | Estadística | Para qué |
 | :--- | :--- |
@@ -1387,17 +926,13 @@ testbed las consulta cada 500 ms y usa estas:
 | `frameHeight` | Resolución recibida. |
 | `packetsLost` | Paquetes perdidos. |
 
-Otras que el navegador ofrece y son útiles para diagnosticar: `nackCount` y `pliCount` (cuántas
-retransmisiones y keyframes ha pedido), `jitter`, `totalDecodeTime` y `framesDecoded`.
+Otras que el navegador ofrece y son útiles para diagnosticar: `nackCount` y `pliCount` (cuántas retransmisiones y keyframes ha pedido), `jitter`, `totalDecodeTime` y `framesDecoded`.
 
 **Lo que el testbed añade alrededor:**
 
-- **Reintento.** Si la negociación falla, lo habitual justo tras un arranque porque MediaMTX aún no
-  tiene la emisión, se repite cada 1,5 s.
-- **Vigilancia.** Como en las otras ramas: 10 s sin imagen nueva y se recrea la conexión
-  (`rtc_player_restarts`).
-- **Medida.** El timecode se lee del `<video>`. La hora de llegada de cada frame la da el navegador
-  con cada frame presentado (ver D.5 y la reserva de D.8).
+- **Reintento.** Si la negociación falla, lo habitual justo tras un arranque porque MediaMTX aún no tiene la emisión, se repite cada 1,5 s.
+- **Vigilancia.** Como en las otras ramas: 10 s sin imagen nueva y se recrea la conexión (`rtc_player_restarts`).
+- **Medida.** El timecode se lee del `<video>`. La hora de llegada de cada frame la da el navegador con cada frame presentado (ver D.5 y la reserva de D.8).
 
 ---
 
@@ -1442,45 +977,19 @@ retransmisiones y keyframes ha pedido), `jitter`, `totalDecodeTime` y `framesDec
 
 Diferencias entre las ramas que no son del protocolo en sí, y que conviene controlar o citar:
 
-1. **Control de congestión**: CUBIC (DASH) frente a BBRv3 (MoQ). El relay admite `loss` para
-   acercarlos.
+1. **Control de congestión**: CUBIC (DASH) frente a BBRv3 (MoQ). El relay admite `loss` para acercarlos.
 2. **Adaptación**: WebRTC no tiene; DASH y MoQ sí.
 3. **Audio**: WebRTC no lo lleva; los otros dos sí (aunque silenciado en el reproductor).
-4. **Búfer**: cada rama tiene un valor por defecto de orden distinto. Comparar latencias es, en buena
-   parte, comparar configuraciones de búfer.
-5. **Implementación**: se mide `dash.js`, `@moq/watch` y el WebRTC del navegador, no los protocolos
-   en abstracto. Otras implementaciones se comportarían distinto.
-6. **Proxy**: si DASH pasa por el punto de entrada, la conexión TCP del navegador termina en el proxy
-   y la red emulada actúa sobre una segunda conexión interna. Se evita con el camino directo
-   (`DASH_HOST`), en el que la conexión del navegador atraviesa el router igual que en MoQ y WebRTC.
-   El CSV registra qué camino se usó (`dash_path`).
-7. **Codificación pensada para emisión, no para WebRTC interactivo.** Las tres ramas reciben el mismo
-   flujo: H.264 *Constrained Baseline* sin B-frames, un keyframe cada GOP (1 s por defecto) y bitrate
-   con tope (120 % del nominal, búfer de 1 s). Es la configuración que recomiendan los servicios que
-   reciben WebRTC desde un codificador externo (WHIP): sin B-frames y keyframe cada 1-2 s. Pero no es
-   como codifica WebRTC en una videollamada. Allí el codificador de los navegadores (libwebrtc) usa
-   bitrate constante ajustado en vivo por el control de congestión, un intervalo de keyframes de 3000
-   frames (50 s a 60 fps) y keyframes adicionales cuando el receptor los pide tras una pérdida.
+4. **Búfer**: cada rama tiene un valor por defecto de orden distinto. Comparar latencias es, en buena parte, comparar configuraciones de búfer.
+5. **Implementación**: se mide `dash.js`, `@moq/watch` y el WebRTC del navegador, no los protocolos en abstracto. Otras implementaciones se comportarían distinto.
+6. **Proxy**: si DASH pasa por el punto de entrada, la conexión TCP del navegador termina en el proxy y la red emulada actúa sobre una segunda conexión interna. Se evita con el camino directo (`DASH_HOST`), en el que la conexión del navegador atraviesa el router igual que en MoQ y WebRTC. El CSV registra qué camino se usó (`dash_path`).
+7. **Codificación pensada para emisión, no para WebRTC interactivo.** Las tres ramas reciben el mismo flujo: H.264 *Constrained Baseline* sin B-frames, un keyframe cada GOP (1 s por defecto) y bitrate con tope (120 % del nominal, búfer de 1 s). Es la configuración que recomiendan los servicios que reciben WebRTC desde un codificador externo (WHIP): sin B-frames y keyframe cada 1-2 s. Pero no es como codifica WebRTC en una videollamada. Allí el codificador de los navegadores (libwebrtc) usa bitrate constante ajustado en vivo por el control de congestión, un intervalo de keyframes de 3000 frames (50 s a 60 fps) y keyframes adicionales cuando el receptor los pide tras una pérdida.
 
-   Aquí falta ese lazo con el codificador. MediaMTX reenvía lo que recibe de un FFmpeg que solo copia,
-   así que nadie atiende las peticiones de keyframe del navegador (PLI/FIR) ni ajusta la tasa del
-   codificador según la congestión. Tras una pérdida, la imagen solo se recupera en el siguiente GOP, y
-   ante falta de ancho de banda no hay forma de bajar la tasa. Las otras dos ramas tampoco tienen ese
-   lazo, pero no lo necesitan: DASH y MoQ adaptan eligiendo entre calidades ya codificadas.
+   Aquí falta ese lazo con el codificador. MediaMTX reenvía lo que recibe de un FFmpeg que solo copia, así que nadie atiende las peticiones de keyframe del navegador (PLI/FIR) ni ajusta la tasa del codificador según la congestión. Tras una pérdida, la imagen solo se recupera en el siguiente GOP, y ante falta de ancho de banda no hay forma de bajar la tasa. Las otras dos ramas tampoco tienen ese lazo, pero no lo necesitan: DASH y MoQ adaptan eligiendo entre calidades ya codificadas.
 
-   El GOP fijo es aquí la elección correcta (con un GOP "a lo libwebrtc", la espera tras una pérdida
-   podría ser de 50 s) y es necesario para las otras ramas: en DASH cada segmento empieza por un
-   keyframe, y en MoQ cada grupo es un GOP. Pero significa que **WebRTC se mide en condiciones
-   distintas a las de su uso habitual**, especialmente con pérdidas o con ancho de banda limitado. Para
-   medirlo "como en una videollamada" haría falta un emisor propio que atienda la realimentación del
-   receptor (un navegador o un emisor basado en libwebrtc); rompería el flujo idéntico para las tres
-   ramas, así que sería un experimento aparte y declarado.
+   El GOP fijo es aquí la elección correcta (con un GOP "a lo libwebrtc", la espera tras una pérdida podría ser de 50 s) y es necesario para las otras ramas: en DASH cada segmento empieza por un keyframe, y en MoQ cada grupo es un GOP. Pero significa que **WebRTC se mide en condiciones distintas a las de su uso habitual**, especialmente con pérdidas o con ancho de banda limitado. Para medirlo "como en una videollamada" haría falta un emisor propio que atienda la realimentación del receptor (un navegador o un emisor basado en libwebrtc); rompería el flujo idéntico para las tres ramas, así que sería un experimento aparte y declarado.
 
-   Fuentes: el estándar solo fija los códecs (RFC 7742); el comportamiento de libwebrtc sale de su
-   código (`libvpx_vp8_encoder.cc`, `h264_encoder_impl.cc` y los valores por defecto de
-   `video_encoder.cc`); las recomendaciones de ingesta, de guías de Gcore, Alibaba Cloud, VDO.Ninja y
-   nanocosmos. Las unidades del búfer de libvpx (milisegundos) son una lectura de su configuración, no
-   un comentario del código.
+   Fuentes: el estándar solo fija los códecs (RFC 7742); el comportamiento de libwebrtc sale de su código (`libvpx_vp8_encoder.cc`, `h264_encoder_impl.cc` y los valores por defecto de `video_encoder.cc`); las recomendaciones de ingesta, de guías de Gcore, Alibaba Cloud, VDO.Ninja y nanocosmos. Las unidades del búfer de libvpx (milisegundos) son una lectura de su configuración, no un comentario del código.
 
 ---
 
@@ -1514,8 +1023,7 @@ Diferencias entre las ramas que no son del protocolo en sí, y que conviene cont
 
 **Catálogo**. En MoQ, pista que describe las demás pistas del broadcast.
 
-**Chunk / fragmento CMAF**. Par `moof` + `mdat`: la porción mínima de un segmento que se puede
-decodificar.
+**Chunk / fragmento CMAF**. Par `moof` + `mdat`: la porción mínima de un segmento que se puede decodificar.
 
 **CMAF**. Formato de MP4 fragmentado común a DASH y HLS.
 
@@ -1533,8 +1041,7 @@ decodificar.
 
 **hang**. Formato de media (catálogo y contenedor) del proyecto `moq.dev`.
 
-**Head-of-line blocking**. Que un dato perdido detenga a los que vienen detrás aunque ya hayan
-llegado.
+**Head-of-line blocking**. Que un dato perdido detenga a los que vienen detrás aunque ya hayan llegado.
 
 **ICE**. Procedimiento de WebRTC para encontrar un camino de red entre dos extremos.
 
@@ -1564,8 +1071,7 @@ llegado.
 
 **PROBE**. En moq-lite, mensaje con el que el emisor comunica su estimación de bitrate y RTT.
 
-**QUIC**. Protocolo de transporte sobre UDP con streams independientes, cifrado y control de
-congestión.
+**QUIC**. Protocolo de transporte sobre UDP con streams independientes, cifrado y control de congestión.
 
 **Relay**. Servidor MoQ que se suscribe hacia arriba y publica hacia abajo.
 
@@ -1593,12 +1099,9 @@ congestión.
 
 ## Anexo A. El manifiesto MPD, campo a campo
 
-Este anexo recorre el manifiesto que sirve el testbed, elemento por elemento y atributo por atributo:
-qué significa cada uno, qué valor tiene aquí, de dónde sale y qué hace el reproductor con él.
+Este anexo recorre el manifiesto que sirve el testbed, elemento por elemento y atributo por atributo: qué significa cada uno, qué valor tiene aquí, de dónde sale y qué hace el reproductor con él.
 
-El manifiesto de ejemplo se capturó del servidor el 9 de octubre de 2026, con una sola calidad
-(1080p a 4000 kbit/s), segmentos de 2 s y fragmentos de 100 ms. Los valores numéricos de los ejemplos
-salen de él.
+El manifiesto de ejemplo se capturó del servidor el 9 de octubre de 2026, con una sola calidad (1080p a 4000 kbit/s), segmentos de 2 s y fragmentos de 100 ms. Los valores numéricos de los ejemplos salen de él.
 
 ### A.1. El manifiesto completo
 
@@ -1658,8 +1161,7 @@ salen de él.
 </MPD>
 ```
 
-Lo escribe FFmpeg (`-f dash`). El testbed interviene en dos puntos, que se señalan donde tocan: el
-origen reescribe `availabilityStartTime`, y el `bandwidth` del vídeo se le declara a FFmpeg a mano.
+Lo escribe FFmpeg (`-f dash`). El testbed interviene en dos puntos, que se señalan donde tocan: el origen reescribe `availabilityStartTime`, y el `bandwidth` del vídeo se le declara a FFmpeg a mano.
 
 ### A.2. Los formatos que aparecen
 
@@ -1695,36 +1197,19 @@ Describe la emisión en su conjunto.
 | `maxSegmentDuration` | `PT2.0S` | Duración máxima de un segmento en toda la emisión. |
 | `minBufferTime` | `PT1.0S` | Parámetro del modelo de búfer que define qué significa `bandwidth`. |
 
-**`type`.** Con `dynamic`, el reproductor no puede pedir cualquier segmento: solo los que la hora
-actual hace disponibles. Con `static` no hay reloj que consultar.
+**`type`.** Con `dynamic`, el reproductor no puede pedir cualquier segmento: solo los que la hora actual hace disponibles. Con `static` no hay reloj que consultar.
 
-**`availabilityStartTime` (AST).** Si el AST es las 14:07:37,116, el frame con tiempo de medios 10 s
-corresponde a las 14:07:47,116. Todos los cálculos de A.9 parten de aquí. Un AST adelantado hace que
-el reproductor pida segmentos que aún no existen (errores 404); uno atrasado añade latencia sin que
-el reproductor lo sepa.
+**`availabilityStartTime` (AST).** Si el AST es las 14:07:37,116, el frame con tiempo de medios 10 s corresponde a las 14:07:47,116. Todos los cálculos de A.9 parten de aquí. Un AST adelantado hace que el reproductor pida segmentos que aún no existen (errores 404); uno atrasado añade latencia sin que el reproductor lo sepa.
 
-> **Intervención del testbed.** FFmpeg escribe como AST la hora en que arrancó, que no coincide con
-> la hora real en que empiezan a existir los segmentos. El origen (`origin.py`) mide a qué hora se
-> abre cada segmento, calcula el AST que le corresponde y lo sustituye en el manifiesto antes de
-> servirlo. Mientras no lo tiene calibrado, no publica el manifiesto. El desfase del último segmento
-> respecto a ese calendario es la métrica `dash_availability_drift_ms`.
+> **Intervención del testbed.** FFmpeg escribe como AST la hora en que arrancó, que no coincide con la hora real en que empiezan a existir los segmentos. El origen (`origin.py`) mide a qué hora se abre cada segmento, calcula el AST que le corresponde y lo sustituye en el manifiesto antes de servirlo. Mientras no lo tiene calibrado, no publica el manifiesto. El desfase del último segmento respecto a ese calendario es la métrica `dash_availability_drift_ms`.
 
-**`publishTime`.** Sirve para distinguir versiones del manifiesto. En el ejemplo, el manifiesto se
-generó 3 h 5 min después de empezar la emisión.
+**`publishTime`.** Sirve para distinguir versiones del manifiesto. En el ejemplo, el manifiesto se generó 3 h 5 min después de empezar la emisión.
 
-**`minimumUpdatePeriod`.** En un manifiesto con lista explícita de segmentos hay que releerlo
-constantemente para descubrir los nuevos. Aquí las direcciones se calculan con una fórmula (A.9), así
-que el manifiesto no cambia y basta un valor alto: 500 s.
+**`minimumUpdatePeriod`.** En un manifiesto con lista explícita de segmentos hay que releerlo constantemente para descubrir los nuevos. Aquí las direcciones se calculan con una fórmula (A.9), así que el manifiesto no cambia y basta un valor alto: 500 s.
 
-**`timeShiftBufferDepth`.** Define la ventana en la que se puede retroceder. Con 30 s, a las
-17:13:13 se puede pedir contenido desde las 17:12:43. FFmpeg recibe la ventana con
-`-window_size` y va pidiendo al origen que borre los segmentos que salen de ella.
+**`timeShiftBufferDepth`.** Define la ventana en la que se puede retroceder. Con 30 s, a las 17:13:13 se puede pedir contenido desde las 17:12:43. FFmpeg recibe la ventana con `-window_size` y va pidiendo al origen que borre los segmentos que salen de ella.
 
-**`minBufferTime` y `bandwidth`.** Van juntos. La definición formal es: si el cliente descarga por
-un canal de velocidad constante igual al `bandwidth` de una Representation, y espera `minBufferTime`
-antes de empezar a reproducir, no se quedará sin datos. Es decir, `bandwidth` no es el bitrate medio,
-sino un caudal que garantiza continuidad dado ese colchón. En la práctica los reproductores usan
-`bandwidth` como bitrate de la calidad y gestionan su búfer con ajustes propios.
+**`minBufferTime` y `bandwidth`.** Van juntos. La definición formal es: si el cliente descarga por un canal de velocidad constante igual al `bandwidth` de una Representation, y espera `minBufferTime` antes de empezar a reproducir, no se quedará sin datos. Es decir, `bandwidth` no es el bitrate medio, sino un caudal que garantiza continuidad dado ese colchón. En la práctica los reproductores usan `bandwidth` como bitrate de la calidad y gestionan su búfer con ajustes propios.
 
 Atributos que este manifiesto no lleva y conviene conocer:
 
@@ -1736,8 +1221,7 @@ Atributos que este manifiesto no lleva y conviene conocer:
 
 ### A.4. `ProgramInformation` y `ServiceDescription`
 
-**`ProgramInformation`** lleva metadatos para humanos: título, fuente, derechos. Aquí está vacío.
-Con contenido sería así:
+**`ProgramInformation`** lleva metadatos para humanos: título, fuente, derechos. Aquí está vacío. Con contenido sería así:
 
 ```xml
 <ProgramInformation>
@@ -1746,9 +1230,7 @@ Con contenido sería así:
 </ProgramInformation>
 ```
 
-**`ServiceDescription`** es donde el servicio le dice al reproductor cómo quiere que se comporte en
-baja latencia. Aquí está vacío, con solo su `id`. Es importante saber qué podría llevar, porque es el
-mecanismo estándar para fijar la latencia desde el servidor:
+**`ServiceDescription`** es donde el servicio le dice al reproductor cómo quiere que se comporte en baja latencia. Aquí está vacío, con solo su `id`. Es importante saber qué podría llevar, porque es el mecanismo estándar para fijar la latencia desde el servidor:
 
 ```xml
 <ServiceDescription id="0">
@@ -1763,29 +1245,22 @@ mecanismo estándar para fijar la latencia desde el servidor:
 | `Latency@min`, `@max` | Margen aceptable. Fuera de él, el reproductor debe corregir. |
 | `PlaybackRate@min`, `@max` | Cuánto puede acelerar o frenar la reproducción para corregir. `1.04` es un 4 % más rápido. |
 
-Como el del testbed está vacío, **el manifiesto no impone ninguna latencia**: la fija el slider del
-panel, que escribe el ajuste `liveDelay` de `dash.js`. Es una diferencia con MoQ, donde el publicador
-sí condiciona el búfer del reproductor a través del catálogo.
+Como el del testbed está vacío, **el manifiesto no impone ninguna latencia**: la fija el slider del panel, que escribe el ajuste `liveDelay` de `dash.js`. Es una diferencia con MoQ, donde el publicador sí condiciona el búfer del reproductor a través del catálogo.
 
 ### A.5. `Period`
 
-Un tramo continuo de contenido. Una emisión puede tener varios, por ejemplo programa, publicidad y
-programa; cada uno con sus propias pistas y calidades.
+Un tramo continuo de contenido. Una emisión puede tener varios, por ejemplo programa, publicidad y programa; cada uno con sus propias pistas y calidades.
 
 | Atributo | Valor aquí | Significado |
 | :--- | :--- | :--- |
 | `id` | `0` | Identificador. |
 | `start` | `PT0.0S` | Cuándo empieza el periodo, contado desde el AST. |
 
-Con `start="PT0.0S"` el periodo empieza justo en el AST. Si hubiera un segundo periodo con
-`start="PT600S"`, empezaría 10 minutos después, y su tiempo de medios volvería a contar desde su
-propio origen.
+Con `start="PT0.0S"` el periodo empieza justo en el AST. Si hubiera un segundo periodo con `start="PT600S"`, empezaría 10 minutos después, y su tiempo de medios volvería a contar desde su propio origen.
 
 ### A.6. `AdaptationSet`
 
-Un componente del contenido: aquí hay dos, el vídeo y el audio. Dentro de un AdaptationSet, todas
-las Representations son **el mismo contenido en versiones intercambiables**. El reproductor elige una
-de cada AdaptationSet y puede cambiar entre las de uno mismo.
+Un componente del contenido: aquí hay dos, el vídeo y el audio. Dentro de un AdaptationSet, todas las Representations son **el mismo contenido en versiones intercambiables**. El reproductor elige una de cada AdaptationSet y puede cambiar entre las de uno mismo.
 
 | Atributo | Vídeo | Audio | Significado |
 | :--- | :--- | :--- | :--- |
@@ -1798,33 +1273,19 @@ de cada AdaptationSet y puede cambiar entre las de uno mismo.
 | `maxWidth`, `maxHeight` | `1920`, `1080` | — | La resolución mayor de entre sus Representations. |
 | `par` | `16:9` | — | Relación de aspecto de la imagen. |
 
-**`startWithSAP`.** Un SAP (*Stream Access Point*) es un punto por el que se puede empezar a
-decodificar. El tipo 1 es el más estricto: un keyframe a partir del cual todo lo que sigue se
-decodifica y se muestra en orden, sin depender de nada anterior. Es lo que garantiza que el
-reproductor puede entrar por cualquier segmento. Por eso el segmento tiene que ser múltiplo del GOP:
-con GOP de 1 s y segmento de 2 s, cada segmento empieza por keyframe.
+**`startWithSAP`.** Un SAP (*Stream Access Point*) es un punto por el que se puede empezar a decodificar. El tipo 1 es el más estricto: un keyframe a partir del cual todo lo que sigue se decodifica y se muestra en orden, sin depender de nada anterior. Es lo que garantiza que el reproductor puede entrar por cualquier segmento. Por eso el segmento tiene que ser múltiplo del GOP: con GOP de 1 s y segmento de 2 s, cada segmento empieza por keyframe.
 
-**`segmentAlignment`.** Si el segmento 5568 de 1080p cubre de 11134 a 11136 s, el de 720p cubre
-exactamente lo mismo. Así el reproductor puede reproducir el 5568 en una calidad y el 5569 en otra
-sin huecos ni solapes. El testbed lo consigue codificando todas las calidades con el mismo GOP y sin
-cortes de escena.
+**`segmentAlignment`.** Si el segmento 5568 de 1080p cubre de 11134 a 11136 s, el de 720p cubre exactamente lo mismo. Así el reproductor puede reproducir el 5568 en una calidad y el 5569 en otra sin huecos ni solapes. El testbed lo consigue codificando todas las calidades con el mismo GOP y sin cortes de escena.
 
-**`frameRate="60/1"`.** Se da como fracción para expresar tasas no enteras: 29,97 fps se escribe
-`30000/1001`.
+**`frameRate="60/1"`.** Se da como fracción para expresar tasas no enteras: 29,97 fps se escribe `30000/1001`.
 
-**`par`** (*picture aspect ratio*) es la forma de la imagen final. No hay que confundirlo con `sar`
-de la Representation (A.7).
+**`par`** (*picture aspect ratio*) es la forma de la imagen final. No hay que confundirlo con `sar` de la Representation (A.7).
 
-**Con varias calidades**, el AdaptationSet de vídeo contiene una Representation por cada una, todas
-dentro del mismo conjunto. Esto lo fija la opción `-adaptation_sets "id=0,streams=v id=1,streams=a"`
-de FFmpeg: sin ella, cada calidad quedaría en un AdaptationSet distinto y `dash.js` no conmutaría
-entre ellas.
+**Con varias calidades**, el AdaptationSet de vídeo contiene una Representation por cada una, todas dentro del mismo conjunto. Esto lo fija la opción `-adaptation_sets "id=0,streams=v id=1,streams=a"` de FFmpeg: sin ella, cada calidad quedaría en un AdaptationSet distinto y `dash.js` no conmutaría entre ellas.
 
 #### El elemento `Resync`
 
-Aparece dos veces en cada componente, y es específico de la baja latencia. Describe los **puntos de
-resincronización dentro de un segmento**: lugares por los que un reproductor puede engancharse sin
-esperar al segmento siguiente.
+Aparece dos veces en cada componente, y es específico de la baja latencia. Describe los **puntos de resincronización dentro de un segmento**: lugares por los que un reproductor puede engancharse sin esperar al segmento siguiente.
 
 | Dónde | Valor | Significado |
 | :--- | :--- | :--- |
@@ -1833,19 +1294,15 @@ esperar al segmento siguiente.
 | Representation de audio | `dT="21333" type="1"` | Hay un punto de acceso de tipo 1 cada 21,333 ms como máximo. |
 
 - **`dT`** es la distancia máxima entre puntos, en unidades de `timescale` (aquí, microsegundos).
-- **`type`** es el tipo de SAP que se garantiza en esos puntos. `0` significa que no se garantiza
-  ninguno: es solo un límite de fragmento, por el que se puede empezar a *leer* pero no
-  necesariamente a *decodificar*.
+- **`type`** es el tipo de SAP que se garantiza en esos puntos. `0` significa que no se garantiza ninguno: es solo un límite de fragmento, por el que se puede empezar a *leer* pero no necesariamente a *decodificar*.
 
 Los tres valores se corresponden con la configuración:
 
 - 100 ms es la duración de fragmento: cada `moof` + `mdat` es un punto de resincronización.
 - 1 s es el GOP: cada keyframe es un punto por el que empezar a decodificar.
-- 21,333 ms es un frame de audio AAC: 1024 muestras a 48 000 Hz. Todos los frames de audio son
-  independientes, así que cada uno es un punto de acceso.
+- 21,333 ms es un frame de audio AAC: 1024 muestras a 48 000 Hz. Todos los frames de audio son independientes, así que cada uno es un punto de acceso.
 
-Leídos juntos dicen: "puedes engancharte a mitad de segmento cada 100 ms, pero para empezar a mostrar
-vídeo tendrás que esperar hasta 1 s a que llegue un keyframe".
+Leídos juntos dicen: "puedes engancharte a mitad de segmento cada 100 ms, pero para empezar a mostrar vídeo tendrás que esperar hasta 1 s a que llegue un keyframe".
 
 ### A.7. `Representation`
 
@@ -1871,26 +1328,17 @@ Una versión concreta: lo que en MoQ se llama rendition.
 | `c0` | — | Restricciones adicionales: con estos bits, *Constrained Baseline*. |
 | `2a` | 42 en decimal | Nivel 4.2, el que permite 1080p a 60 fps. |
 
-El reproductor usa esta cadena para preguntar al navegador si puede decodificarlo antes de descargar
-nada. El perfil *Baseline* es consecuencia de codificar con `-preset ultrafast`: sin B-frames ni
-CABAC.
+El reproductor usa esta cadena para preguntar al navegador si puede decodificarlo antes de descargar nada. El perfil *Baseline* es consecuencia de codificar con `-preset ultrafast`: sin B-frames ni CABAC.
 
-Compárese con el catálogo de MoQ, que para el mismo vídeo dice `avc3.42c02a`. Los mismos bytes, pero
-`avc3` indica que los parámetros van dentro del flujo, repetidos en cada keyframe, y `avc1` que van
-aparte, en el segmento de inicialización.
+Compárese con el catálogo de MoQ, que para el mismo vídeo dice `avc3.42c02a`. Los mismos bytes, pero `avc3` indica que los parámetros van dentro del flujo, repetidos en cada keyframe, y `avc1` que van aparte, en el segmento de inicialización.
 
 **`bandwidth="4000000"`.**
 
-> **Intervención del testbed.** Como el empaquetador copia el vídeo sin recodificar (`-c copy`),
-> FFmpeg no conoce su bitrate. El testbed se lo declara (`-b:v:0 4000k`) para que el manifiesto lo
-> lleve. Es el valor nominal de la escalera, no una medida. El ABR de `dash.js` lo usa para decidir
-> si una calidad cabe.
+> **Intervención del testbed.** Como el empaquetador copia el vídeo sin recodificar (`-c copy`), FFmpeg no conoce su bitrate. El testbed se lo declara (`-b:v:0 4000k`) para que el manifiesto lo lleve. Es el valor nominal de la escalera, no una medida. El ABR de `dash.js` lo usa para decidir si una calidad cabe.
 
-Aquí hay otra diferencia con MoQ: para esta misma calidad, el catálogo de MoQ declara unos
-7 Mbit/s, porque allí el valor lo mide el publicador.
+Aquí hay otra diferencia con MoQ: para esta misma calidad, el catálogo de MoQ declara unos 7 Mbit/s, porque allí el valor lo mide el publicador.
 
-**`sar`** (*sample aspect ratio*) es la forma de cada píxel. `1:1` son píxeles cuadrados. Con vídeo
-anamórfico, por ejemplo 1440×1080 mostrado como 16:9, sería `4:3`.
+**`sar`** (*sample aspect ratio*) es la forma de cada píxel. `1:1` son píxeles cuadrados. Con vídeo anamórfico, por ejemplo 1440×1080 mostrado como 16:9, sería `4:3`.
 
 **Audio**
 
@@ -1900,14 +1348,11 @@ anamórfico, por ejemplo 1440×1080 mostrado como 16:9, sería `4:3`.
 | `bandwidth` | `130858` | Aquí sí lo conoce FFmpeg, porque lo lee del flujo: unos 128 kbit/s más cabeceras. |
 | `audioSamplingRate` | `48000` | Muestras por segundo. |
 
-**`AudioChannelConfiguration`** indica la disposición de canales. Con el esquema
-`...audio_channel_configuration:2011`, el `value` es directamente el número de canales: `2` es
-estéreo.
+**`AudioChannelConfiguration`** indica la disposición de canales. Con el esquema `...audio_channel_configuration:2011`, el `value` es directamente el número de canales: `2` es estéreo.
 
 ### A.8. `ProducerReferenceTime`
 
-Relaciona un instante del vídeo con la hora de reloj a la que se produjo. Es lo que permite a un
-reproductor calcular su latencia real de extremo a extremo.
+Relaciona un instante del vídeo con la hora de reloj a la que se produjo. Es lo que permite a un reproductor calcular su latencia real de extremo a extremo.
 
 | Atributo | Valor aquí | Significado |
 | :--- | :--- | :--- |
@@ -1925,17 +1370,11 @@ latencia = ahora − (wallClockTime + tiempo de medios que se está mostrando)
 
 El `UTCTiming` anidado indica con qué reloj se tomó esa hora, para que el reproductor use el mismo.
 
-> **Observación.** En este manifiesto, `wallClockTime` (14:07:38,089) y `availabilityStartTime`
-> (14:07:37,116) difieren en 0,973 s, cuando los dos se refieren al tiempo de medios 0. El primero lo
-> escribe FFmpeg con su propio reloj y el origen no lo corrige; el segundo es el que el origen
-> recalibra. La latencia que declaró `dash.js` en las pruebas (3,002 s con objetivo de 3 s, frente a
-> 3,119 s medidos por timecode) es coherente con que se guíe por el AST. No he comprobado en su
-> código qué uso hace de este elemento.
+> **Observación.** En este manifiesto, `wallClockTime` (14:07:38,089) y `availabilityStartTime` (14:07:37,116) difieren en 0,973 s, cuando los dos se refieren al tiempo de medios 0. El primero lo escribe FFmpeg con su propio reloj y el origen no lo corrige; el segundo es el que el origen recalibra. La latencia que declaró `dash.js` en las pruebas (3,002 s con objetivo de 3 s, frente a 3,119 s medidos por timecode) es coherente con que se guíe por el AST. No he comprobado en su código qué uso hace de este elemento.
 
 ### A.9. `SegmentTemplate`: cómo se calculan las direcciones
 
-Es la pieza central. En vez de listar los segmentos, da una **fórmula** para construir sus
-direcciones y saber cuándo existen.
+Es la pieza central. En vez de listar los segmentos, da una **fórmula** para construir sus direcciones y saber cuándo existen.
 
 | Atributo | Valor aquí | Significado |
 | :--- | :--- | :--- |
@@ -1956,8 +1395,7 @@ direcciones y saber cuándo existen.
 | `$Bandwidth$` | El `bandwidth` de la Representation. No se usa aquí. |
 | `$Time$` | El tiempo de inicio del segmento. Se usa con listas de segmentos, no aquí. |
 
-Para la Representation `0`, las direcciones quedan `init-stream0.m4s` y `chunk-stream0-00042.m4s`.
-Son relativas a la del manifiesto: `/media/dash/chunk-stream0-00042.m4s`.
+Para la Representation `0`, las direcciones quedan `init-stream0.m4s` y `chunk-stream0-00042.m4s`. Son relativas a la del manifiesto: `/media/dash/chunk-stream0-00042.m4s`.
 
 **Qué segmento toca.** El número del segmento que se está produciendo en un instante dado es:
 
@@ -1975,8 +1413,7 @@ número = 1 + 5567 = 5568
 dirección: /media/dash/chunk-stream0-05568.m4s
 ```
 
-Ese segmento cubre el tiempo de medios de 11 134 a 11 136 s. El reproductor no ha descargado ninguna
-lista: lo ha calculado con el reloj.
+Ese segmento cubre el tiempo de medios de 11 134 a 11 136 s. El reproductor no ha descargado ninguna lista: lo ha calculado con el reloj.
 
 **Cuándo se puede pedir.** En DASH clásico, un segmento está disponible cuando termina:
 
@@ -1984,8 +1421,7 @@ lista: lo ha calculado con el reloj.
 disponible desde = AST + Period@start + (número − startNumber + 1) × duración
 ```
 
-Para el 5568: 14:07:37,116 + 5568 × 2 s = **17:13:13,116**. Es decir, 2 s después de que empezara a
-producirse. Ese retraso es la razón de la latencia alta de DASH clásico.
+Para el 5568: 14:07:37,116 + 5568 × 2 s = **17:13:13,116**. Es decir, 2 s después de que empezara a producirse. Ese retraso es la razón de la latencia alta de DASH clásico.
 
 **`availabilityTimeOffset`** adelanta ese momento:
 
@@ -1994,9 +1430,7 @@ disponible desde = (lo anterior) − availabilityTimeOffset
                  = 17:13:13,116 − 1,9 s = 17:13:11,216
 ```
 
-El segmento empezó a producirse a las 17:13:11,116 y se puede pedir desde las 17:13:11,216: solo
-100 ms después, que es lo que tarda en existir su primer fragmento. El valor 1,9 sale de restar la
-duración de fragmento a la de segmento (2 − 0,1). Lo calcula FFmpeg.
+El segmento empezó a producirse a las 17:13:11,116 y se puede pedir desde las 17:13:11,216: solo 100 ms después, que es lo que tarda en existir su primer fragmento. El valor 1,9 sale de restar la duración de fragmento a la de segmento (2 − 0,1). Lo calcula FFmpeg.
 
 | Fragmento | Segmento | `availabilityTimeOffset` |
 | :--- | :--- | :--- |
@@ -2005,9 +1439,7 @@ duración de fragmento a la de segmento (2 − 0,1). Lo calcula FFmpeg.
 | 500 ms | 2 s | 1,500 |
 | 100 ms | 4 s | 3,900 |
 
-**`availabilityTimeComplete="false"`** es el complemento necesario: avisa de que, en ese momento
-adelantado, el segmento **no está entero**. El reproductor debe pedirlo y leer la respuesta conforme
-llega, en vez de esperar a que termine. `dash.js` activa su modo de baja latencia al ver este valor.
+**`availabilityTimeComplete="false"`** es el complemento necesario: avisa de que, en ese momento adelantado, el segmento **no está entero**. El reproductor debe pedirlo y leer la respuesta conforme llega, en vez de esperar a que termine. `dash.js` activa su modo de baja latencia al ver este valor.
 
 **Línea de tiempo del segmento 5568:**
 
@@ -2020,8 +1452,7 @@ llega, en vez de esperar a que termine. `dash.js` activa su modo de baja latenci
 17:13:13,216  ya se puede pedir el 5569
 ```
 
-**La alternativa: `SegmentTimeline`.** En vez de una duración fija, se puede listar cada segmento
-con su inicio y duración exactos:
+**La alternativa: `SegmentTimeline`.** En vez de una duración fija, se puede listar cada segmento con su inicio y duración exactos:
 
 ```xml
 <SegmentTemplate timescale="1000000" media="chunk-$Time$.m4s">
@@ -2031,15 +1462,11 @@ con su inicio y duración exactos:
 </SegmentTemplate>
 ```
 
-Es más preciso, porque tolera segmentos de duración irregular, pero obliga a releer el manifiesto
-para conocer cada segmento nuevo y no permite anunciar disponibilidad adelantada. Por eso el testbed
-lo desactiva (`-use_timeline 0`).
+Es más preciso, porque tolera segmentos de duración irregular, pero obliga a releer el manifiesto para conocer cada segmento nuevo y no permite anunciar disponibilidad adelantada. Por eso el testbed lo desactiva (`-use_timeline 0`).
 
 ### A.10. `UTCTiming`
 
-Todo lo anterior depende de que el "ahora" del reproductor sea el mismo que el del servidor. Con el
-reloj del ordenador 2 s adelantado, el reproductor pediría segmentos que no existen. `UTCTiming` le
-dice de dónde sacar la hora buena.
+Todo lo anterior depende de que el "ahora" del reproductor sea el mismo que el del servidor. Con el reloj del ordenador 2 s adelantado, el reproductor pediría segmentos que no existen. `UTCTiming` le dice de dónde sacar la hora buena.
 
 | Atributo | Valor aquí | Significado |
 | :--- | :--- | :--- |
@@ -2053,10 +1480,7 @@ GET /api/utc
 → 2026-10-13T09:48:38.776Z
 ```
 
-`dash.js` compara esa hora con la de su reloj, calcula la diferencia y la aplica a todos sus
-cálculos. La dirección es relativa al manifiesto, así que funciona con cualquier nombre de host y
-tanto con HTTP como con HTTPS. La sirve el propio orquestador, con el mismo reloj que usa para
-calibrar el AST.
+`dash.js` compara esa hora con la de su reloj, calcula la diferencia y la aplica a todos sus cálculos. La dirección es relativa al manifiesto, así que funciona con cualquier nombre de host y tanto con HTTP como con HTTPS. La sirve el propio orquestador, con el mismo reloj que usa para calibrar el AST.
 
 Otros métodos que define el estándar:
 
@@ -2068,12 +1492,9 @@ Otros métodos que define el estándar:
 | `...:http-ntp:2014`, `...:ntp:2014` | Protocolo NTP. |
 | `...:direct:2014` | La hora va escrita en el propio `value`. |
 
-Aparece dos veces en el manifiesto: una en la raíz, que es la que rige la reproducción, y otra dentro
-de `ProducerReferenceTime` (A.8).
+Aparece dos veces en el manifiesto: una en la raíz, que es la que rige la reproducción, y otra dentro de `ProducerReferenceTime` (A.8).
 
-La precisión de este método está limitada por lo que tarde la petición. Es una de las razones por las
-que el testbed mide la latencia con un timecode quemado en la imagen y su propia sincronización de
-reloj, y no con la que declara el reproductor.
+La precisión de este método está limitada por lo que tarde la petición. Es una de las razones por las que el testbed mide la latencia con un timecode quemado en la imagen y su propia sincronización de reloj, y no con la que declara el reproductor.
 
 ### A.11. Los ficheros a los que apunta
 
@@ -2084,8 +1505,7 @@ El manifiesto no contiene media; solo dice cómo encontrarla. Para cada Represen
 | `init-stream0.m4s` | Cajas `ftyp` y `moov`: tipo de fichero y configuración del decodificador (resolución, SPS y PPS). Sin frames. | Una vez, al empezar y al cambiar de calidad. |
 | `chunk-stream0-NNNNN.m4s` | Una sucesión de fragmentos, cada uno con su `moof` (índice de los frames que siguen y su tiempo) y su `mdat` (los frames). | Uno cada 2 s por componente. |
 
-Con una calidad, el reproductor mantiene dos descargas en curso: el segmento de vídeo
-(`chunk-stream0-…`) y el de audio (`chunk-stream1-…`).
+Con una calidad, el reproductor mantiene dos descargas en curso: el segmento de vídeo (`chunk-stream0-…`) y el de audio (`chunk-stream1-…`).
 
 ### A.12. Resumen: de qué depende cada valor
 
@@ -2105,25 +1525,15 @@ Con una calidad, el reproductor mantiene dos descargas en curso: el segmento de 
 
 ## Anexo B. El catálogo de MoQ, campo a campo
 
-Este anexo hace con el catálogo de MoQ lo mismo que el Anexo A con el manifiesto de DASH: recorrerlo
-entero, sección por sección y campo por campo.
+Este anexo hace con el catálogo de MoQ lo mismo que el Anexo A con el manifiesto de DASH: recorrerlo entero, sección por sección y campo por campo.
 
-El catálogo cumple el mismo papel que el MPD: decirle al reproductor qué hay y cómo decodificarlo.
-Pero es más pequeño, porque le falta casi todo lo que en el MPD se dedica a **localizar** la media.
-En MoQ no hay direcciones que calcular ni horas de disponibilidad: basta el nombre de la pista para
-suscribirse, y el relay envía lo que vaya llegando.
+El catálogo cumple el mismo papel que el MPD: decirle al reproductor qué hay y cómo decodificarlo. Pero es más pequeño, porque le falta casi todo lo que en el MPD se dedica a **localizar** la media. En MoQ no hay direcciones que calcular ni horas de disponibilidad: basta el nombre de la pista para suscribirse, y el relay envía lo que vaya llegando.
 
-**Fuentes.** El catálogo de ejemplo se capturó del servidor el 9 de octubre de 2026, con una sola
-calidad. Las definiciones de los campos salen del esquema de la librería instalada (`@moq/hang`
-0.5.2), que es lo que el reproductor entiende. Para lo que esa versión no documenta he consultado el
-código del publicador en su rama de desarrollo, que es posterior a la versión instalada (moq-cli
-0.14.2); donde me apoyo en ella, lo digo.
+**Fuentes.** El catálogo de ejemplo se capturó del servidor el 9 de octubre de 2026, con una sola calidad. Las definiciones de los campos salen del esquema de la librería instalada (`@moq/hang` 0.5.2), que es lo que el reproductor entiende. Para lo que esa versión no documenta he consultado el código del publicador en su rama de desarrollo, que es posterior a la versión instalada (moq-cli 0.14.2); donde me apoyo en ella, lo digo.
 
 ### B.1. Qué es y cómo viaja
 
-El catálogo no es un fichero que se descarga: **es una pista más del broadcast**, llamada
-`catalog.json`. El reproductor se suscribe a ella igual que al vídeo, y recibe una versión nueva cada
-vez que algo cambia.
+El catálogo no es un fichero que se descarga: **es una pista más del broadcast**, llamada `catalog.json`. El reproductor se suscribe a ella igual que al vídeo, y recibe una versión nueva cada vez que algo cambia.
 
 | Aspecto | Valor |
 | :--- | :--- |
@@ -2133,16 +1543,11 @@ vez que algo cambia.
 | Formato | JSON en texto |
 | Variante comprimida | `catalog.json.z`, con DEFLATE. Opcional; el reproductor solo la usa si se le pide |
 
-El formato del catálogo se deduce del nombre del broadcast, como la extensión de un fichero:
-`live.hang` indica catálogo hang; `live.msf` indicaría el formato MSF del IETF.
+El formato del catálogo se deduce del nombre del broadcast, como la extensión de un fichero: `live.hang` indica catálogo hang; `live.msf` indicaría el formato MSF del IETF.
 
-**Actualizaciones.** La pista funciona en modo *snapshot*: cada grupo empieza con el catálogo
-completo, y los frames siguientes del mismo grupo son **parches** que solo llevan lo que cambia, en
-formato JSON Merge Patch (RFC 7396). Quien se suscribe recibe el grupo más reciente y con eso tiene
-el estado completo.
+**Actualizaciones.** La pista funciona en modo *snapshot*: cada grupo empieza con el catálogo completo, y los frames siguientes del mismo grupo son **parches** que solo llevan lo que cambia, en formato JSON Merge Patch (RFC 7396). Quien se suscribe recibe el grupo más reciente y con eso tiene el estado completo.
 
-Por ejemplo, para marcar una calidad como atascada no hace falta reenviar todo. Bastaría un parche
-como este (ilustrativo; no lo he capturado del cable):
+Por ejemplo, para marcar una calidad como atascada no hace falta reenviar todo. Bastaría un parche como este (ilustrativo; no lo he capturado del cable):
 
 ```json
 { "video": { "renditions": { "0.avc3": { "stalled": true } } } }
@@ -2154,12 +1559,9 @@ Y para retirar la marca, el mismo campo con valor `null`, que en ese formato sig
 { "video": { "renditions": { "0.avc3": { "stalled": null } } } }
 ```
 
-Esta es la razón de que las calidades se guarden en un **mapa** con el nombre de la pista como clave,
-y no en una lista: un parche puede dirigirse a una entrada de un mapa por su clave, pero no a un
-elemento de una lista.
+Esta es la razón de que las calidades se guarden en un **mapa** con el nombre de la pista como clave, y no en una lista: un parche puede dirigirse a una entrada de un mapa por su clave, pero no a un elemento de una lista.
 
-Las actualizaciones pueden ser muy frecuentes. Con la fuente irregular del testbed y tres calidades
-se observaron 334 en 30 s, casi todas para poner y quitar esa marca.
+Las actualizaciones pueden ser muy frecuentes. Con la fuente irregular del testbed y tres calidades se observaron 334 en 30 s, casi todas para poner y quitar esa marca.
 
 ### B.2. El catálogo completo
 
@@ -2200,9 +1602,7 @@ se observaron 334 en 30 s, casi todas para poner y quitar esa marca.
 }
 ```
 
-Lo escribe entero el publicador (`moq import ts`), deduciéndolo del flujo MPEG-TS que recibe. El
-testbed no interviene en ningún campo: a diferencia del manifiesto de DASH, aquí no hay nada
-reescrito ni declarado a mano.
+Lo escribe entero el publicador (`moq import ts`), deduciéndolo del flujo MPEG-TS que recibe. El testbed no interviene en ningún campo: a diferencia del manifiesto de DASH, aquí no hay nada reescrito ni declarado a mano.
 
 ### B.3. La raíz: las secciones
 
@@ -2219,8 +1619,7 @@ El catálogo es un objeto con una sección por tipo de contenido. Una sección s
 | `clock` | Relación entre el tiempo de medios y la hora de reloj | Sí |
 | `mpegts` | Extensión del importador: datos para reconstruir el MPEG-TS original | Sí |
 
-La raíz es **abierta**: una sección que el reproductor no conoce se ignora sin invalidar el resto. Es
-lo que ocurre con `mpegts`, que no pertenece al esquema base. Una aplicación puede añadir las suyas.
+La raíz es **abierta**: una sección que el reproductor no conoce se ignora sin invalidar el resto. Es lo que ocurre con `mpegts`, que no pertenece al esquema base. Una aplicación puede añadir las suyas.
 
 Hay un límite: como máximo 64 renditions entre vídeo, audio y texto en un mismo catálogo.
 
@@ -2242,22 +1641,15 @@ Hay un límite: como máximo 64 renditions entre vídeo, audio y texto en un mis
 | `rotation` | Ausente (0) | Giro en grados, para vídeo grabado con el móvil en vertical, por ejemplo. |
 | `flip` | Ausente (`false`) | Espejo horizontal, típico de una cámara frontal. |
 
-`display`, `rotation` y `flip` valen para todas las calidades a la vez. Están separados de la
-configuración de cada rendition porque cambiarlos no obliga a reiniciar el decodificador.
+`display`, `rotation` y `flip` valen para todas las calidades a la vez. Están separados de la configuración de cada rendition porque cambiarlos no obliga a reiniciar el decodificador.
 
-**La clave del mapa es el nombre de la pista.** Para ver la calidad `0.avc3`, el reproductor se
-suscribe a la pista `0.avc3` del broadcast `live.hang`. No hay plantilla ni cálculo: es el
-equivalente directo, y mucho más simple, de `SegmentTemplate` en DASH.
+**La clave del mapa es el nombre de la pista.** Para ver la calidad `0.avc3`, el reproductor se suscribe a la pista `0.avc3` del broadcast `live.hang`. No hay plantilla ni cálculo: es el equivalente directo, y mucho más simple, de `SegmentTemplate` en DASH.
 
-El nombre lo elige el publicador. Aquí sigue el patrón *índice.códec*: `0.avc3` es la primera pista
-elemental del MPEG-TS, en H.264. El reproductor no interpreta el nombre; solo lo usa para
-suscribirse.
+El nombre lo elige el publicador. Aquí sigue el patrón *índice.códec*: `0.avc3` es la primera pista elemental del MPEG-TS, en H.264. El reproductor no interpreta el nombre; solo lo usa para suscribirse.
 
 ### B.5. Los campos de una rendition de vídeo
 
-Reproducen los de `VideoDecoderConfig`, la estructura con la que el navegador configura un
-decodificador de WebCodecs, más unos pocos propios de hang. La idea es que el reproductor pueda
-pasárselos al decodificador casi tal cual.
+Reproducen los de `VideoDecoderConfig`, la estructura con la que el navegador configura un decodificador de WebCodecs, más unos pocos propios de hang. La idea es que el reproductor pueda pasárselos al decodificador casi tal cual.
 
 | Campo | Valor aquí | Obligatorio | Significado |
 | :--- | :--- | :--- | :--- |
@@ -2275,70 +1667,46 @@ pasárselos al decodificador casi tal cual.
 | `label` | Ausente | No | Nombre legible para un selector de calidad. |
 | `broadcast` | Ausente | No | La pista está en otro broadcast. |
 
-**`codec`.** La misma notación que en DASH (ver A.7): `42` es el perfil *Baseline*, `c0` sus
-restricciones y `2a` el nivel 4.2. La diferencia está en el prefijo:
+**`codec`.** La misma notación que en DASH (ver A.7): `42` es el perfil *Baseline*, `c0` sus restricciones y `2a` el nivel 4.2. La diferencia está en el prefijo:
 
 | Prefijo | Dónde van los parámetros del decodificador (SPS y PPS) |
 | :--- | :--- |
 | `avc1` | Fuera del flujo. En DASH, en el segmento de inicialización; en MoQ, en `description`. |
 | `avc3` | Dentro del flujo, repetidos antes de cada keyframe. |
 
-Aquí es `avc3`, y por eso no hay `description`: el reproductor los obtiene del primer keyframe que
-reciba. Encaja con el modelo de grupos, donde cada grupo debe poder decodificarse por sí solo. La
-fuente los repite gracias a la opción `repeat-headers=1` de x264.
+Aquí es `avc3`, y por eso no hay `description`: el reproductor los obtiene del primer keyframe que reciba. Encaja con el modelo de grupos, donde cada grupo debe poder decodificarse por sí solo. La fuente los repite gracias a la opción `repeat-headers=1` de x264.
 
-**`description`.** Cuando existe, es una cadena hexadecimal con la configuración que el códec
-necesita antes del primer frame. Permite preparar el decodificador solo con el catálogo. El ejemplo
-de este catálogo está en el audio (B.6).
+**`description`.** Cuando existe, es una cadena hexadecimal con la configuración que el códec necesita antes del primer frame. Permite preparar el decodificador solo con el catálogo. El ejemplo de este catálogo está en el audio (B.6).
 
-**`codedWidth` y `codedHeight`.** El reproductor las usa para ordenar las calidades por resolución
-y para aplicar límites del tipo "no más de 720 de alto". Con `avc3` la resolución real también va en
-el flujo, así que estos valores son informativos.
+**`codedWidth` y `codedHeight`.** El reproductor las usa para ordenar las calidades por resolución y para aplicar límites del tipo "no más de 720 de alto". Con `avc3` la resolución real también va en el flujo, así que estos valores son informativos.
 
-**`displayAspectWidth` y `displayAspectHeight`.** Sirven para vídeo con píxeles no cuadrados. Un
-vídeo de 1440×1080 que deba verse en 16:9 llevaría `16` y `9`. Si faltan, los píxeles son cuadrados.
-Es el equivalente a `sar` en el MPD.
+**`displayAspectWidth` y `displayAspectHeight`.** Sirven para vídeo con píxeles no cuadrados. Un vídeo de 1440×1080 que deba verse en 16:9 llevaría `16` y `9`. Si faltan, los píxeles son cuadrados. Es el equivalente a `sar` en el MPD.
 
-**`framerate`.** Tiene dos usos en el reproductor. Uno es informativo. El otro afecta a la latencia:
-si la rendition no declara `jitter`, el reproductor asume un intervalo de frame (1000 / 60 = 17 ms)
-como irregularidad mínima.
+**`framerate`.** Tiene dos usos en el reproductor. Uno es informativo. El otro afecta a la latencia: si la rendition no declara `jitter`, el reproductor asume un intervalo de frame (1000 / 60 = 17 ms) como irregularidad mínima.
 
-**`bitrate`.** Es el campo que usa la adaptación automática: el reproductor elige la calidad de
-mayor `bitrate` que quepa en el 80 % del ancho de banda estimado (ver 4.10).
+**`bitrate`.** Es el campo que usa la adaptación automática: el reproductor elige la calidad de mayor `bitrate` que quepa en el 80 % del ancho de banda estimado (ver 4.10).
 
-> **Observación.** Para la calidad configurada a 4000 kbit/s, el catálogo declara 7,57 Mbit/s. En
-> otras emisiones he visto 6,70 y 6,95 Mbit/s para la misma configuración. El código del publicador
-> (rama de desarrollo) documenta este campo como el bitrate **máximo** de la pista, no el medio, lo
-> que explica que salga por encima del nominal: los keyframes producen picos. No he comprobado sobre
-> qué ventana lo calcula.
+> **Observación.** Para la calidad configurada a 4000 kbit/s, el catálogo declara 7,57 Mbit/s. En otras emisiones he visto 6,70 y 6,95 Mbit/s para la misma configuración. El código del publicador (rama de desarrollo) documenta este campo como el bitrate **máximo** de la pista, no el medio, lo que explica que salga por encima del nominal: los keyframes producen picos. No he comprobado sobre qué ventana lo calcula.
 >
-> La consecuencia es una asimetría con DASH. Para el mismo vídeo, el MPD declara 4 Mbit/s (el valor
-> nominal, puesto a mano) y el catálogo unos 7 Mbit/s (un máximo medido). Con el mismo ancho de banda
-> disponible, los dos reproductores no ven la misma escalera.
+> La consecuencia es una asimetría con DASH. Para el mismo vídeo, el MPD declara 4 Mbit/s (el valor nominal, puesto a mano) y el catálogo unos 7 Mbit/s (un máximo medido). Con el mismo ancho de banda disponible, los dos reproductores no ven la misma escalera.
 
-**`optimizeForLatency`.** Se pasa tal cual al decodificador. Con `true`, que es lo que se asume si
-falta, el decodificador entrega cada frame en cuanto puede en lugar de acumular varios.
+**`optimizeForLatency`.** Se pasa tal cual al decodificador. Con `true`, que es lo que se asume si falta, el decodificador entrega cada frame en cuanto puede en lugar de acumular varios.
 
-**`label`.** Texto para mostrar al usuario, como "1080p" o "Alta". Si falta, un selector tiene que
-componerlo a partir de la resolución.
+**`label`.** Texto para mostrar al usuario, como "1080p" o "Alta". Si falta, un selector tiene que componerlo a partir de la resolución.
 
-**`broadcast`.** Permite que el catálogo de un broadcast apunte a pistas publicadas en otro, con una
-ruta relativa. Sirve para repartir las calidades entre publicadores distintos:
+**`broadcast`.** Permite que el catálogo de un broadcast apunte a pistas publicadas en otro, con una ruta relativa. Sirve para repartir las calidades entre publicadores distintos:
 
 ```json
 "720p": { "codec": "avc3.42c01f", "broadcast": "../transcodificado" }
 ```
 
-Leído desde `live.hang`, esa pista se buscaría en el broadcast `transcodificado`. Una referencia que
-intente salir por encima de la raíz invalida el catálogo.
+Leído desde `live.hang`, esa pista se buscaría en el broadcast `transcodificado`. Una referencia que intente salir por encima de la raíz invalida el catálogo.
 
-`jitter`, `delay` y `stalled` se tratan aparte, en B.8 y B.9, porque son los que condicionan el
-comportamiento del reproductor.
+`jitter`, `delay` y `stalled` se tratan aparte, en B.8 y B.9, porque son los que condicionan el comportamiento del reproductor.
 
 ### B.6. La sección `audio` y sus renditions
 
-Tiene la misma forma que la de vídeo: un mapa `renditions` con una entrada por versión. Los campos
-reproducen los de `AudioDecoderConfig` de WebCodecs.
+Tiene la misma forma que la de vídeo: un mapa `renditions` con una entrada por versión. Los campos reproducen los de `AudioDecoderConfig` de WebCodecs.
 
 | Campo | Valor aquí | Obligatorio | Significado |
 | :--- | :--- | :--- | :--- |
@@ -2351,8 +1719,7 @@ reproducen los de `AudioDecoderConfig` de WebCodecs.
 | `jitter` | `43` | No | Igual que en vídeo (B.8). |
 | `delay`, `label`, `broadcast` | Ausentes | No | Igual que en vídeo. |
 
-**`description: "1190"`.** Son dos bytes, `0x11` y `0x90`, que forman la configuración estándar de
-AAC (*AudioSpecificConfig*). En binario:
+**`description: "1190"`.** Son dos bytes, `0x11` y `0x90`, que forman la configuración estándar de AAC (*AudioSpecificConfig*). En binario:
 
 ```
 0x11 0x90  =  00010 0011 0010 000
@@ -2362,12 +1729,9 @@ AAC (*AudioSpecificConfig*). En binario:
               └───────────────── 2  → AAC-LC
 ```
 
-Repite lo que ya dicen `codec`, `sampleRate` y `numberOfChannels`, pero en el formato que el
-decodificador exige. A diferencia del H.264 en `avc3`, el AAC no lleva esta información dentro de
-cada frame, así que tiene que ir aquí.
+Repite lo que ya dicen `codec`, `sampleRate` y `numberOfChannels`, pero en el formato que el decodificador exige. A diferencia del H.264 en `avc3`, el AAC no lleva esta información dentro de cada frame, así que tiene que ir aquí.
 
-**`bitrate: 165007`.** La fuente codifica el audio a 128 kbit/s. Como en el vídeo, el valor del
-catálogo es mayor que el nominal.
+**`bitrate: 165007`.** La fuente codifica el audio a 128 kbit/s. Como en el vídeo, el valor del catálogo es mayor que el nominal.
 
 El audio no tiene `stalled`: ese campo solo existe para vídeo.
 
@@ -2381,8 +1745,7 @@ Dice cómo interpretar los bytes de cada frame de MoQ. Hay tres valores conocido
 "container": { "kind": "legacy" }
 ```
 
-Cada frame es una marca de tiempo en microsegundos seguida del frame codificado tal cual, sin más
-envoltorio. Es el valor por defecto: si el campo falta, se asume este.
+Cada frame es una marca de tiempo en microsegundos seguida del frame codificado tal cual, sin más envoltorio. Es el valor por defecto: si el campo falta, se asume este.
 
 **`cmaf`:**
 
@@ -2390,9 +1753,7 @@ envoltorio. Es el valor por defecto: si el campo falta, se asume este.
 "container": { "kind": "cmaf", "init": "AAAAHGZ0eXBpc281AAAC..." }
 ```
 
-Cada frame de MoQ es un fragmento CMAF completo (`moof` + `mdat`), como los de DASH. El segmento de
-inicialización, que en DASH es un fichero aparte, va aquí dentro, codificado en base64. Permite
-reutilizar media ya empaquetada para DASH o HLS.
+Cada frame de MoQ es un fragmento CMAF completo (`moof` + `mdat`), como los de DASH. El segmento de inicialización, que en DASH es un fichero aparte, va aquí dentro, codificado en base64. Permite reutilizar media ya empaquetada para DASH o HLS.
 
 **`loc`:**
 
@@ -2400,19 +1761,15 @@ reutilizar media ya empaquetada para DASH o HLS.
 "container": { "kind": "loc" }
 ```
 
-*Low Overhead Container*, el formato del borrador del IETF: un pequeño bloque de propiedades y el
-frame codificado.
+*Low Overhead Container*, el formato del borrador del IETF: un pequeño bloque de propiedades y el frame codificado.
 
-Un `kind` desconocido no invalida el catálogo: esa rendition se ignora y las demás siguen
-disponibles.
+Un `kind` desconocido no invalida el catálogo: esa rendition se ignora y las demás siguen disponibles.
 
 ### B.8. `jitter` y `delay`: lo que el publicador le dice al búfer
 
-Son los dos campos con efecto directo sobre la latencia, y no tienen equivalente en el MPD de este
-testbed.
+Son los dos campos con efecto directo sobre la latencia, y no tienen equivalente en el MPD de este testbed.
 
-**`jitter`** es el retraso máximo, en milisegundos, entre que un frame está listo y el publicador lo
-envía. Lo mide el publicador sobre sí mismo, no sobre la red. Ejemplos de lo que valdría:
+**`jitter`** es el retraso máximo, en milisegundos, entre que un frame está listo y el publicador lo envía. Lo mide el publicador sobre sí mismo, no sobre la red. Ejemplos de lo que valdría:
 
 | Cómo envía el publicador | `jitter` |
 | :--- | :--- |
@@ -2422,17 +1779,12 @@ envía. Lo mide el publicador sobre sí mismo, no sobre la red. Ejemplos de lo q
 
 Dos propiedades importantes:
 
-- **Solo crece** a lo largo de una emisión. Si en algún momento el publicador se retrasó 65 ms, el
-  valor queda en 65 hasta que se reinicie.
+- **Solo crece** a lo largo de una emisión. Si en algún momento el publicador se retrasó 65 ms, el valor queda en 65 hasta que se reinicie.
 - **Un 0 se trata como ausente.**
 
-**`delay`** es cuánto llega esta rendition por detrás de la más temprana del mismo broadcast. La más
-temprana no lo lleva. Sirve cuando una calidad se genera a partir de otra: si el 720p sale de
-transcodificar el 1080p y eso tarda 80 ms, el 720p declararía `"delay": 80`.
+**`delay`** es cuánto llega esta rendition por detrás de la más temprana del mismo broadcast. La más temprana no lo lleva. Sirve cuando una calidad se genera a partir de otra: si el 720p sale de transcodificar el 1080p y eso tarda 80 ms, el 720p declararía `"delay": 80`.
 
-**Qué hace el reproductor con ellos.** Para cada rendition activa calcula `delay + jitter`, usando un
-intervalo de frame si no hay `jitter`. Toma el mayor de todas las pistas, y se lo suma al búfer que
-tenga configurado. En este catálogo:
+**Qué hace el reproductor con ellos.** Para cada rendition activa calcula `delay + jitter`, usando un intervalo de frame si no hay `jitter`. Toma el mayor de todas las pistas, y se lo suma al búfer que tenga configurado. En este catálogo:
 
 ```
 vídeo  0.avc3 : sin jitter → 1000 / 60 = 17 ms
@@ -2440,29 +1792,21 @@ audio  1.aac  : jitter 43               = 43 ms
                                  mayor  = 43 ms  → se suma al slider o al valor automático
 ```
 
-Con el reproductor en automático y 20 ms de búfer de red, el retardo efectivo sale de 63 ms. Tres
-cosas que conviene saber:
+Con el reproductor en automático y 20 ms de búfer de red, el retardo efectivo sale de 63 ms. Tres cosas que conviene saber:
 
-- **Manda el audio, aunque esté silenciado.** El reproductor cuenta su `jitter` aunque no descargue
-  la pista. Con solo vídeo serían 17 ms.
-- **El valor cambia entre emisiones y dentro de una.** He visto 43, 46 y 65 ms para el audio en
-  momentos distintos, este último con el servidor saturado.
+- **Manda el audio, aunque esté silenciado.** El reproductor cuenta su `jitter` aunque no descargue la pista. Con solo vídeo serían 17 ms.
+- **El valor cambia entre emisiones y dentro de una.** He visto 43, 46 y 65 ms para el audio en momentos distintos, este último con el servidor saturado.
 - **Es un suelo.** El slider no puede bajar de él.
 
-Por qué el audio declara 43 ms: un frame AAC dura 1024 / 48 000 = 21,3 ms, así que 43 son dos frames.
-Es coherente con que el publicador haya observado el audio llegar de dos en dos, pero no he
-comprobado que esa sea la causa.
+Por qué el audio declara 43 ms: un frame AAC dura 1024 / 48 000 = 21,3 ms, así que 43 son dos frames. Es coherente con que el publicador haya observado el audio llegar de dos en dos, pero no he comprobado que esa sea la causa.
 
 ### B.9. `stalled`: el aviso de que una calidad no va bien
 
-Es un indicador que el publicador pone a `true` en una rendition de vídeo cuando no consigue
-entregarla al ritmo debido. Solo se escribe cuando es `true`; ausente significa que va bien.
+Es un indicador que el publicador pone a `true` en una rendition de vídeo cuando no consigue entregarla al ritmo debido. Solo se escribe cuando es `true`; ausente significa que va bien.
 
-**Cuándo se activa**, según el detector de la versión instalada. Tiene que haber alguien suscrito a
-esa calidad, y cumplirse una de dos condiciones:
+**Cuándo se activa**, según el detector de la versión instalada. Tiene que haber alguien suscrito a esa calidad, y cumplirse una de dos condiciones:
 
-- lo último recibido de la fuente va más de 3 intervalos de frame por delante de lo entregado al
-  transporte, o
+- lo último recibido de la fuente va más de 3 intervalos de frame por delante de lo entregado al transporte, o
 - la fuente lleva más de 3 intervalos sin entregar un frame de esa calidad.
 
 **Cuándo se retira:** tras 3 frames seguidos entregados a tiempo.
@@ -2473,24 +1817,15 @@ esa calidad, y cumplirse una de dos condiciones:
 | 30 fps | 33,3 ms | 100 ms |
 | Sin `framerate` declarado | 33 ms (se asume) | 99 ms |
 
-**Qué hace el reproductor.** En modo automático, descarta las renditions marcadas y elige entre las
-demás. Si están todas marcadas, se queda con la de menor bitrate. Una calidad fijada a mano se
-mantiene aunque esté marcada: el indicador orienta la adaptación automática, no anula una elección
-explícita.
+**Qué hace el reproductor.** En modo automático, descarta las renditions marcadas y elige entre las demás. Si están todas marcadas, se queda con la de menor bitrate. Una calidad fijada a mano se mantiene aunque esté marcada: el indicador orienta la adaptación automática, no anula una elección explícita.
 
-Es un mecanismo sin equivalente en DASH: **el publicador puede sacar una calidad de la selección de
-todos los reproductores a la vez**, sin que ninguno haya medido nada. En el testbed es la causa de
-los cambios continuos de calidad observados en MoQ (ver el final de 4.10).
+Es un mecanismo sin equivalente en DASH: **el publicador puede sacar una calidad de la selección de todos los reproductores a la vez**, sin que ninguno haya medido nada. En el testbed es la causa de los cambios continuos de calidad observados en MoQ (ver el final de 4.10).
 
-> **Este campo está cambiando.** En la rama de desarrollo del proyecto, `stalled` ya no se escribe y
-> se ignora al leer; lo sustituye un campo `enabled` con otro significado: si es `false`, no llegan
-> frames y el reproductor no debe seleccionar esa calidad. La versión instalada aquí, que es la
-> última publicada, sigue usando `stalled`.
+> **Este campo está cambiando.** En la rama de desarrollo del proyecto, `stalled` ya no se escribe y se ignora al leer; lo sustituye un campo `enabled` con otro significado: si es `false`, no llegan frames y el reproductor no debe seleccionar esa calidad. La versión instalada aquí, que es la última publicada, sigue usando `stalled`.
 
 ### B.10. La sección `clock`
 
-Relaciona el tiempo de medios con la hora de reloj. Es el equivalente a `availabilityStartTime` y
-`ProducerReferenceTime` del MPD, en un solo sitio y para todo el broadcast.
+Relaciona el tiempo de medios con la hora de reloj. Es el equivalente a `availabilityStartTime` y `ProducerReferenceTime` del MPD, en un solo sitio y para todo el broadcast.
 
 | Campo | Valor aquí | Significado |
 | :--- | :--- | :--- |
@@ -2511,18 +1846,13 @@ Para saber a qué hora corresponde cualquier frame, se suma su marca de tiempo:
 frame con marca de tiempo 10 s  →  14:07:26,807 + 10 s  =  14:07:36,807
 ```
 
-El publicador fija este valor una vez y no lo cambia durante la emisión, ni siquiera si se ajusta el
-reloj del sistema.
+El publicador fija este valor una vez y no lo cambia durante la emisión, ni siquiera si se ajusta el reloj del sistema.
 
-El reproductor de vídeo **no lo usa para decidir cuándo pintar**: se guía por las horas de llegada de
-los frames (ver 4.11). Aquí está la diferencia de fondo con DASH. Allí, sin la relación entre reloj y
-medios el reproductor no sabe ni qué segmento pedir. En MoQ es un dato opcional, útil para alinear
-varias emisiones entre sí o con datos externos, pero prescindible para reproducir.
+El reproductor de vídeo **no lo usa para decidir cuándo pintar**: se guía por las horas de llegada de los frames (ver 4.11). Aquí está la diferencia de fondo con DASH. Allí, sin la relación entre reloj y medios el reproductor no sabe ni qué segmento pedir. En MoQ es un dato opcional, útil para alinear varias emisiones entre sí o con datos externos, pero prescindible para reproducir.
 
 ### B.11. La sección `archive`
 
-Anuncia el índice de segmentos de la emisión: una pista auxiliar con la que se puede localizar
-contenido ya pasado para pedirlo con FETCH.
+Anuncia el índice de segmentos de la emisión: una pista auxiliar con la que se puede localizar contenido ya pasado para pedirlo con FETCH.
 
 | Campo | Valor aquí | Significado |
 | :--- | :--- | :--- |
@@ -2533,19 +1863,13 @@ contenido ya pasado para pedirlo con FETCH.
 | `store` | Ausente | Dirección del almacén de objetos donde vive la grabación. |
 | `version` | Ausente | Versión del formato de grabación. Solo aparece si hay almacén. |
 
-Aquí solo están los dos primeros, lo que corresponde a un publicador en directo sin grabación
-duradera: hay índice de lo reciente, pero nada almacenado. El sufijo `.z` del nombre es una
-convención para pistas comprimidas; el esquema advierte de que no debe deducirse la compresión a
-partir del nombre.
+Aquí solo están los dos primeros, lo que corresponde a un publicador en directo sin grabación duradera: hay índice de lo reciente, pero nada almacenado. El sufijo `.z` del nombre es una convención para pistas comprimidas; el esquema advierte de que no debe deducirse la compresión a partir del nombre.
 
 El reproductor del testbed no usa esta sección: solo reproduce el directo.
 
 ### B.12. La sección `mpegts`
 
-No pertenece al esquema base. La añade el importador porque la fuente es un flujo MPEG-TS, y guarda
-lo necesario para **reconstruir ese flujo** a la salida (con `moq export ts`): todo lo que no cabe en
-la descripción genérica de vídeo y audio. La describe el código del publicador en su rama de
-desarrollo, de donde salen estas definiciones.
+No pertenece al esquema base. La añade el importador porque la fuente es un flujo MPEG-TS, y guarda lo necesario para **reconstruir ese flujo** a la salida (con `moq export ts`): todo lo que no cabe en la descripción genérica de vídeo y audio. La describe el código del publicador en su rama de desarrollo, de donde salen estas definiciones.
 
 ```json
 "mpegts": {
@@ -2563,16 +1887,9 @@ desarrollo, de donde salen estas definiciones.
 | `program.pmtPid` | `4096` | PID de la tabla que describe el programa (PMT). |
 | `si` | PID 17, tabla 66 | Tablas de información de servicio que se conservan tal cual. |
 
-Qué es un PID, una PMT o una SDT se explica en el
-[Anexo C](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed). En resumen: un **PID** es el identificador de cada flujo elemental dentro de un MPEG-TS. Los valores coinciden
-con los que produce FFmpeg en la fuente: 256 (`0x100`) para el primer vídeo y los siguientes en
-orden. Son los mismos que usa `tsgate.py` para reconocer los frames de cada calidad.
+Qué es un PID, una PMT o una SDT se explica en el [Anexo C](#anexo-c-mpeg-ts-el-formato-intermedio-del-testbed). En resumen: un **PID** es el identificador de cada flujo elemental dentro de un MPEG-TS. Los valores coinciden con los que produce FFmpeg en la fuente: 256 (`0x100`) para el primer vídeo y los siguientes en orden. Son los mismos que usa `tsgate.py` para reconocer los frames de cada calidad.
 
-En `si`, las claves son números en decimal escritos como texto: `17` es el PID `0x0011` y `66` es el
-identificador de tabla `0x42`. Corresponden a la tabla de descripción de servicio (SDT), la que lleva
-el nombre del servicio y del proveedor. Su contenido no va en el catálogo sino en una pista aparte
-(`0x0011-0x42.si`), y `interval` indica cada cuántos milisegundos debe repetirse al reconstruir el
-flujo.
+En `si`, las claves son números en decimal escritos como texto: `17` es el PID `0x0011` y `66` es el identificador de tabla `0x42`. Corresponden a la tabla de descripción de servicio (SDT), la que lleva el nombre del servicio y del proveedor. Su contenido no va en el catálogo sino en una pista aparte (`0x0011-0x42.si`), y `interval` indica cada cuántos milisegundos debe repetirse al reconstruir el flujo.
 
 Nada de esta sección afecta a la reproducción en el navegador.
 
@@ -2595,8 +1912,7 @@ Nada de esta sección afecta a la reproducción en el navegador.
 | `lang` | Idioma, en notación BCP 47: `es`, `en`, `es-419`. |
 | `label`, `container`, `jitter`, `delay`, `broadcast` | Como en vídeo y audio. |
 
-**`json` y `binary`**: datos de aplicación que no son media, como un marcador deportivo, la posición
-de un dron o un chat.
+**`json` y `binary`**: datos de aplicación que no son media, como un marcador deportivo, la posición de un dron o un chat.
 
 ```json
 "json": {
@@ -2613,13 +1929,11 @@ de un dron o un chat.
 | `schema` | Identificador de la forma de los datos. Solo descriptivo. |
 | `bitrate`, `jitter`, `delay`, `broadcast` | Como en vídeo y audio. |
 
-Aquí la clave del mapa es `tracks`, no `renditions`: las entradas son pistas distintas, no versiones
-alternativas entre las que elegir.
+Aquí la clave del mapa es `tracks`, no `renditions`: las entradas son pistas distintas, no versiones alternativas entre las que elegir.
 
 ### B.14. Con varias calidades
 
-Con la escalera de tres calidades, el importador publica tres renditions de vídeo. No capturé ese
-catálogo entero, pero sí los nombres y los bitrates que vio el reproductor:
+Con la escalera de tres calidades, el importador publica tres renditions de vídeo. No capturé ese catálogo entero, pero sí los nombres y los bitrates que vio el reproductor:
 
 | Pista | Calidad | Bitrate nominal | `bitrate` en el catálogo (dos emisiones) |
 | :--- | :--- | :--- | :--- |
@@ -2627,11 +1941,9 @@ catálogo entero, pero sí los nombres y los bitrates que vio el reproductor:
 | `1.avc3` | 720p | 2000 kbit/s | 3393 y 3259 kbit/s |
 | `2.avc3` | 360p | 700 kbit/s | 1249 y 1111 kbit/s |
 
-Ninguna de las tres declaraba `jitter` ni `delay`. El audio pasa a ser la pista siguiente en el
-orden del MPEG-TS.
+Ninguna de las tres declaraba `jitter` ni `delay`. El audio pasa a ser la pista siguiente en el orden del MPEG-TS.
 
-El orden de las calidades es el de la fuente, que las emite de mayor a menor. El reproductor no
-depende de ese orden: las ordena él por resolución o por bitrate.
+El orden de las calidades es el de la fuente, que las emite de mayor a menor. El reproductor no depende de ese orden: las ordena él por resolución o por bitrate.
 
 ### B.15. Qué usa el reproductor, y comparación con el MPD
 
@@ -2671,24 +1983,15 @@ No usa `archive`, `clock` ni `mpegts`.
 | Estado de una calidad en directo | No existe | `stalled` |
 | Contenido pasado | `timeShiftBufferDepth` | `archive` |
 
-La diferencia de tamaño entre los dos anexos refleja la de los modelos. En DASH el cliente tira, así
-que el manifiesto tiene que darle una forma de calcular qué pedir y cuándo, y un reloj fiable para
-hacerlo. En MoQ el servidor empuja, y al catálogo le basta con decir qué hay y cómo decodificarlo. A
-cambio, el catálogo lleva dos cosas que el MPD no tiene: el estado en vivo de cada calidad y la
-irregularidad del propio publicador.
+La diferencia de tamaño entre los dos anexos refleja la de los modelos. En DASH el cliente tira, así que el manifiesto tiene que darle una forma de calcular qué pedir y cuándo, y un reloj fiable para hacerlo. En MoQ el servidor empuja, y al catálogo le basta con decir qué hay y cómo decodificarlo. A cambio, el catálogo lleva dos cosas que el MPD no tiene: el estado en vivo de cada calidad y la irregularidad del propio publicador.
 
 ---
 
 ## Anexo C. MPEG-TS: el formato intermedio del testbed
 
-MPEG-TS aparece en varios puntos de este documento sin haberse explicado: es lo que sale de la
-fuente, lo que lee `tsgate.py`, lo que consume cada empaquetador y lo que describe la sección
-`mpegts` del catálogo de MoQ. Este anexo explica qué es, cómo está hecho por dentro y qué papel
-cumple aquí.
+MPEG-TS aparece en varios puntos de este documento sin haberse explicado: es lo que sale de la fuente, lo que lee `tsgate.py`, lo que consume cada empaquetador y lo que describe la sección `mpegts` del catálogo de MoQ. Este anexo explica qué es, cómo está hecho por dentro y qué papel cumple aquí.
 
-Lo primero, para situarlo: **MPEG-TS no llega nunca al navegador**. Solo existe dentro del servidor,
-en el tramo que va de la fuente a los tres empaquetadores. Cada rama lo deshace y vuelve a empaquetar
-el vídeo en su propio formato.
+Lo primero, para situarlo: **MPEG-TS no llega nunca al navegador**. Solo existe dentro del servidor, en el tramo que va de la fuente a los tres empaquetadores. Cada rama lo deshace y vuelve a empaquetar el vídeo en su propio formato.
 
 ```
                       ┌── MPEG-TS ──▶ tsgate ──▶ ffmpeg -f dash ──▶ CMAF  (DASH)
@@ -2700,33 +2003,21 @@ codifica y multiplexa └── MPEG-TS ──▶ tsgate ──▶ ffmpeg -f rts
 
 ### C.1. Qué es un contenedor y por qué hace falta
 
-Un codificador produce **flujos elementales**: una sucesión de frames de vídeo comprimidos por un
-lado, y una sucesión de frames de audio por otro. Eso, tal cual, no se puede transmitir ni guardar de
-forma útil, porque faltan tres cosas:
+Un codificador produce **flujos elementales**: una sucesión de frames de vídeo comprimidos por un lado, y una sucesión de frames de audio por otro. Eso, tal cual, no se puede transmitir ni guardar de forma útil, porque faltan tres cosas:
 
 - **Juntarlos.** Vídeo y audio tienen que viajar por el mismo canal, mezclados en orden.
-- **Sincronizarlos.** Hay que saber en qué instante se muestra cada frame y cuál de audio le
-  corresponde.
+- **Sincronizarlos.** Hay que saber en qué instante se muestra cada frame y cuál de audio le corresponde.
 - **Describirlos.** Quien lo recibe tiene que saber qué hay dentro: cuántas pistas y de qué códec.
 
-Un **contenedor** es el formato que resuelve esas tres cosas. No comprime nada: envuelve lo ya
-comprimido. MP4, MPEG-TS, Matroska o WebM son contenedores. El proceso de juntar los flujos se llama
-**multiplexar**, y el de separarlos, **demultiplexar**.
+Un **contenedor** es el formato que resuelve esas tres cosas. No comprime nada: envuelve lo ya comprimido. MP4, MPEG-TS, Matroska o WebM son contenedores. El proceso de juntar los flujos se llama **multiplexar**, y el de separarlos, **demultiplexar**.
 
-MPEG-TS (*MPEG Transport Stream*, también llamado M2TS o simplemente TS) es el contenedor diseñado
-en los años noventa para la **televisión digital**: satélite, cable, TDT. Está definido en la norma
-ISO/IEC 13818-1. Sigue siendo el formato de la emisión televisiva y de buena parte de la contribución
-profesional, y es también el formato original de los segmentos de HLS.
+MPEG-TS (*MPEG Transport Stream*, también llamado M2TS o simplemente TS) es el contenedor diseñado en los años noventa para la **televisión digital**: satélite, cable, TDT. Está definido en la norma ISO/IEC 13818-1. Sigue siendo el formato de la emisión televisiva y de buena parte de la contribución profesional, y es también el formato original de los segmentos de HLS.
 
 ### C.2. La idea de diseño: poder engancharse en cualquier momento
 
-Un MP4 normal tiene una cabecera con el índice de todo el fichero. Sin ella no se puede leer nada, y
-no se puede escribir hasta saber cuánto dura el contenido. Sirve para ficheros, no para una emisión
-que no termina nunca.
+Un MP4 normal tiene una cabecera con el índice de todo el fichero. Sin ella no se puede leer nada, y no se puede escribir hasta saber cuánto dura el contenido. Sirve para ficheros, no para una emisión que no termina nunca.
 
-MPEG-TS se diseñó para el caso contrario: una emisión continua, por un canal con errores, a la que
-los receptores se conectan cuando quieren (al encender el televisor o cambiar de canal). De ahí salen
-sus cuatro decisiones de diseño:
+MPEG-TS se diseñó para el caso contrario: una emisión continua, por un canal con errores, a la que los receptores se conectan cuando quieren (al encender el televisor o cambiar de canal). De ahí salen sus cuatro decisiones de diseño:
 
 | Decisión | Consecuencia |
 | :--- | :--- |
@@ -2762,22 +2053,16 @@ Los 32 bits de la cabecera:
 
 Los tres campos en negrita son los que usa el testbed.
 
-**El PID** (*Packet Identifier*) es la clave de todo el formato. Es un número de 13 bits, de 0 a
-8191, que dice a qué flujo pertenece el paquete. Los paquetes de vídeo, de audio y de tablas van
-mezclados en la misma sucesión, y el PID es lo que permite separarlos: para sacar el vídeo basta
-quedarse con los paquetes de su PID.
+**El PID** (*Packet Identifier*) es la clave de todo el formato. Es un número de 13 bits, de 0 a 8191, que dice a qué flujo pertenece el paquete. Los paquetes de vídeo, de audio y de tablas van mezclados en la misma sucesión, y el PID es lo que permite separarlos: para sacar el vídeo basta quedarse con los paquetes de su PID.
 
 ```
 PID:   256  256  257  256  256    0  256  256  257  256 4096  256 ...
        vídeo     audio          PAT            audio     PMT
 ```
 
-**El contador de continuidad** permite detectar pérdidas. Si de un PID llegan los paquetes con
-contador 7, 8 y 10, falta el 9. Solo tiene 4 bits, así que detecta la pérdida pero no dice cuántos
-paquetes faltan si son 16 o más.
+**El contador de continuidad** permite detectar pérdidas. Si de un PID llegan los paquetes con contador 7, 8 y 10, falta el 9. Solo tiene 4 bits, así que detecta la pérdida pero no dice cuántos paquetes faltan si son 16 o más.
 
-**El campo de adaptación** es una extensión opcional de la cabecera, que ocupa parte de los 184
-bytes. Lleva tres cosas relevantes:
+**El campo de adaptación** es una extensión opcional de la cabecera, que ocupa parte de los 184 bytes. Lleva tres cosas relevantes:
 
 | Contenido | Para qué |
 | :--- | :--- |
@@ -2785,20 +2070,15 @@ bytes. Lleva tres cosas relevantes:
 | **Indicador de acceso aleatorio** | Marca que en este paquete empieza un punto por el que se puede empezar a decodificar: un keyframe. |
 | Relleno | Bytes de relleno para completar los 188 cuando la carga no llega. |
 
-Hay además un PID reservado, el 8191 (`0x1FFF`), para **paquetes nulos**: relleno sin contenido que
-se inserta para mantener un caudal constante. En televisión son habituales; en el testbed, la fuente
-no los genera.
+Hay además un PID reservado, el 8191 (`0x1FFF`), para **paquetes nulos**: relleno sin contenido que se inserta para mantener un caudal constante. En televisión son habituales; en el testbed, la fuente no los genera.
 
 ### C.4. De un frame a paquetes: la capa PES
 
-Un frame de vídeo no cabe en 184 bytes. Entre el frame y los paquetes hay una capa intermedia, el
-**PES** (*Packetized Elementary Stream*).
+Un frame de vídeo no cabe en 184 bytes. Entre el frame y los paquetes hay una capa intermedia, el **PES** (*Packetized Elementary Stream*).
 
-1. Cada frame se envuelve en un paquete PES: una pequeña cabecera, que incluye sus marcas de tiempo,
-   seguida del frame.
+1. Cada frame se envuelve en un paquete PES: una pequeña cabecera, que incluye sus marcas de tiempo, seguida del frame.
 2. Ese PES se trocea en porciones de 184 bytes.
-3. Cada porción va en un paquete TS con el PID de su flujo. El primero lleva activado el indicador de
-   inicio de unidad.
+3. Cada porción va en un paquete TS con el PID de su flujo. El primero lleva activado el indicador de inicio de unidad.
 
 ```
 Frame de vídeo (8300 bytes)
@@ -2823,19 +2103,11 @@ Con los valores por defecto del testbed, en órdenes de magnitud:
 
 En total, unos 2900 paquetes por segundo para una calidad.
 
-**Cómo se sabe dónde acaba un frame.** La cabecera PES tiene un campo de longitud, pero en vídeo
-suele valer 0, que significa "sin límite declarado". El final de un frame se reconoce entonces
-porque **empieza el siguiente**: llega un paquete del mismo PID con el indicador de inicio activado.
-Así lo hace `tsgate.py`. Tiene una consecuencia: quien lee el flujo no puede dar un frame por
-completo hasta ver el principio del siguiente, 17 ms después a 60 fps. `tsgate.py` lo compensa
-anotando la hora de llegada del *último* paquete de cada frame, no la del momento en que supo que
-había terminado. No he medido si los empaquetadores añaden ese intervalo por su cuenta.
+**Cómo se sabe dónde acaba un frame.** La cabecera PES tiene un campo de longitud, pero en vídeo suele valer 0, que significa "sin límite declarado". El final de un frame se reconoce entonces porque **empieza el siguiente**: llega un paquete del mismo PID con el indicador de inicio activado. Así lo hace `tsgate.py`. Tiene una consecuencia: quien lee el flujo no puede dar un frame por completo hasta ver el principio del siguiente, 17 ms después a 60 fps. `tsgate.py` lo compensa anotando la hora de llegada del *último* paquete de cada frame, no la del momento en que supo que había terminado. No he medido si los empaquetadores añaden ese intervalo por su cuenta.
 
 ### C.5. Las tablas: cómo se describe el contenido
 
-Con solo paquetes y PID, el receptor no sabría qué PID lleva qué. Esa información viaja en el propio
-flujo, en **tablas** (PSI, *Program Specific Information*) que ocupan sus propios PID y se repiten
-varias veces por segundo.
+Con solo paquetes y PID, el receptor no sabría qué PID lleva qué. Esa información viaja en el propio flujo, en **tablas** (PSI, *Program Specific Information*) que ocupan sus propios PID y se repiten varias veces por segundo.
 
 Se leen en cadena:
 
@@ -2858,9 +2130,7 @@ PMT  (PID 4096)
 | **PMT** (*Program Map Table*) | El que indique la PAT | Para un programa: qué flujos lo componen, de qué tipo es cada uno y en qué PID va. |
 | **SDT** (*Service Description Table*) | 17 | Nombre del servicio y del proveedor. Es de la norma DVB, no imprescindible para decodificar. |
 
-Un **programa** es lo que en televisión se llama un canal: un conjunto de flujos que se reproducen
-juntos. Un mismo MPEG-TS puede llevar varios, y así viajan varios canales por una sola frecuencia de
-TDT. El del testbed lleva uno solo.
+Un **programa** es lo que en televisión se llama un canal: un conjunto de flujos que se reproducen juntos. Un mismo MPEG-TS puede llevar varios, y así viajan varios canales por una sola frecuencia de TDT. El del testbed lleva uno solo.
 
 Los valores concretos del testbed son los que FFmpeg usa por defecto:
 
@@ -2872,9 +2142,7 @@ Los valores concretos del testbed son los que FFmpeg usa por defecto:
 | Primer flujo (el vídeo de mayor calidad) | 256 | `0x0100` |
 | Flujos siguientes | 257, 258, … | `0x0101`, … |
 
-Con una calidad, el vídeo va en el PID 256 y el audio en el 257. Con tres, los vídeos ocupan 256,
-257 y 258, de mayor a menor calidad, y el audio pasa al 259. **Las tres calidades viajan en el mismo
-flujo**, como tres pistas de vídeo de un mismo programa.
+Con una calidad, el vídeo va en el PID 256 y el audio en el 257. Con tres, los vídeos ocupan 256, 257 y 258, de mayor a menor calidad, y el audio pasa al 259. **Las tres calidades viajan en el mismo flujo**, como tres pistas de vídeo de un mismo programa.
 
 Esto explica la sección `mpegts` del catálogo de MoQ (B.12), que ahora se puede leer entera:
 
@@ -2887,13 +2155,10 @@ Esto explica la sección `mpegts` del catálogo de MoQ (B.12), que ahora se pued
 ```
 
 - `tracks`: los PID que la PMT asignaba al vídeo y al audio.
-- `program`: lo que decía la PAT. Un flujo con identificador 1, que lleva el programa 1, descrito en
-  el PID 4096.
+- `program`: lo que decía la PAT. Un flujo con identificador 1, que lleva el programa 1, descrito en el PID 4096.
 - `si`: la SDT, que viajaba en el PID 17 y tiene el identificador de tabla 66 (`0x42`).
 
-El importador de MoQ guarda todo eso porque, al convertir el flujo en pistas de MoQ, esa información
-se perdería. Con ella, otra herramienta podría reconstruir un MPEG-TS equivalente al original a la
-salida del relay.
+El importador de MoQ guarda todo eso porque, al convertir el flujo en pistas de MoQ, esa información se perdería. Con ella, otra herramienta podría reconstruir un MPEG-TS equivalente al original a la salida del relay.
 
 ### C.6. El tiempo: PTS, DTS y PCR
 
@@ -2905,8 +2170,7 @@ MPEG-TS mide el tiempo con un reloj de **90 000 unidades por segundo** (90 kHz).
 | **DTS** (*Decoding Time Stamp*) | Cabecera PES | En qué instante debe decodificarse. Solo difiere del PTS si hay B-frames. |
 | **PCR** (*Program Clock Reference*) | Campo de adaptación | La hora del reloj del emisor, para que el receptor ajuste el suyo. |
 
-**El PTS** es la marca de tiempo de cada frame. A 60 fps, dos frames consecutivos distan
-90 000 / 60 = **1500 unidades**. Es un número de 33 bits, así que da la vuelta cada 26,5 horas.
+**El PTS** es la marca de tiempo de cada frame. A 60 fps, dos frames consecutivos distan 90 000 / 60 = **1500 unidades**. Es un número de 33 bits, así que da la vuelta cada 26,5 horas.
 
 ```
 frame n     PTS = 1 260 000
@@ -2914,18 +2178,11 @@ frame n+1   PTS = 1 261 500     (+1500 = 1/60 s)
 frame n+2   PTS = 1 263 000
 ```
 
-El testbed usa el PTS para **identificar frames**. Las marcas de etapa del desglose de latencia se
-guardan por PTS: `tsgate.py` anota a qué hora llegó el frame con cada PTS, y el orquestador calcula
-el PTS de un frame a partir de su número de orden (PTS del frame 0 más 1500 por frame).
+El testbed usa el PTS para **identificar frames**. Las marcas de etapa del desglose de latencia se guardan por PTS: `tsgate.py` anota a qué hora llegó el frame con cada PTS, y el orquestador calcula el PTS de un frame a partir de su número de orden (PTS del frame 0 más 1500 por frame).
 
-**El DTS** existe porque, con B-frames, el orden de decodificación no coincide con el de
-presentación. La fuente del testbed no los usa (`-tune zerolatency`), así que DTS y PTS coinciden.
+**El DTS** existe porque, con B-frames, el orden de decodificación no coincide con el de presentación. La fuente del testbed no los usa (`-tune zerolatency`), así que DTS y PTS coinciden.
 
-**El PCR** resuelve un problema propio de la emisión televisiva: el receptor no tiene forma de
-preguntar la hora al emisor, y su reloj va ligeramente más rápido o más lento. El emisor inserta su
-hora varias veces por segundo y el receptor ajusta su reloj a ella, para consumir exactamente al
-ritmo al que se emite. En el testbed no cumple ninguna función práctica: los empaquetadores procesan
-el flujo según llega.
+**El PCR** resuelve un problema propio de la emisión televisiva: el receptor no tiene forma de preguntar la hora al emisor, y su reloj va ligeramente más rápido o más lento. El emisor inserta su hora varias veces por segundo y el receptor ajusta su reloj a ella, para consumir exactamente al ritmo al que se emite. En el testbed no cumple ninguna función práctica: los empaquetadores procesan el flujo según llega.
 
 ### C.7. Cómo viaja dentro del servidor
 
@@ -2937,44 +2194,27 @@ La fuente envía el MPEG-TS por **UDP** a tres puertos locales, uno por rama:
 | 5002 | MoQ |
 | 5003 | WebRTC |
 
-Cada datagrama UDP lleva **7 paquetes TS**: 7 × 188 = 1316 bytes. Es el tamaño habitual, porque es el
-mayor múltiplo de 188 que cabe en un paquete de red corriente sin fragmentarse. Corresponde a la
-opción `pkt_size=1316`.
+Cada datagrama UDP lleva **7 paquetes TS**: 7 × 188 = 1316 bytes. Es el tamaño habitual, porque es el mayor múltiplo de 188 que cabe en un paquete de red corriente sin fragmentarse. Corresponde a la opción `pkt_size=1316`.
 
-El reparto lo hace el multiplexor `tee` de FFmpeg, que escribe el mismo flujo en los tres destinos.
-Las tres ramas reciben **exactamente los mismos paquetes**.
+El reparto lo hace el multiplexor `tee` de FFmpeg, que escribe el mismo flujo en los tres destinos. Las tres ramas reciben **exactamente los mismos paquetes**.
 
-UDP no garantiza la entrega ni siquiera dentro de una misma máquina: si un empaquetador lee más
-despacio de lo que la fuente escribe, el búfer del sistema se llena y se descartan datagramas. Esa
-pérdida afectaría solo a una rama y falsearía la comparación, y por eso se vigila (C.8).
+UDP no garantiza la entrega ni siquiera dentro de una misma máquina: si un empaquetador lee más despacio de lo que la fuente escribe, el búfer del sistema se llena y se descartan datagramas. Esa pérdida afectaría solo a una rama y falsearía la comparación, y por eso se vigila (C.8).
 
 ### C.8. Qué hace `tsgate.py`
 
-Es un programa pequeño colocado entre la fuente y cada empaquetador: lee los datagramas UDP y los
-escribe por una tubería. Usa directamente los campos descritos arriba, para tres cosas.
+Es un programa pequeño colocado entre la fuente y cada empaquetador: lee los datagramas UDP y los escribe por una tubería. Usa directamente los campos descritos arriba, para tres cosas.
 
-**1. Empezar en un keyframe.** Los empaquetadores arrancan en un instante cualquiera de la emisión.
-La compuerta descarta todo hasta ver un paquete del PID 256 con el **indicador de acceso aleatorio**
-activado: ahí empieza un keyframe. Mientras espera, guarda la última copia de la PAT, la SDT y la
-PMT, y las envía justo antes de ese keyframe, para que el empaquetador pueda interpretar el flujo
-desde el primer byte. Así las tres ramas empiezan en un punto limpio.
+**1. Empezar en un keyframe.** Los empaquetadores arrancan en un instante cualquiera de la emisión. La compuerta descarta todo hasta ver un paquete del PID 256 con el **indicador de acceso aleatorio** activado: ahí empieza un keyframe. Mientras espera, guarda la última copia de la PAT, la SDT y la PMT, y las envía justo antes de ese keyframe, para que el empaquetador pueda interpretar el flujo desde el primer byte. Así las tres ramas empiezan en un punto limpio.
 
-**2. Vigilar la continuidad.** Para cada PID comprueba que el **contador de continuidad** avanza de
-uno en uno. Si no, escribe una línea como esta:
+**2. Vigilar la continuidad.** Para cada PID comprueba que el **contador de continuidad** avanza de uno en uno. Si no, escribe una línea como esta:
 
 ```
 continuity check failed: pid=257 expected=9 got=10
 ```
 
-Significa que del PID 257 se esperaba el paquete con contador 9 y llegó el 10: se ha perdido uno. El
-orquestador cuenta esas líneas y las muestra como **anomalías de ingesta**. Con el servidor saturado
-se llegaron a ver 203 en la rama de MoQ; con 8 núcleos, ninguna.
+Significa que del PID 257 se esperaba el paquete con contador 9 y llegó el 10: se ha perdido uno. El orquestador cuenta esas líneas y las muestra como **anomalías de ingesta**. Con el servidor saturado se llegaron a ver 203 en la rama de MoQ; con 8 núcleos, ninguna.
 
-**3. Anotar cuándo llega cada frame.** Cada vez que ve un paquete con el **indicador de inicio de
-unidad** en un PID de vídeo, lee el **PTS** de la cabecera PES que empieza ahí y da por terminado el
-frame anterior. Envía al orquestador el PTS de cada frame junto con dos horas: cuándo llegó su último
-paquete al sistema y cuándo se reenvió al empaquetador. Son las etapas "Codificación" y "Entrada al
-empaquetador" del desglose de latencia.
+**3. Anotar cuándo llega cada frame.** Cada vez que ve un paquete con el **indicador de inicio de unidad** en un PID de vídeo, lee el **PTS** de la cabecera PES que empieza ahí y da por terminado el frame anterior. Envía al orquestador el PTS de cada frame junto con dos horas: cuándo llegó su último paquete al sistema y cuándo se reenvió al empaquetador. Son las etapas "Codificación" y "Entrada al empaquetador" del desglose de latencia.
 
 No modifica ningún byte de la media: solo decide por dónde empezar y observa.
 
@@ -2982,44 +2222,25 @@ No modifica ningún byte de la media: solo decide por dónde empezar y observa.
 
 **Por qué MPEG-TS como formato intermedio:**
 
-- **Los empaquetadores pueden arrancar y reiniciarse por separado.** Como el flujo no tiene
-  principio, cualquiera puede engancharse a mitad de emisión. Es lo que permite que el supervisor
-  reinicie una rama sin tocar las otras ni la fuente.
-- **Es un formato que las tres herramientas saben leer:** FFmpeg para DASH y WebRTC, y el importador
-  de MoQ.
-- **Lleva varias pistas de vídeo en un mismo flujo**, lo que permite enviar toda la escalera de
-  calidades de una vez.
-- **Sus marcas de inicio de frame y de keyframe son fáciles de leer** sin decodificar el vídeo, que
-  es lo que hace posible la compuerta.
+- **Los empaquetadores pueden arrancar y reiniciarse por separado.** Como el flujo no tiene principio, cualquiera puede engancharse a mitad de emisión. Es lo que permite que el supervisor reinicie una rama sin tocar las otras ni la fuente.
+- **Es un formato que las tres herramientas saben leer:** FFmpeg para DASH y WebRTC, y el importador de MoQ.
+- **Lleva varias pistas de vídeo en un mismo flujo**, lo que permite enviar toda la escalera de calidades de una vez.
+- **Sus marcas de inicio de frame y de keyframe son fáciles de leer** sin decodificar el vídeo, que es lo que hace posible la compuerta.
 
 **Lo que cuesta:**
 
-- **Sobrecarga.** 4 bytes de cabecera por cada 188 son un 2 %, más las cabeceras PES, las tablas y
-  el relleno. Solo afecta al tramo interno.
+- **Sobrecarga.** 4 bytes de cabecera por cada 188 son un 2 %, más las cabeceras PES, las tablas y el relleno. Solo afecta al tramo interno.
 - **El final de cada frame se conoce con un frame de retraso** (C.4).
-- **Un único canal para todo.** Vídeo, audio y tablas se serializan en una sola sucesión de
-  paquetes, así que el multiplexor tiene que decidir en qué orden los escribe.
+- **Un único canal para todo.** Vídeo, audio y tablas se serializan en una sola sucesión de paquetes, así que el multiplexor tiene que decidir en qué orden los escribe.
 
-Ese último punto es el origen de dos problemas de la fuente, ambos causados por el audio y ambos
-ya corregidos. Se manifestaban igual: el vídeo, que entra al codificador cada 16,7 ms, salía a
-ráfagas.
+Ese último punto es el origen de dos problemas de la fuente, ambos causados por el audio y ambos ya corregidos. Se manifestaban igual: el vídeo, que entra al codificador cada 16,7 ms, salía a ráfagas.
 
-**1. El agrupado de audio en un PES.** Por defecto, el multiplexor de MPEG-TS de FFmpeg agrupa
-varios frames de audio en un mismo PES, unos 180 ms, para ahorrar cabeceras. El vídeo intercalado con
-ese audio se retenía ese tiempo. La opción `pes_payload_size=0` lo desactiva: un PES por cada frame
-de audio.
+**1. El agrupado de audio en un PES.** Por defecto, el multiplexor de MPEG-TS de FFmpeg agrupa varios frames de audio en un mismo PES, unos 180 ms, para ahorrar cabeceras. El vídeo intercalado con ese audio se retenía ese tiempo. La opción `pes_payload_size=0` lo desactiva: un PES por cada frame de audio.
 
-**2. El acoplamiento entre vídeo y audio dentro de FFmpeg** (corregido el 13 de octubre de 2026).
-Eran dos mecanismos distintos que se sumaban:
+**2. El acoplamiento entre vídeo y audio dentro de FFmpeg** (corregido el 13 de octubre de 2026). Eran dos mecanismos distintos que se sumaban:
 
-- **Un grafo de filtros compartido.** El vídeo y el audio pasaban por un único grafo de filtros.
-  FFmpeg alimenta un grafo pidiendo frames a sus entradas por turnos, según sus marcas de tiempo, de
-  modo que el vídeo avanzaba al compás de los frames de audio del fichero de origen (MP3, 24 ms cada
-  uno) en vez de al suyo. Ahora el audio tiene su propio grafo (`-filter_complex` aparte).
-- **El intercalado estricto del multiplexor.** Para escribir los paquetes en orden exacto de
-  tiempo, FFmpeg retiene cada frame de vídeo hasta tener un paquete de audio posterior. Como el
-  audio llega más espaciado, el vídeo salía de dos en dos. La opción `-max_interleave_delta 1` hace
-  que cada paquete se escriba en cuanto está listo.
+- **Un grafo de filtros compartido.** El vídeo y el audio pasaban por un único grafo de filtros. FFmpeg alimenta un grafo pidiendo frames a sus entradas por turnos, según sus marcas de tiempo, de modo que el vídeo avanzaba al compás de los frames de audio del fichero de origen (MP3, 24 ms cada uno) en vez de al suyo. Ahora el audio tiene su propio grafo (`-filter_complex` aparte).
+- **El intercalado estricto del multiplexor.** Para escribir los paquetes en orden exacto de tiempo, FFmpeg retiene cada frame de vídeo hasta tener un paquete de audio posterior. Como el audio llega más espaciado, el vídeo salía de dos en dos. La opción `-max_interleave_delta 1` hace que cada paquete se escriba en cuanto está listo.
 
 Hacían falta los dos cambios: cada uno por separado solo lo arreglaba a medias.
 
@@ -3031,20 +2252,15 @@ Hacían falta los dos cambios: cada uno por separado solo lo arreglaba a medias.
 | Los dos cambios | 16,3 ms | 24,1 ms | 38,0 ms | 8 | 0 |
 | Referencia: la misma fuente sin audio | 16,4 ms | 24,1 ms | 36,0 ms | 3 | 0 |
 
-Las cifras son la separación entre frames consecutivos a la salida de la fuente; lo ideal es
-16,7 ms. Con los dos cambios queda igual que sin audio.
+Las cifras son la separación entre frames consecutivos a la salida de la fuente; lo ideal es 16,7 ms. Con los dos cambios queda igual que sin audio.
 
-El arreglo tiene un segundo efecto, que beneficia a las tres ramas: como el vídeo ya no espera al
-audio, la etapa de codificación del desglose baja de unos 30 ms a unos 10 ms de mediana.
+El arreglo tiene un segundo efecto, que beneficia a las tres ramas: como el vídeo ya no espera al audio, la etapa de codificación del desglose baja de unos 30 ms a unos 10 ms de mediana.
 
-La contrapartida es que vídeo y audio ya no van intercalados en orden estricto de tiempo dentro del
-MPEG-TS: el audio de un instante puede ir unas decenas de milisegundos detrás del vídeo del mismo
-instante. Los tres empaquetadores lo aceptan, y las marcas de tiempo de cada frame no cambian.
+La contrapartida es que vídeo y audio ya no van intercalados en orden estricto de tiempo dentro del MPEG-TS: el audio de un instante puede ir unas decenas de milisegundos detrás del vídeo del mismo instante. Los tres empaquetadores lo aceptan, y las marcas de tiempo de cada frame no cambian.
 
 ### C.10. Lo que hace cada rama con el flujo
 
-Las tres hacen lo mismo en esencia: demultiplexar, es decir, separar los paquetes por PID,
-reconstruir los PES y extraer los frames con su PTS. Lo que cambia es en qué los vuelven a envolver.
+Las tres hacen lo mismo en esencia: demultiplexar, es decir, separar los paquetes por PID, reconstruir los PES y extraer los frames con su PTS. Lo que cambia es en qué los vuelven a envolver.
 
 | Rama | Herramienta | Qué toma | En qué lo convierte |
 | :--- | :--- | :--- | :--- |
@@ -3052,17 +2268,12 @@ reconstruir los PES y extraer los frames con su PTS. Lo que cambia es en qué lo
 | MoQ | `moq import ts` | Todos los vídeos y el audio | Una pista por PID; cada frame, un frame de MoQ con su marca de tiempo; cada keyframe abre un grupo. |
 | WebRTC | `ffmpeg -f rtsp` | Solo el primer vídeo (PID 256) | Paquetes RTP, hacia MediaMTX. |
 
-En ninguna se recodifica: los bytes de H.264 de cada frame son los mismos a la entrada y a la salida.
-Lo que se desecha es el envoltorio de MPEG-TS, es decir, las cabeceras de 188 bytes, los PES y las
-tablas. El importador de MoQ conserva además un resumen de esas tablas en el catálogo.
+En ninguna se recodifica: los bytes de H.264 de cada frame son los mismos a la entrada y a la salida. Lo que se desecha es el envoltorio de MPEG-TS, es decir, las cabeceras de 188 bytes, los PES y las tablas. El importador de MoQ conserva además un resumen de esas tablas en el catálogo.
 
 Dos detalles de cómo se trata el PTS:
 
-- **DASH** resta a todo el flujo el PTS del primer frame que recibe, de modo que el tiempo de medios
-  empieza en 0. Por eso importa que la compuerta haga empezar el flujo en un keyframe.
-- **MoQ** reescribe las marcas de tiempo con un desfase propio. Por esa razón el testbed no puede
-  seguir un frame por su marca de tiempo en la rama de MoQ, y lo identifica por el timecode quemado
-  en la imagen.
+- **DASH** resta a todo el flujo el PTS del primer frame que recibe, de modo que el tiempo de medios empieza en 0. Por eso importa que la compuerta haga empezar el flujo en un keyframe.
+- **MoQ** reescribe las marcas de tiempo con un desfase propio. Por esa razón el testbed no puede seguir un frame por su marca de tiempo en la rama de MoQ, y lo identifica por el timecode quemado en la imagen.
 
 ### C.11. Vocabulario
 
@@ -3086,19 +2297,13 @@ Dos detalles de cómo se trata el PTS:
 
 ## Anexo D. Cómo se mide la latencia
 
-Este anexo explica cómo obtiene el testbed sus dos medidas de latencia: la total (*glass-to-glass*) y
-su reparto por etapas. En particular, cómo se sabe que la hora anotada en cada punto corresponde al
-mismo frame.
+Este anexo explica cómo obtiene el testbed sus dos medidas de latencia: la total (*glass-to-glass*) y su reparto por etapas. En particular, cómo se sabe que la hora anotada en cada punto corresponde al mismo frame.
 
-El principio que lo rige todo: **se mide igual en las tres ramas, y se mide lo que se ve**. No se
-usa la latencia que declara cada reproductor, porque cada uno la define a su manera y ninguna incluye
-todo el recorrido. Se lee en la imagen.
+El principio que lo rige todo: **se mide igual en las tres ramas, y se mide lo que se ve**. No se usa la latencia que declara cada reproductor, porque cada uno la define a su manera y ninguna incluye todo el recorrido. Se lee en la imagen.
 
 ### D.1. El timecode quemado
 
-Antes de codificar, la fuente dibuja en cada frame la hora a la que lo procesa. No como texto, sino
-como una fila de cuadros blancos y negros en la esquina inferior izquierda, que una máquina puede
-leer sin ambigüedad aunque la compresión emborrone la imagen.
+Antes de codificar, la fuente dibuja en cada frame la hora a la que lo procesa. No como texto, sino como una fila de cuadros blancos y negros en la esquina inferior izquierda, que una máquina puede leer sin ambigüedad aunque la compresión emborrone la imagen.
 
 ```
 ┌──────┬──────┬────┬────┬────┬─────┬────┬──────┬──────┐
@@ -3115,17 +2320,11 @@ leer sin ambigüedad aunque la compresión emborrone la imagen.
 | Cuadros de los extremos | Blanco y negro fijos | Dan el umbral de lectura y delatan una imagen sin timecode. |
 | Codificación | Código Gray | Ver abajo. |
 
-Cada calidad lleva su propio timecode, dibujado después de escalarla. Un timecode pensado para 1080p
-y reducido a 360p tendría cuadros de pocos píxeles, ilegibles tras la compresión.
+Cada calidad lleva su propio timecode, dibujado después de escalarla. Un timecode pensado para 1080p y reducido a 360p tendría cuadros de pocos píxeles, ilegibles tras la compresión.
 
-**Por qué código Gray.** En binario normal, pasar de 7 a 8 cambia cuatro bits a la vez (`0111` →
-`1000`). Si la lectura de un cuadro falla justo en ese momento, puede salir cualquier número. En
-código Gray, dos valores consecutivos difieren siempre en **un solo bit**, así que un fallo de lectura
-en la transición produce como mucho un error de 1 ms.
+**Por qué código Gray.** En binario normal, pasar de 7 a 8 cambia cuatro bits a la vez (`0111` → `1000`). Si la lectura de un cuadro falla justo en ese momento, puede salir cualquier número. En código Gray, dos valores consecutivos difieren siempre en **un solo bit**, así que un fallo de lectura en la transición produce como mucho un error de 1 ms.
 
-**Por qué solo 20 bits.** La hora completa en milisegundos necesita unos 41 bits. Se queman solo los
-20 más bajos, y el navegador reconstruye el resto con su propia hora: sabe qué hora es con un margen
-muy inferior a 17,5 minutos, así que solo hay una hora posible que termine en esos 20 bits.
+**Por qué solo 20 bits.** La hora completa en milisegundos necesita unos 41 bits. Se queman solo los 20 más bajos, y el navegador reconstruye el resto con su propia hora: sabe qué hora es con un margen muy inferior a 17,5 minutos, así que solo hay una hora posible que termine en esos 20 bits.
 
 ```
 hora al leer el frame (servidor):   1 791 554 900 123 ms   → sus 20 bits bajos valen 938 139
@@ -3136,19 +2335,15 @@ instante del quemado:               1 791 554 900 123 − 300 = 1 791 554 899 82
 
 ### D.2. Poner de acuerdo los dos relojes
 
-El timecode lleva la hora **del servidor**. Para restarla de "ahora", el navegador tiene que saber
-qué hora es en el servidor, no en su propio reloj, que puede ir desviado.
+El timecode lleva la hora **del servidor**. Para restarla de "ahora", el navegador tiene que saber qué hora es en el servidor, no en su propio reloj, que puede ir desviado.
 
-Cada 10 segundos el navegador pregunta la hora al servidor (`GET /api/time`) varias veces seguidas.
-En cada consulta apunta cuándo la envió y cuándo recibió la respuesta, y supone que la hora del
-servidor corresponde al punto medio:
+Cada 10 segundos el navegador pregunta la hora al servidor (`GET /api/time`) varias veces seguidas. En cada consulta apunta cuándo la envió y cuándo recibió la respuesta, y supone que la hora del servidor corresponde al punto medio:
 
 ```
 desfase = hora que responde el servidor − (hora de envío + hora de recepción) / 2
 ```
 
-De todas las consultas se queda con la de **menor tiempo de ida y vuelta**, que es la que menos
-margen de error tiene.
+De todas las consultas se queda con la de **menor tiempo de ida y vuelta**, que es la que menos margen de error tiene.
 
 | Dato | Ejemplo |
 | :--- | :--- |
@@ -3159,15 +2354,11 @@ margen de error tiene.
 | Desfase | +102 ms: el servidor va 102 ms adelantado |
 | Incertidumbre | ±3 ms: la mitad de los 6 ms de ida y vuelta |
 
-La incertidumbre sale de que no se sabe cómo se repartieron esos 6 ms entre la ida y la vuelta. Se
-muestra en el panel y se guarda en el CSV (`clock_offset_ms`, `clock_rtt_ms`). **Es el límite de
-exactitud de toda medida que compare una hora del servidor con una del navegador.** Afecta por igual
-a las tres ramas, así que no altera las diferencias entre ellas.
+La incertidumbre sale de que no se sabe cómo se repartieron esos 6 ms entre la ida y la vuelta. Se muestra en el panel y se guarda en el CSV (`clock_offset_ms`, `clock_rtt_ms`). **Es el límite de exactitud de toda medida que compare una hora del servidor con una del navegador.** Afecta por igual a las tres ramas, así que no altera las diferencias entre ellas.
 
 ### D.3. La latencia *glass-to-glass*
 
-Con el timecode y los relojes sincronizados, la medida es una resta. En cada refresco de pantalla,
-para cada reproductor:
+Con el timecode y los relojes sincronizados, la medida es una resta. En cada refresco de pantalla, para cada reproductor:
 
 1. Se toma el frame que el reproductor acaba de mostrar.
 2. Se lee su timecode.
@@ -3185,17 +2376,13 @@ La tarjeta muestra la mediana del último segundo.
 
 Lo que queda fuera es idéntico en las tres ramas.
 
-El frame se identifica a sí mismo: no hace falta saber nada más de él que lo que lleva dibujado. Por
-eso esta medida es la más sólida del testbed.
+El frame se identifica a sí mismo: no hace falta saber nada más de él que lo que lleva dibujado. Por eso esta medida es la más sólida del testbed.
 
-**El lector no debe alterar lo que mide.** Lee solo dos filas de píxeles de la franja del timecode,
-de forma asíncrona. Una versión anterior copiaba la imagen entera en cada frame y saturaba la página
-hasta degradar al reproductor de MoQ: las medidas anteriores a ese cambio no son válidas.
+**El lector no debe alterar lo que mide.** Lee solo dos filas de píxeles de la franja del timecode, de forma asíncrona. Una versión anterior copiaba la imagen entera en cada frame y saturaba la página hasta degradar al reproductor de MoQ: las medidas anteriores a ese cambio no son válidas.
 
 ### D.4. El desglose por etapas: la idea
 
-La latencia total dice cuánto, pero no dónde. Para repartirla hay que anotar la hora a la que **un
-mismo frame** pasa por varios puntos del recorrido y restar cada par consecutivo.
+La latencia total dice cuánto, pero no dónde. Para repartirla hay que anotar la hora a la que **un mismo frame** pasa por varios puntos del recorrido y restar cada par consecutivo.
 
 ```
 quemado ──▶ salida del ──▶ entrega al ──▶ (fragmento ──▶ llegada al ──▶ pintado
@@ -3204,17 +2391,13 @@ quemado ──▶ salida del ──▶ entrega al ──▶ (fragmento ──▶
    └── etapa 1 ──┴── etapa 2 ───┴─── etapa 3 ──┴── etapa 4 ───┴─ etapa 5 ──┘
 ```
 
-Como cada etapa es la diferencia entre dos horas del mismo frame, **las etapas suman exactamente su
-latencia total**. No hay estimaciones ni repartos proporcionales.
+Como cada etapa es la diferencia entre dos horas del mismo frame, **las etapas suman exactamente su latencia total**. No hay estimaciones ni repartos proporcionales.
 
-La dificultad está en reconocer el frame en cada punto. El timecode solo se puede leer donde hay
-imagen: al principio (la fuente sabe qué quemó) y al final (el navegador lo lee). En medio, el frame
-es un bloque de bytes comprimidos, y cada tramo lo identifica de otra manera.
+La dificultad está en reconocer el frame en cada punto. El timecode solo se puede leer donde hay imagen: al principio (la fuente sabe qué quemó) y al final (el navegador lo lee). En medio, el frame es un bloque de bytes comprimidos, y cada tramo lo identifica de otra manera.
 
 ### D.5. Cómo se sigue un frame de punta a punta
 
-Cinco veces por segundo, el navegador elige un frame recién pintado y reconstruye su recorrido. La
-cadena de identificadores es esta:
+Cinco veces por segundo, el navegador elige un frame recién pintado y reconstruye su recorrido. La cadena de identificadores es esta:
 
 | Paso | De qué se parte | Qué se obtiene | Cómo |
 | :--- | :--- | :--- | :--- |
@@ -3225,15 +2408,9 @@ cadena de identificadores es esta:
 | 5 | El PTS (solo DASH) | Hora en que se completó su fragmento | Registro del origen. |
 | 6 | El frame pintado | Su hora de llegada al reproductor | Distinto en cada reproductor. |
 
-**Paso 2: de la hora al número de frame.** Al quemar el timecode, FFmpeg escribe en su registro, para
-cada frame, la hora exacta que quemó y su número de orden (0, 1, 2, …). El servidor guarda esa lista.
-Cuando el navegador envía una hora, busca el frame cuya hora coincide, con 4 ms de tolerancia. Como
-los frames distan 16,7 ms, no hay confusión posible.
+**Paso 2: de la hora al número de frame.** Al quemar el timecode, FFmpeg escribe en su registro, para cada frame, la hora exacta que quemó y su número de orden (0, 1, 2, …). El servidor guarda esa lista. Cuando el navegador envía una hora, busca el frame cuya hora coincide, con 4 ms de tolerancia. Como los frames distan 16,7 ms, no hay confusión posible.
 
-**Paso 3: del número de frame al PTS.** La compuerta no ve números de orden: solo puede leer el PTS,
-la marca de tiempo que cada frame lleva en el MPEG-TS (ver C.6). El PTS cuenta 90 000 unidades por
-segundo, así que a 60 fps avanza 1500 unidades por frame, siempre igual. Conociendo el PTS del
-frame 0, que la compuerta anota al verlo pasar, el de cualquier otro es:
+**Paso 3: del número de frame al PTS.** La compuerta no ve números de orden: solo puede leer el PTS, la marca de tiempo que cada frame lleva en el MPEG-TS (ver C.6). El PTS cuenta 90 000 unidades por segundo, así que a 60 fps avanza 1500 unidades por frame, siempre igual. Conociendo el PTS del frame 0, que la compuerta anota al verlo pasar, el de cualquier otro es:
 
 ```
 PTS del frame n = PTS del frame 0 + n × 1500
@@ -3244,13 +2421,9 @@ si el frame 0 llevaba el PTS 126 000:
 
 Para que la compuerta vea el frame 0, el testbed arranca primero las compuertas y después la fuente.
 
-**Paso 4: del PTS a las horas del servidor.** La compuerta de cada rama (`tsgate.py`) apunta dos
-horas por cada frame, indexadas por su PTS (ver C.8). Se busca el PTS calculado, con medio frame de
-tolerancia.
+**Paso 4: del PTS a las horas del servidor.** La compuerta de cada rama (`tsgate.py`) apunta dos horas por cada frame, indexadas por su PTS (ver C.8). Se busca el PTS calculado, con medio frame de tolerancia.
 
-**Paso 5, solo en DASH.** El origen sigue los fragmentos CMAF según los recibe y apunta a qué hora se
-completa cada uno y qué intervalo de tiempo de medios cubre. El PTS del frame se convierte en tiempo
-de medios y se mira en qué fragmento cae.
+**Paso 5, solo en DASH.** El origen sigue los fragmentos CMAF según los recibe y apunta a qué hora se completa cada uno y qué intervalo de tiempo de medios cubre. El PTS del frame se convierte en tiempo de medios y se mira en qué fragmento cae.
 
 **Paso 6: la llegada al navegador.** Aquí cada reproductor ofrece algo distinto:
 
@@ -3273,8 +2446,7 @@ Los seis puntos, con el reloj en que se toma cada hora:
 | Llegada al reproductor | Página web | Navegador, convertido |
 | Pintado | Página web | Navegador, convertido |
 
-La hora de salida del codificador la pone el propio sistema operativo en el instante en que recibe el
-paquete, no el programa cuando lo lee. Así no depende de lo ocupada que esté la compuerta.
+La hora de salida del codificador la pone el propio sistema operativo en el instante en que recibe el paquete, no el programa cuando lo lee. Así no depende de lo ocupada que esté la compuerta.
 
 **LL-DASH**
 
@@ -3303,31 +2475,22 @@ paquete, no el programa cuando lo lee. Así no depende de lo ocupada que esté l
 | Publicación y transporte | Entrega → llegada | FFmpeg, RTSP, MediaMTX, router de emulación y red. |
 | Búfer de jitter y pintado | Llegada → pintado | Búfer de jitter, decodificación y pintado. |
 
-La etapa "Codificación" es la misma medida en las tres ramas, porque es anterior al reparto. Las
-pequeñas diferencias que se ven entre carriles se deben a que cada rama muestrea frames distintos.
+La etapa "Codificación" es la misma medida en las tres ramas, porque es anterior al reparto. Las pequeñas diferencias que se ven entre carriles se deben a que cada rama muestrea frames distintos.
 
-**La resolución es la de los puntos de medida.** Dentro de una etapa no se sabe cómo se reparte el
-tiempo. En MoQ, por ejemplo, importador, relay y red van juntos, porque el relay es un programa de
-terceros en el que no hay donde anotar una hora.
+**La resolución es la de los puntos de medida.** Dentro de una etapa no se sabe cómo se reparte el tiempo. En MoQ, por ejemplo, importador, relay y red van juntos, porque el relay es un programa de terceros en el que no hay donde anotar una hora.
 
 ### D.7. Un ejemplo con cifras reales
 
-Dos frames medidos el 10 de octubre de 2026 contra el servidor. La conexión del cliente tenía ese día
-mucha variación de retardo, lo que infla las etapas que cruzan la red; sirven como ejemplo de lectura,
-no como valores de referencia.
+Dos frames medidos el 10 de octubre de 2026 contra el servidor. La conexión del cliente tenía ese día mucha variación de retardo, lo que infla las etapas que cruzan la red; sirven como ejemplo de lectura, no como valores de referencia.
 
 | Rama | Etapas | Suma |
 | :--- | :--- | :--- |
 | DASH (objetivo 3 s) | 38 + 97 + 76 + 2908 ms | 3119 ms |
 | MoQ (slider 200 ms) | 24 + 0 + 104 + 173 ms | 301 ms |
 
-Cómo se lee el de DASH: el frame tardó 38 ms en codificarse, pasaron 97 ms hasta que su fragmento
-quedó completo (el fragmento era de 100 ms), 76 ms hasta que llegó al reproductor, y esperó 2908 ms
-en el búfer. En total 3119 ms, que es lo que marcaba su tarjeta de latencia *glass-to-glass*.
+Cómo se lee el de DASH: el frame tardó 38 ms en codificarse, pasaron 97 ms hasta que su fragmento quedó completo (el fragmento era de 100 ms), 76 ms hasta que llegó al reproductor, y esperó 2908 ms en el búfer. En total 3119 ms, que es lo que marcaba su tarjeta de latencia *glass-to-glass*.
 
-**Qué frame se muestra.** Cada segundo se siguen unos cinco frames por rama. No se promedia cada
-etapa por separado: se elige **un frame real**, el de latencia total mediana, y se muestran las suyas.
-Así las cifras suman exactamente y corresponden a algo que ocurrió.
+**Qué frame se muestra.** Cada segundo se siguen unos cinco frames por rama. No se promedia cada etapa por separado: se elige **un frame real**, el de latencia total mediana, y se muestran las suyas. Así las cifras suman exactamente y corresponden a algo que ocurrió.
 
 ### D.8. Precisión y límites
 
@@ -3339,26 +2502,18 @@ Así las cifras suman exactamente y corresponden a algo que ocurrió.
 | Llegada en MoQ | Unos milisegundos | El reproductor agrupa los avisos de frames que llegan casi a la vez; a un frame se le puede asignar la hora del siguiente. |
 | Llegada en WebRTC | Dudosa | Ver abajo. |
 
-**La llegada en WebRTC no cuadra con las estadísticas del navegador.** En una misma prueba, el
-desglose atribuía 11 ms a "Búfer de jitter y pintado", mientras que las estadísticas del propio
-navegador daban 55 ms de permanencia media en el búfer de jitter. Las dos cifras no pueden ser
-ciertas a la vez. La total de la rama es fiable, porque no depende de esa hora; el reparto entre
-"Publicación y transporte" y "Búfer de jitter y pintado" en WebRTC no lo es. Está sin resolver.
+**La llegada en WebRTC no cuadra con las estadísticas del navegador.** En una misma prueba, el desglose atribuía 11 ms a "Búfer de jitter y pintado", mientras que las estadísticas del propio navegador daban 55 ms de permanencia media en el búfer de jitter. Las dos cifras no pueden ser ciertas a la vez. La total de la rama es fiable, porque no depende de esa hora; el reparto entre "Publicación y transporte" y "Búfer de jitter y pintado" en WebRTC no lo es. Está sin resolver.
 
 Otros límites:
 
-- **Se descarta lo que no cuadra.** Si para un frame sale una etapa negativa, o una codificación
-  fuera de entre 0 y 1 s, alguna hora no era la suya y la muestra entera se desecha.
+- **Se descarta lo que no cuadra.** Si para un frame sale una etapa negativa, o una codificación fuera de entre 0 y 1 s, alguna hora no era la suya y la muestra entera se desecha.
 - **El muestreo es de cinco frames por segundo**, no de todos.
-- **El final de un frame se conoce con retraso** en MPEG-TS, pero la medida lo compensa (C.4). Lo
-  que no se ha medido es si los empaquetadores añaden por su cuenta ese intervalo, que quedaría dentro
-  de la etapa siguiente.
+- **El final de un frame se conoce con retraso** en MPEG-TS, pero la medida lo compensa (C.4). Lo que no se ha medido es si los empaquetadores añaden por su cuenta ese intervalo, que quedaría dentro de la etapa siguiente.
 - **Tras un reinicio de la fuente** se pierde la referencia del frame 0 hasta que se restablece.
 
 ### D.9. Otras dos medidas de búfer, y en qué se diferencian
 
-El panel muestra, además de la etapa de búfer del desglose, una cifra de búfer en la tarjeta de cada
-rama. No son lo mismo:
+El panel muestra, además de la etapa de búfer del desglose, una cifra de búfer en la tarjeta de cada rama. No son lo mismo:
 
 | Medida | Qué es | Cómo se obtiene |
 | :--- | :--- | :--- |
@@ -3367,13 +2522,9 @@ rama. No son lo mismo:
 | "Búfer de jitter" (MoQ) | Tiempo medio que los frames pasan retenidos en el reproductor. | Se anota cuándo el reproductor lee cada frame y cuándo lo entrega para pintar. Incluye la decodificación. |
 | "Búfer de jitter" (WebRTC) | Tiempo medio que los frames pasan en el búfer de jitter. | Estadísticas del navegador. No incluye la decodificación. |
 
-En MoQ, la etapa del desglose y la cifra de la tarjeta deberían salir parecidas, y así ocurre. En
-WebRTC es donde aparece la discrepancia descrita en D.8.
+En MoQ, la etapa del desglose y la cifra de la tarjeta deberían salir parecidas, y así ocurre. En WebRTC es donde aparece la discrepancia descrita en D.8.
 
-Hay una tercera cifra que conviene no confundir con ninguna de estas: el **retardo efectivo** que se
-muestra junto al slider de MoQ. No es una medida, sino el valor que el reproductor se ha fijado como
-objetivo. El búfer medido sale menor, porque el objetivo se cuenta desde el frame que más rápido
-llegó y los demás llegan algo más tarde (ver 4.11).
+Hay una tercera cifra que conviene no confundir con ninguna de estas: el **retardo efectivo** que se muestra junto al slider de MoQ. No es una medida, sino el valor que el reproductor se ha fijado como objetivo. El búfer medido sale menor, porque el objetivo se cuenta desde el frame que más rápido llegó y los demás llegan algo más tarde (ver 4.11).
 
 ### D.10. Dónde queda registrado
 
