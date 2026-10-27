@@ -6,10 +6,14 @@ import type { Campaign, CampaignRun, PlayerId } from '../types';
 ChartJS.register(LinearScale, PointElement, LineElement, Tooltip, Legend);
 
 // Segundo a segundo de varias pruebas superpuestas (README, 4.8): una gráfica por protocolo y una línea por
-// prueba, cada una a todo el ancho (la evolución en el tiempo necesita eje horizontal). Con el contenido reiniciado en cada prueba el eje es el segundo del vídeo, el mismo en todas; si no,
-// los segundos desde el inicio de la medida. El calentamiento va en trazo discontinuo.
+// prueba, cada una a todo el ancho (la evolución en el tiempo necesita eje horizontal); o, superpuestos, todos
+// los protocolos en una sola, con el color de cada protocolo y todas sus pruebas en ese color. Con el contenido
+// reiniciado en cada prueba el eje es el segundo del vídeo, el mismo en todas; si no, los segundos desde el
+// inicio de la medida. El calentamiento va en trazo discontinuo.
 
 const PLAYER_LABEL: Record<PlayerId, string> = { dash: 'LL-DASH', moq: 'MoQ', rtc: 'WebRTC' };
+// Los colores de cada protocolo en todo el dashboard, para la gráfica superpuesta
+const PLAYER_COLOR: Record<PlayerId, string> = { dash: '#3b82f6', moq: '#10b981', rtc: '#f59e0b' };
 
 // Aquí la entidad es la prueba: paleta categórica en orden fijo (la de los protocolos ya distingue las gráficas)
 const RUN_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
@@ -43,6 +47,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const [condition, setCondition] = useState(conditions[0] ?? '');
   const [selected, setSelected] = useState<string[]>([]);
   const [metricKey, setMetricKey] = useState('g2g');
+  const [overlay, setOverlay] = useState(false);
   const [data, setData] = useState<Record<string, Series>>({});
   const [error, setError] = useState<string | null>(null);
   const metric = METRICS[metricKey];
@@ -112,16 +117,53 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     },
   };
 
-  const datasetsFor = (p: PlayerId): ChartDataset<'line'>[] =>
+  // Superpuestos: una entrada de la leyenda por protocolo, que muestra u oculta todas sus pruebas
+  const overlayOptions: ChartOptions<'line'> = {
+    ...options,
+    plugins: {
+      ...options.plugins,
+      legend: {
+        labels: {
+          color: '#cbd5e1',
+          boxWidth: 12,
+          boxHeight: 2,
+          generateLabels: (chart) =>
+            players.map((p) => {
+              const indexes = chart.data.datasets.flatMap((d, i) => ((d as any).protocol === p ? [i] : []));
+              return {
+                text: PLAYER_LABEL[p],
+                fillStyle: PLAYER_COLOR[p],
+                strokeStyle: PLAYER_COLOR[p],
+                fontColor: '#cbd5e1',
+                lineWidth: 2,
+                hidden: indexes.length > 0 && indexes.every((i) => !chart.isDatasetVisible(i)),
+                datasetIndex: indexes[0],
+                protocol: p,
+              } as any;
+            }),
+        },
+        onClick: (_e, item, legend) => {
+          const chart = legend.chart;
+          chart.data.datasets.forEach((d, i) => {
+            if ((d as any).protocol === (item as any).protocol) chart.setDatasetVisibility(i, !!item.hidden);
+          });
+          chart.update();
+        },
+      },
+    },
+  };
+
+  const datasetsFor = (p: PlayerId, together = false): ChartDataset<'line'>[] =>
     chosen
       .filter((id) => byId[id].players.includes(p))
       .map((id) => {
-        const color = RUN_COLORS[selected.indexOf(id) % RUN_COLORS.length];
+        const color = together ? PLAYER_COLOR[p] : RUN_COLORS[selected.indexOf(id) % RUN_COLORS.length];
         const points = (data[id]?.rows ?? [])
           .map((row) => ({ x: row.t_s, y: row[`${p}_${metric.field}`] as number | null, phase: row.phase }))
           .filter((pt) => pt.y !== null && pt.y !== undefined);
         return {
-          label: `${id} (rep. ${byId[id].rep + 1})`,
+          label: together ? `${PLAYER_LABEL[p]}, ${id} (rep. ${byId[id].rep + 1})` : `${id} (rep. ${byId[id].rep + 1})`,
+          protocol: p,
           data: points as any,
           borderColor: color,
           backgroundColor: color,
@@ -160,6 +202,10 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-1.5 pb-1 text-slate-300">
+          <input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} />
+          Superponer los protocolos
+        </label>
         <span className="text-slate-500 pb-1">
           {plan.content === 'restart'
             ? 'Contenido reiniciado en cada prueba: el mismo segundo del eje es el mismo tramo del vídeo en todas.'
@@ -179,16 +225,25 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
           ))}
       </div>
       {error && <p className="text-rose-400">No se pudieron leer las series: {error}</p>}
-      <div className="space-y-3">
-        {players.map((p) => (
-          <div key={p} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
-            <h4 className="text-xs font-medium text-slate-300 mb-2">{PLAYER_LABEL[p]}</h4>
-            <div className="h-80">
-              <Line data={{ datasets: datasetsFor(p) }} options={options} />
-            </div>
+      {overlay ? (
+        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+          <h4 className="text-xs font-medium text-slate-300 mb-2">{players.map((p) => PLAYER_LABEL[p]).join(', ')}: una línea por prueba, con el color del protocolo</h4>
+          <div className="h-[28rem]">
+            <Line data={{ datasets: players.flatMap((p) => datasetsFor(p, true)) }} options={overlayOptions} />
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {players.map((p) => (
+            <div key={p} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+              <h4 className="text-xs font-medium text-slate-300 mb-2">{PLAYER_LABEL[p]}</h4>
+              <div className="h-80">
+                <Line data={{ datasets: datasetsFor(p) }} options={options} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
