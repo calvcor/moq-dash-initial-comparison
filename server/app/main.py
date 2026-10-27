@@ -1040,6 +1040,17 @@ def control_campaign(cid: str, action: Literal["start", "pause", "abort"]):
         raise HTTPException(status_code=409, detail=str(e))
     return campaigns.get(cid)
 
+@app.post("/api/campaigns/{cid}/runs/{rid}/repeat")
+def repeat_campaign_run(cid: str, rid: str):
+    """Repite una prueba terminada (válida o inválida) al final de la cola."""
+    campaign_or_404(cid)
+    try:
+        return campaigns.repeat(cid, rid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"No existe la prueba {rid}")
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
 @app.delete("/api/campaigns/{cid}")
 def delete_campaign(cid: str):
     campaign_or_404(cid)

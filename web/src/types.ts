@@ -333,7 +333,7 @@ export interface CampaignPlan {
 }
 
 export type CampaignState = 'ready' | 'running' | 'paused' | 'done' | 'aborted';
-export type RunState = 'pending' | 'preparing' | 'mounting' | 'warmup' | 'measuring' | 'closing' | 'done' | 'invalid';
+export type RunState = 'pending' | 'preparing' | 'mounting' | 'warmup' | 'measuring' | 'closing' | 'done' | 'invalid' | 'replaced';
 
 export interface CampaignRun {
   id: string;
@@ -344,7 +344,9 @@ export interface CampaignRun {
   rep: number;
   kind: 'test' | 'control';
   attempt: number;
-  retry_of?: string;
+  retry_of?: string; // la prueba que repite (reintento automático o repetición pedida)
+  manual?: boolean; // repetición pedida a mano
+  replaced_by?: string; // válida, pero sustituida por su repetición válida
   state: RunState;
   invalid_reasons: string[];
   started_ms: number | null;

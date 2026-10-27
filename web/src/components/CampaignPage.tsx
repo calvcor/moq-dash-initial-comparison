@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Copy, Download, FlaskConical, Pause, Pencil, Play, Settings2, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Download, FlaskConical, Pause, Pencil, Play, RotateCcw, Settings2, Square, Trash2, X } from 'lucide-react';
 import { CampaignEditor, DEFAULT_PLAYER_OPTIONS, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
 import { CampaignResults } from './CampaignResults';
@@ -22,6 +22,7 @@ const STATE_LABEL: Record<string, string> = {
   measuring: 'midiendo',
   closing: 'cerrando',
   invalid: 'inválida',
+  replaced: 'sustituida',
 };
 const STATE_STYLE: Record<string, string> = {
   running: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
@@ -60,11 +61,24 @@ async function call(path: string, method = 'GET', payload?: unknown): Promise<an
   return body;
 }
 
-const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
+const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void }> = ({ campaign, onChanged }) => {
   const plan = campaign.plan;
   const runs = campaign.runs ?? [];
+  const [error, setError] = useState<string | null>(null);
+  // Se repite una prueba terminada que no tenga ya su repetición (la de la copia se repite en la copia)
+  const repeated = new Set(runs.map((r) => r.retry_of).filter(Boolean));
+  const repeat = async (run: CampaignRun) => {
+    try {
+      await call(`/api/campaigns/${campaign.id}/runs/${run.id}/repeat`, 'POST');
+      setError(null);
+      onChanged();
+    } catch (e) {
+      setError(`${run.id}: ${(e as Error).message}`);
+    }
+  };
   return (
     <div className="overflow-x-auto">
+      {error && <p className="text-rose-400 mb-1">{error}</p>}
       <table className="w-full text-left text-[11px]">
         <thead className="text-[10px] text-slate-500 uppercase">
           <tr>
@@ -76,6 +90,7 @@ const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
             <th className="py-1 pr-2 font-medium" title="Por reproductor: glass-to-glass p50 / p95 (ms), fracción del tiempo parado y cambios de calidad">
               Resultado (p50 / p95 ms · parado · cambios)
             </th>
+            <th className="py-1 pr-2 font-medium" />
           </tr>
         </thead>
         <tbody className="font-mono">
@@ -84,7 +99,12 @@ const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
               <td className="py-1 pr-2 text-slate-300">
                 {run.id}
                 {run.kind === 'control' && <span className="text-slate-500"> control</span>}
-                {run.attempt > 1 && <span className="text-slate-500"> intento {run.attempt}</span>}
+                {run.retry_of && (
+                  <span className="text-slate-500">
+                    {' '}
+                    {run.manual ? 'repite' : 'reintenta'} {run.retry_of}
+                  </span>
+                )}
               </td>
               <td className="py-1 pr-2 text-slate-300 font-sans">{run.network === null ? 'sin restricción' : plan.networks[run.network].label}</td>
               <td className="py-1 pr-2 text-slate-300 font-sans">{plan.targets[run.target].label}</td>
@@ -94,6 +114,7 @@ const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
                   {STATE_LABEL[run.state] ?? run.state}
                 </span>
                 {run.state === 'invalid' && <span className="text-slate-500"> ({run.invalid_reasons.join('; ')})</span>}
+                {run.state === 'replaced' && <span className="text-slate-500"> por {run.replaced_by}</span>}
               </td>
               <td className="py-1 pr-2 text-slate-300">
                 {run.summary
@@ -104,6 +125,21 @@ const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
                       })
                       .join('   ')
                   : run.players.map((p) => PLAYER_SHORT[p]).join(' + ')}
+              </td>
+              <td className="py-1 pr-2 font-sans">
+                {(run.state === 'done' || run.state === 'invalid') && !repeated.has(run.id) && (
+                  <button
+                    className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200"
+                    title={
+                      run.state === 'done'
+                        ? 'Repetir al final de la cola. Este resultado sigue contando hasta que la repetición termine válida, y entonces la sustituye'
+                        : 'Repetir al final de la cola'
+                    }
+                    onClick={() => repeat(run)}
+                  >
+                    <RotateCcw className="w-3 h-3" /> Repetir
+                  </button>
+                )}
               </td>
             </tr>
           ))}
@@ -161,7 +197,7 @@ const Monitor: React.FC<{
   };
 
   const c = campaign.counts;
-  const finished = (c.done ?? 0) + (c.invalid ?? 0);
+  const finished = (c.done ?? 0) + (c.invalid ?? 0) + (c.replaced ?? 0);
   const current = campaign.runs?.find((r) => r.id === campaign.current);
   const worker = campaign.worker;
   const plan = campaign.plan;
@@ -263,10 +299,11 @@ const Monitor: React.FC<{
         <div className="h-2 rounded bg-slate-800 overflow-hidden flex">
           <div className="bg-emerald-500" style={{ width: `${(100 * (c.done ?? 0)) / Math.max(1, campaign.total_runs)}%` }} />
           <div className="bg-rose-500" style={{ width: `${(100 * (c.invalid ?? 0)) / Math.max(1, campaign.total_runs)}%` }} />
+          <div className="bg-slate-500" style={{ width: `${(100 * (c.replaced ?? 0)) / Math.max(1, campaign.total_runs)}%` }} />
         </div>
         <div className="flex flex-wrap gap-x-4 text-slate-400">
           <span>
-            {finished} de {campaign.total_runs} pruebas ({c.done ?? 0} válidas, {c.invalid ?? 0} inválidas)
+            {finished} de {campaign.total_runs} pruebas ({c.done ?? 0} válidas, {c.invalid ?? 0} inválidas{c.replaced ? `, ${c.replaced} ${c.replaced === 1 ? 'sustituida' : 'sustituidas'} por su repetición` : ''})
           </span>
           {campaign.state !== 'done' && campaign.state !== 'aborted' && <span>quedan unas {formatDuration(campaign.eta_s)}</span>}
           <span>
@@ -309,7 +346,7 @@ const Monitor: React.FC<{
       <button className="text-indigo-300 hover:text-indigo-200" onClick={() => setShowRuns((v) => !v)}>
         {showRuns ? 'Ocultar las pruebas ▴' : 'Ver las pruebas ▾'}
       </button>
-      {showRuns && <RunsTable campaign={campaign} />}
+      {showRuns && <RunsTable campaign={campaign} onChanged={onChanged} />}
 
       <button className="block text-indigo-300 hover:text-indigo-200" onClick={() => setShowResults((v) => !v)}>
         {showResults ? 'Ocultar los resultados ▴' : 'Ver los resultados ▾'}

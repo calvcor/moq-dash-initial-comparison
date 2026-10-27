@@ -178,7 +178,7 @@ class Campaigns:
             except (KeyError, OSError, ValueError):
                 continue
             for run in campaign["runs"]:
-                if run["state"] not in ("pending", "done", "invalid", "skipped"):
+                if run["state"] not in ("pending", "done", "invalid", "replaced", "skipped"):
                     run["state"] = "pending"
             self.campaigns[cid] = campaign
             if campaign["state"] == "running":
@@ -331,7 +331,9 @@ class Campaigns:
                 raise RuntimeError(f"Ya hay otra campaña en marcha ({self.active})")
             if campaign["state"] not in ("ready", "paused"):
                 raise RuntimeError(f"La campaña está {campaign['state']}")
-            if campaign["restore"] is None:
+            # reopened: una campaña terminada o cancelada a la que se le ha pedido repetir una prueba; lo de
+            # entonces ya se restauró y puede haber cambiado
+            if campaign["restore"] is None or campaign.pop("reopened", False):
                 # Cómo estaba todo al empezar, para dejarlo igual al terminar (sobrevive a reinicios)
                 snap = self.snapshot()
                 campaign["restore"] = {"running": snap.get("running"), "config": snap.get("config"),
@@ -651,6 +653,8 @@ class Campaigns:
                 self.log(campaign, f"{run['id']} inválida: {'; '.join(reasons)}")
                 if run["attempt"] < plan["max_attempts"]:
                     self.retry(campaign, run)
+            else:
+                self.supersede(campaign, run)
             campaign["current"] = None
             self.save(campaign)
         self.append_summary(campaign, run)
@@ -687,6 +691,45 @@ class Campaigns:
         copy["retry_of"] = run["id"]
         runs.insert(position, copy)
 
+    def repeat(self, cid: str, run_id: str) -> dict:
+        """Repetición pedida a mano de una prueba terminada, válida o no: una copia al final de la cola.
+
+        Si la original era válida, sigue contando hasta que la copia termine válida (supersede): así no se
+        pierde el resultado si la repetición falla. Una campaña terminada o cancelada queda en pausa, para
+        reanudarla y medir lo pendiente."""
+        with self.lock:
+            campaign = self.campaigns[cid]
+            runs = campaign["runs"]
+            run = self.find_run(campaign, run_id)
+            if run is None:
+                raise KeyError(run_id)
+            if run["state"] not in ("done", "invalid"):
+                raise RuntimeError(f"{run_id} está {run['state']}: solo se repite una prueba terminada")
+            child = next((r["id"] for r in runs if r.get("retry_of") == run_id), None)
+            if child:
+                raise RuntimeError(f"{run_id} ya se repite en {child}")
+            fields = {k: run[k] for k in ("stream", "network", "target", "players", "rep", "kind")}
+            copy = self.new_run(len(runs), fields, attempt=run["attempt"] + 1)
+            copy.update(retry_of=run_id, manual=True)
+            runs.append(copy)
+            self.log(campaign, f"{run_id} se repite como {copy['id']}")
+            if campaign["state"] in ("done", "aborted"):
+                campaign.update(state="paused", reopened=True)
+                self.log(campaign, "Campaña en pausa con pruebas por repetir: reanúdala para medirlas")
+            self.save(campaign)
+            self.wake.set()
+            return self.view(campaign)
+
+    def supersede(self, campaign: dict, run: dict):
+        """Una prueba válida sustituye a la válida que repetía (la cadena de retry_of puede pasar por intentos
+        inválidos). La sustituida deja de contar en los resultados y queda como replaced."""
+        parent = self.find_run(campaign, run.get("retry_of")) if run.get("retry_of") else None
+        while parent is not None:
+            if parent["state"] == "done":
+                parent.update(state="replaced", replaced_by=run["id"])
+                self.log(campaign, f"{parent['id']} sustituida por {run['id']}")
+            parent = self.find_run(campaign, parent["retry_of"]) if parent.get("retry_of") else None
+
     # --- exportación ---
 
     def run_columns(self, campaign: dict, run: dict) -> dict:
@@ -703,6 +746,7 @@ class Campaigns:
             # Ajustes de los reproductores de la campaña (también en cada fila de samples.csv)
             **(plan.get("player_options") or {}),
             "invalid_reasons": "; ".join(run["invalid_reasons"]),
+            "retry_of": run.get("retry_of"), "manual_repeat": bool(run.get("manual")),
             "started_ms": run["started_ms"], "measure_start_ms": run["measure_start_ms"], "ended_ms": run["ended_ms"],
         }
         for direction in ("down", "up"):
@@ -764,6 +808,13 @@ class Campaigns:
                 rows = [json.loads(line) for line in f if line.strip()]
         except OSError:
             pass
+        if name == "runs.jsonl":
+            # Una prueba válida que después se repitió y quedó sustituida: su fila se escribió como done
+            runs = {r["id"]: r for r in self.campaigns[cid]["runs"]}
+            for row in rows:
+                run = runs.get(row.get("run_id"))
+                if run and run["state"] == "replaced" and row.get("state") == "done":
+                    row.update(state="replaced", replaced_by=run.get("replaced_by"))
         if name == "samples.jsonl":
             # Las columnas de la condición, delante de las del dashboard
             campaign = self.campaigns[cid]
