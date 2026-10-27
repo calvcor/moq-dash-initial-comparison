@@ -269,7 +269,7 @@ Esto marca una diferencia importante con MoQ: **`dash.js` no ve los frames**. En
 
 | Ajuste | Por defecto en `dash.js` | Aquí | Efecto |
 | :--- | :--- | :--- | :--- |
-| `streaming.delay.liveDelay` | Sin fijar; lo deduce del manifiesto | Slider, 0,05 a 6 s (0,3 s al abrir) | Distancia al directo. |
+| `streaming.delay.liveDelay` | Sin fijar; lo deduce del manifiesto | Slider, 0,05 a 2 s (0,3 s al abrir; hasta el 27-10-2026, 6 s) | Distancia al directo. |
 | `streaming.liveCatchup.enabled` | Automático | `true` | Activa la corrección de latencia. |
 | `streaming.liveCatchup.mode` | `liveCatchupModeDefault` | `liveCatchupModeLoLP` (hasta el 27-10-2026, por una errata, el por defecto: ver 3.5) | Algoritmo de corrección. LoL+ mira la latencia y también el búfer. |
 | `streaming.liveCatchup.playbackBufferMin` | 0,5 s | Slider "Búfer mínimo", 0 a 2 s (0 al abrir) | Búfer por debajo del cual LoL+ frena y no persigue el objetivo. Suelo de la latencia. |

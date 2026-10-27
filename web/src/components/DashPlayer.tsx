@@ -417,13 +417,13 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           <input
             type="range"
             min={0.05}
-            max={6.0}
+            max={2.0}
             step={0.05}
             value={targetLatency}
             onChange={(e) => handleLatencyChange(parseFloat(e.target.value))}
             className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
-          <span className="text-[10px] text-slate-500 font-mono">6.0s</span>
+          <span className="text-[10px] text-slate-500 font-mono">2.0s</span>
         </div>
       </div>
 
