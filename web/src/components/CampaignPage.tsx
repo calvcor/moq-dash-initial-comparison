@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Download, FlaskConical, Pause, Play, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, Download, FlaskConical, Pause, Pencil, Play, Square, Trash2, X } from 'lucide-react';
 import { CampaignEditor, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
 import type { Campaign, CampaignRun, PlayerId, ServerStatus } from '../types';
@@ -37,8 +37,8 @@ const Badge: React.FC<{ state: string }> = ({ state }) => (
   <span className={`text-[11px] px-2 py-0.5 rounded-full border ${STATE_STYLE[state] ?? STATE_STYLE.ready}`}>{STATE_LABEL[state] ?? state}</span>
 );
 
-async function call(path: string, method = 'GET'): Promise<any> {
-  const res = await fetch(path, { method });
+async function call(path: string, method = 'GET', payload?: unknown): Promise<any> {
+  const res = await fetch(path, payload === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(typeof body?.detail === 'string' ? body.detail : `Error ${res.status}`);
   return body;
@@ -100,6 +100,20 @@ const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
 const Monitor: React.FC<{ campaign: Campaign; lean: boolean; onChanged: () => void; onDeleted: () => void }> = ({ campaign, lean, onChanged, onDeleted }) => {
   const [error, setError] = useState<string | null>(null);
   const [showRuns, setShowRuns] = useState(!lean);
+  // Nombre en edición; null si no se está editando
+  const [draftName, setDraftName] = useState<string | null>(null);
+  const saveName = async () => {
+    const name = draftName?.trim();
+    if (!name || name === campaign.name) return setDraftName(null);
+    try {
+      await call(`/api/campaigns/${campaign.id}`, 'PATCH', { name });
+      setDraftName(null);
+      setError(null);
+      onChanged();
+    } catch (e) {
+      setError(String((e as Error).message));
+    }
+  };
   const act = async (action: 'start' | 'pause' | 'abort') => {
     try {
       await call(`/api/campaigns/${campaign.id}/${action}`, 'POST');
@@ -128,7 +142,34 @@ const Monitor: React.FC<{ campaign: Campaign; lean: boolean; onChanged: () => vo
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-semibold text-white">{campaign.name}</h2>
+        {draftName === null ? (
+          <h2 className="text-sm font-semibold text-white flex items-center gap-1.5">
+            {campaign.name}
+            <button className="text-slate-500 hover:text-indigo-300" title="Cambiar el nombre" onClick={() => setDraftName(campaign.name)}>
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </h2>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              maxLength={120}
+              className="bg-slate-950 border border-indigo-500 rounded px-2 py-1 text-sm text-white w-80 focus:outline-none"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveName();
+                if (e.key === 'Escape') setDraftName(null);
+              }}
+            />
+            <button className="text-emerald-400 hover:text-emerald-300" title="Guardar (Intro)" onClick={saveName}>
+              <Check className="w-4 h-4" />
+            </button>
+            <button className="text-slate-500 hover:text-slate-300" title="Cancelar (Esc)" onClick={() => setDraftName(null)}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         <Badge state={campaign.state} />
         <span className="text-slate-500 font-mono">{campaign.id}</span>
         <div className="ml-auto flex gap-2">

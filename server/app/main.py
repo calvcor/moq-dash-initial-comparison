@@ -977,6 +977,18 @@ def get_campaign(cid: str):
     """Plan, estado, pruebas con su resumen y registro de eventos."""
     return campaign_or_404(cid)
 
+class CampaignRename(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+
+@app.patch("/api/campaigns/{cid}")
+def rename_campaign(cid: str, req: CampaignRename):
+    """Cambia el nombre de una campaña, en cualquier estado."""
+    campaign_or_404(cid)
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="El nombre no puede quedar vacío")
+    return campaigns.rename(cid, name)
+
 # Antes que /{action}: la primera ruta que encaja es la que responde
 class CampaignRows(BaseModel):
     """Filas de cada segundo de una prueba, las del CSV del dashboard más t_server_ms (reloj del servidor)."""

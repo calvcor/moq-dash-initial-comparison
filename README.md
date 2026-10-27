@@ -578,7 +578,7 @@ Baterías de pruebas desatendidas para estudiar cómo se comportan las tres impl
 **La página `/campaign`** tiene tres partes:
 
 - **Editor** (**+ Nueva campaña**): emisiones (fuente, escalera `altura@kbps`, GOP, segmento, fragmento CMAF —de 1 frame, `frag_duration` 0, a 1 s, como en el panel de control—, audio en WebRTC; una por bloque), condiciones de red (barridos de un parámetro sobre una base común —RTT y jitter repartidos por igual entre los dos sentidos, pérdida en los dos, ancho de banda solo en la bajada— o los perfiles del panel de red, todo editable en una tabla), latencias objetivo (`auto, 100, 300…`: el mismo valor para los tres reproductores; valores distintos por rama solo por la API) y diseño (reproductores, todos a la vez o de uno en uno, calidad, repeticiones, duraciones, control, intentos, semilla). Estima el número de pruebas y la duración con la misma cuenta que el servidor. La campaña se crea sin arrancar.
-- **Monitor**: estado, barra de progreso (válidas e inválidas), tiempo restante, prueba en curso, trabajador, eventos y la tabla de pruebas con su resultado (p50/p95 de glass-to-glass, fracción del tiempo parado y cambios de calidad por reproductor). Arrancar o reanudar, pausa, cancelar, borrar y descargar los dos CSV.
+- **Monitor**: estado, barra de progreso (válidas e inválidas), tiempo restante, prueba en curso, trabajador, eventos y la tabla de pruebas con su resultado (p50/p95 de glass-to-glass, fracción del tiempo parado y cambios de calidad por reproductor). Arrancar o reanudar, pausa, cancelar, borrar y descargar los dos CSV. El lápiz junto al nombre lo cambia (Intro guarda, Esc cancela), en cualquier estado: no toca el plan ni las medidas, que van por el id.
 - **Trabajador** (casilla **Esta pestaña es el trabajador**, o abrir `/campaign?worker=1`): monta los reproductores de cada prueba y sube sus filas. Pide al navegador que no apague la pantalla (Wake Lock) y avisa de que la pestaña tiene que quedar visible. Con él activo, el monitor se consulta menos y la tabla de pruebas va plegada, para no cargar el navegador que mide. Un solo trabajador a la vez: otro que se conecte espera.
 
 Con una campaña en marcha, el dashboard no monta sus reproductores y muestra un aviso: en otra pestaña o en otro equipo compartirían la cola de emulación con los del trabajador.
@@ -947,6 +947,7 @@ El reproductor de dash.js queda accesible como `window.dashPlayer` en la consola
 | `GET /api/campaigns` | Campañas guardadas, sin sus pruebas |
 | `GET /api/campaigns/{id}` | Plan, estado, pruebas con su resumen, trabajador y eventos |
 | `POST /api/campaigns/{id}/start`, `/pause`, `/abort` | Arranca o reanuda; pausa (la prueba en curso se repetirá); cancela y restaura la red y la emisión |
+| `PATCH /api/campaigns/{id}` | Cambia el nombre (`{name}`), en cualquier estado; queda en los eventos |
 | `DELETE /api/campaigns/{id}` | Borra una campaña que no esté en marcha |
 | `GET /api/campaigns/{id}/runs.csv`, `/samples.csv` | Resumen por prueba y reproductor; filas de cada segundo con la condición |
 | `POST /api/campaigns-worker` | Latido del trabajador (`worker_id`, `mounted`, `mounted_at_ms`): devuelve la prueba que debe tener montada y con qué ajustes |

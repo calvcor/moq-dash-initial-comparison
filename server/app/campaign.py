@@ -279,6 +279,16 @@ class Campaigns:
             return {"id": campaign["id"], "name": campaign["name"], "state": campaign["state"],
                     "current": campaign["current"], "worker": self.worker_view()}
 
+    def rename(self, cid: str, name: str) -> dict:
+        """Cambia el nombre, en cualquier estado: no toca el plan ni las medidas (el CSV lleva el id, no el nombre)."""
+        with self.lock:
+            campaign = self.campaigns[cid]
+            if name != campaign["name"]:
+                self.log(campaign, f"Renombrada: «{campaign['name']}» → «{name}»")
+                campaign["name"] = campaign["plan"]["name"] = name
+                self.save(campaign)
+            return self.view(campaign)
+
     def delete(self, cid: str):
         with self.lock:
             if cid == self.active:
