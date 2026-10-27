@@ -4,7 +4,7 @@ import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, W
 import { meters } from '../lib/qoe';
 import { RtcTracer } from '../lib/trace';
 import { serverNowMs } from '../lib/clock';
-import type { PlayerMetrics, TimecodeLayout } from '../types';
+import type { PlayerMetrics, PlayerPreset, TimecodeLayout } from '../types';
 
 interface RtcPlayerProps {
   isStreaming: boolean;
@@ -12,6 +12,7 @@ interface RtcPlayerProps {
   audible: boolean; // sonido activado (selector de sonido del dashboard)
   streamStartedMs: number; // hora del servidor (ms epoch) a la que arrancó el empaquetador WebRTC (stream_ids.rtc)
   timecodes?: TimecodeLayout[];
+  preset?: PlayerPreset; // ajustes de una prueba de campaña (WebRTC no tiene calidades: se ignora quality)
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
 
@@ -26,7 +27,7 @@ const WHEP_URL = '/rtc/live/whep';
 // (keyframe y sondeo de la entrada); desde ahí, 6 s bastan.
 const JOIN_AFTER_START_MS = 8000;
 
-export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, audible, streamStartedMs, timecodes, onMetricsUpdate }) => {
+export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, audible, streamStartedMs, timecodes, preset, onMetricsUpdate }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
 
@@ -37,8 +38,8 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   // Búfer de jitter que se le pide al navegador (RTCRtpReceiver.jitterBufferTarget). 0 = no pedir nada
   // y dejar el comportamiento por defecto del navegador, que lo ajusta solo.
-  const [targetMs, setTargetMs] = useState<number>(0);
-  const targetRef = useRef(0);
+  const [targetMs, setTargetMs] = useState<number>(preset?.targetMs ?? 0);
+  const targetRef = useRef(preset?.targetMs ?? 0);
   const receiverRef = useRef<RTCRtpReceiver | null>(null);
 
   // El medidor vive lo que el componente, no lo que cada intento de reproducción: así los congelados

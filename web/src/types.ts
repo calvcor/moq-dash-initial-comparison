@@ -83,6 +83,7 @@ export interface ServerStatus {
   // Vídeo fuente: se descarga al primer arranque si no está
   source?: { state: 'ready' | 'downloading' | 'extracting' | 'error'; progress_pct: number; error: string | null };
   camera?: CameraState;
+  campaign?: CampaignBrief | null; // campaña en marcha (README, 4.8)
 }
 
 // Cámara RTSP (GET /api/camera y /api/status): nunca incluye la URL, que puede llevar credenciales
@@ -155,6 +156,14 @@ export interface StageBreakdown {
   stages: { key: string; ms: number }[]; // mediana de cada etapa, en el orden del recorrido
   totalMs: number;
   samples: number; // frames seguidos de principio a fin en el periodo
+}
+
+export type PlayerId = 'dash' | 'moq' | 'rtc';
+
+// Ajustes con los que arranca un reproductor en una prueba de campaña (README, 4.8). Sin ellos, los de la página.
+export interface PlayerPreset {
+  targetMs: number | null; // latencia objetivo en el mando del reproductor; null = la de fábrica de su implementación
+  quality: number | 'auto';
 }
 
 // Una fila por segundo del registro exportable de la sesión
@@ -276,4 +285,108 @@ export interface SampleRow {
   rtc_up_dropped: number | null;
   tab_hidden: boolean;
   versions: string | null; // componentes de terceros desplegados, p. ej. moq-relay=0.17.2;moq-cli=0.14.2
+}
+
+// --- Campañas de medida (README, 4.8; server/app/campaign.py) ---
+
+export interface CampaignNetwork {
+  label: string;
+  profile: NetworkProfile;
+}
+
+// Latencia objetivo en el mando de cada reproductor; null = la de fábrica de su implementación
+export interface CampaignTarget {
+  label: string;
+  dash_ms: number | null;
+  moq_ms: number | null;
+  rtc_ms: number | null;
+}
+
+export interface CampaignPlan {
+  name: string;
+  streams: Omit<StreamConfig, 'fps'>[];
+  networks: CampaignNetwork[];
+  targets: CampaignTarget[];
+  players: PlayerId[];
+  player_mode: 'together' | 'each';
+  quality: number | null; // null = la adaptación de cada reproductor
+  repetitions: number;
+  warmup_s: number;
+  measure_s: number;
+  control_every: number;
+  max_attempts: number;
+  stream_settle_s: number;
+  seed: number | null;
+}
+
+export type CampaignState = 'ready' | 'running' | 'paused' | 'done' | 'aborted';
+export type RunState = 'pending' | 'preparing' | 'mounting' | 'warmup' | 'measuring' | 'closing' | 'done' | 'invalid';
+
+export interface CampaignRun {
+  id: string;
+  stream: number;
+  network: number | null; // null = prueba de control, sin restricción
+  target: number;
+  players: PlayerId[];
+  rep: number;
+  kind: 'test' | 'control';
+  attempt: number;
+  retry_of?: string;
+  state: RunState;
+  invalid_reasons: string[];
+  started_ms: number | null;
+  measure_start_ms: number | null;
+  ended_ms: number | null;
+  summary: {
+    rows: number;
+    server: { restarts: number | null; ingest_anomalies: number | null };
+    players: Partial<Record<PlayerId, Record<string, number | null>>>;
+  } | null;
+}
+
+export interface CampaignWorkerState {
+  connected: boolean;
+  id: string | null;
+  seen_ms: number;
+  mounted: string | null;
+  info: Record<string, unknown>;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  state: CampaignState;
+  created_ms: number;
+  plan: CampaignPlan;
+  runs?: CampaignRun[];
+  events?: { t_ms: number; message: string }[];
+  current: string | null;
+  counts: Partial<Record<RunState, number>>;
+  total_runs: number;
+  eta_s: number;
+  worker?: CampaignWorkerState;
+  versions?: Record<string, string | null>;
+}
+
+export interface CampaignBrief {
+  id: string;
+  name: string;
+  state: CampaignState;
+  current: string | null;
+  worker: CampaignWorkerState;
+}
+
+// Lo que debe tener montado el trabajador (POST /api/campaigns-worker)
+export interface CampaignAssignment {
+  campaign: string;
+  phase: 'idle' | RunState;
+  run?: string;
+  players?: PlayerId[];
+  targets?: Record<PlayerId, number | null>;
+  target_label?: string;
+  network_label?: string;
+  quality?: number | null;
+  kind?: 'test' | 'control';
+  rep?: number;
+  ends_ms?: number | null;
 }

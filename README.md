@@ -571,9 +571,19 @@ En el servidor (bucle a 60 fps, escalera 1080/720/540, 30 s, sin red emulada, lo
 - **Parada y reanudación:** con la casilla **Detener la emisión para el VMAF y reanudarla después** (marcada por defecto), el servidor detiene la emisión en cuanto termina la grabación (`stop_after` en `POST /api/qoe/recordings`), calcula el VMAF y la QoE, y la vuelve a arrancar con la configuración que tenía al empezar la prueba, guardada con la grabación (`resume_config`), así que también sobrevive a un reinicio del orquestador. Indexar y subir los registros no dependen de la emisión. Si la grabación falla, no se detiene; si el VMAF falla, se reanuda igual; si alguien la arranca mientras se calcula, el cálculo vuelve a la cola y no se toca. Esa prueba pasa la primera en la cola de VMAF. El resultado queda en la grabación (`resumed`). Desmarcada, el VMAF queda en cola hasta que se detenga a mano, y el panel ofrece un botón para hacerlo. Desde la consola, `qoeTest` no la detiene.
 - **Exportar:** CSV con cada paso de 1 s de cada reproductor y JSON completo (grabación, términos, entradas y pasos). La QoE es un resultado por prueba, no por segundo de medida: no va en el CSV de muestras.
 
-### 4.8. Campañas de medida (en construcción)
+### 4.8. Campañas de medida
 
-Baterías de pruebas desatendidas para estudiar cómo se comportan las tres implementaciones con distintas condiciones de red y latencias objetivo. Hecha la fase 1 (el servidor, `server/app/campaign.py`); faltan la página `/campaign` con el editor, el monitor y el modo trabajador del navegador (fase 2), y las gráficas de resultados y un trabajador headless (fase 3). Hasta entonces se maneja con la API (sección 9).
+Baterías de pruebas desatendidas para estudiar cómo se comportan las tres implementaciones con distintas condiciones de red y latencias objetivo. Hechas la fase 1 (el servidor, `server/app/campaign.py`) y la 2 (la página `/campaign`, enlazada desde la cabecera del dashboard); faltan las gráficas de resultados y un script para lanzar el trabajador en Chrome headless (fase 3).
+
+**La página `/campaign`** tiene tres partes:
+
+- **Editor** (**+ Nueva campaña**): emisiones (fuente, escalera `altura@kbps`, GOP, segmento, fragmento, audio en WebRTC; una por bloque), condiciones de red (barridos de un parámetro sobre una base común —RTT y jitter repartidos por igual entre los dos sentidos, pérdida en los dos, ancho de banda solo en la bajada— o los perfiles del panel de red, todo editable en una tabla), latencias objetivo (`auto, 100, 300…`: el mismo valor para los tres reproductores; valores distintos por rama solo por la API) y diseño (reproductores, todos a la vez o de uno en uno, calidad, repeticiones, duraciones, control, intentos, semilla). Estima el número de pruebas y la duración con la misma cuenta que el servidor. La campaña se crea sin arrancar.
+- **Monitor**: estado, barra de progreso (válidas e inválidas), tiempo restante, prueba en curso, trabajador, eventos y la tabla de pruebas con su resultado (p50/p95 de glass-to-glass, fracción del tiempo parado y cambios de calidad por reproductor). Arrancar o reanudar, pausa, cancelar, borrar y descargar los dos CSV.
+- **Trabajador** (casilla **Esta pestaña es el trabajador**, o abrir `/campaign?worker=1`): monta los reproductores de cada prueba y sube sus filas. Pide al navegador que no apague la pantalla (Wake Lock) y avisa de que la pestaña tiene que quedar visible. Con él activo, el monitor se consulta menos y la tabla de pruebas va plegada, para no cargar el navegador que mide. Un solo trabajador a la vez: otro que se conecte espera.
+
+Con una campaña en marcha, el dashboard no monta sus reproductores y muestra un aviso: en otra pestaña o en otro equipo compartirían la cola de emulación con los del trabajador.
+
+**Ajustes de los reproductores en una prueba.** Los de la página al abrirla, salvo la latencia objetivo y la calidad, que fija la campaña. DASH: `maxDrift` 1,5 s, búfer mínimo de LoL+ 0 y reglas ABR de fábrica (`dash_max_drift_s`, `dash_playback_buffer_min_s` y `dash_abr` en las filas). MoQ: adaptación y cambio de calidad de `@moq/watch` (`watch` y `seamless`), sin los experimentos de README 6.1 y 6.3 aunque estén recordados en el navegador. Sin sonido en ninguno.
 
 **Reparto.** El orquestador guarda la campaña en disco (`media/campaigns/<id>/`) y marca el ritmo: aplica él mismo la emisión y el perfil de red y decide qué prueba toca. El navegador solo hace de **trabajador**: cada segundo envía un latido (`POST /api/campaigns-worker`) diciendo qué prueba tiene montada, recibe lo que debe tener y sube las filas de cada segundo de los reproductores (las mismas del CSV del dashboard, más `t_server_ms` en reloj del servidor). Si la pestaña se recarga o se cuelga, se vuelve a enganchar y la prueba interrumpida se repite. Un solo trabajador a la vez.
 
@@ -589,18 +599,18 @@ Baterías de pruebas desatendidas para estudiar cómo se comportan las tres impl
 
 Los reproductores son siempre nuevos porque MoQ en auto solo calcula su objetivo al conectar (PROTOCOLOS, 4.11); de paso se mide el arranque (`first_g2g_s`, con la resolución de una fila por segundo).
 
-**Latencia objetivo.** Cada valor de `targets` lleva el de cada reproductor (`dash_ms`, `moq_ms`, `rtc_ms`) y se pasa a su mando tal como lo entiende su implementación: `liveDelay` de dash.js (de extremo a extremo), `delay` de `@moq/watch` (un búfer al que la librería suma el jitter del catálogo) y `jitterBufferTarget` de WebRTC (solo el búfer del receptor). **No significan lo mismo**; el eje del análisis es la latencia conseguida frente a la pedida. `null` es el valor por defecto de la implementación. Lo normal es poner el mismo valor en los tres; valores distintos son un experimento aparte y declarado.
+**Latencia objetivo.** Cada valor de `targets` lleva el de cada reproductor (`dash_ms`, `moq_ms`, `rtc_ms`) y se pasa a su mando tal como lo entiende su implementación: `liveDelay` de dash.js (de extremo a extremo), `delay` de `@moq/watch` (un búfer al que la librería suma el jitter del catálogo) y `jitterBufferTarget` de WebRTC (solo el búfer del receptor). **No significan lo mismo**; el eje del análisis es la latencia conseguida frente a la pedida. `null` (`auto` en el editor) es el valor de fábrica de cada implementación: en MoQ y WebRTC, su auto (el de los sliders a 0); en DASH, no se fija `liveDelay` (queda en `NaN`, el de fábrica de dash.js) y dash.js lo saca del manifiesto. **Con DASH eso da unos 8 s** (medido en local el 27-10-2026: 8,1 s de p50 con RTT de 40 ms y con 6 Mbit/s): `auto` no es un punto de baja latencia para DASH, sino su comportamiento sin configurar. Lo normal es poner el mismo valor en los tres; valores distintos son un experimento aparte y declarado.
 
 **Diseño.** El orden se sortea (con `seed`, guardada) dentro de cada bloque, que es una configuración de la emisión × una repetición: la deriva del sistema en una campaña larga no se confunde con la condición y la fuente solo se reinicia al cambiar de bloque. Cada `control_every` pruebas se intercala una de **control**, sin restricción de red y con el primer objetivo, que detecta esa deriva. Con `player_mode: "each"` cada reproductor va en su propia prueba, para medir cuánto se estorban en el navegador.
 
-**Validez.** Una prueba se marca `invalid` y se repite al final de su bloque (hasta `max_attempts` intentos) si hay filas con la pestaña oculta, reinicios del supervisor, anomalías de ingesta, reproductores activos distintos de los de la prueba, latencia medida en menos del 80 % de los segundos de algún reproductor, o el trabajador se desconecta (15 s sin latido) o desmonta los reproductores.
+**Validez.** Una prueba se marca `invalid` y se repite al final de su bloque (hasta `max_attempts` intentos) si hay filas con la pestaña oculta, reinicios del supervisor, anomalías de ingesta, reproductores activos distintos de los de la prueba, menos filas que el 80 % de los segundos de medida, o el trabajador se desconecta (15 s sin latido) o desmonta los reproductores. Son fallos de la medida, no del protocolo: los segundos sin latencia de un reproductor (vídeo parado o que no arranca) **no** invalidan la prueba, porque son su resultado y repetirlos sesgaría la campaña hacia las pruebas buenas. Quedan en `coverage` (fracción de los segundos de medida con latencia) y en las paradas.
 
 **Mientras corre**, `POST /api/config`, `/api/start`, `/api/stop`, `/api/network` y `/api/qoe/recordings` responden 409: la emisión y la red las lleva la campaña. En pausa se pueden tocar; al reanudar se vuelven a aplicar. Al terminar o al cancelar, la red y la emisión vuelven a como estaban al empezar (también si estaba parada). Si el orquestador se reinicia con una campaña en marcha, la retoma al arrancar y repite la prueba en curso.
 
 **Resultados.** `runs.csv`: una fila por prueba (también las inválidas) y reproductor, con la condición (`network_label`, `target_label`, perfil de red), la validez y el resumen de la medida: muestras y cobertura, p50/p95/media/σ/mín/máx de glass-to-glass, paradas y su tiempo (`stall_ratio`), bitrate, fps, mediana del p95 del tiempo en pantalla, búfer, altura media y fracción del tiempo en la más alta, cambios de calidad, recreaciones del reproductor, descartes del router y, en WebRTC, paquetes perdidos. `samples.csv`: todas las filas de cada segundo con la condición delante; `in_summary` marca las que entran en el resumen de una prueba válida (las de un intento interrumpido conservan el `run_id`, con otro `run_started_ms`). Se mide lo que hacen las implementaciones tal como vienen: la campaña no toca su comportamiento.
 
 > [!NOTE]
-> Comprobado en local el 23-10-2026 con un trabajador simulado (un script que inventa las filas): aplicación de la red en cada prueba, repetición de una prueba inválida, reanudación tras reiniciar el orquestador, restauración al terminar y exportación. Sin reproductores reales todavía.
+> Comprobado en local el 23-10-2026 con un trabajador simulado (un script que inventa las filas): aplicación de la red en cada prueba, repetición de una prueba inválida, reanudación tras reiniciar el orquestador, restauración al terminar y exportación. El 27-10-2026, con la página como trabajador en Chrome headless y los tres reproductores reales: una campaña de cinco pruebas (RTT 40 ms y 6 Mbit/s × auto y 500 ms) pasó por todas las fases, aplicó los objetivos a cada reproductor y devolvió la red y la emisión a como estaban. Las cifras de esas pruebas cortas (30 s) no son resultados: solo comprueban el mecanismo.
 
 ---
 
@@ -980,10 +990,12 @@ moq-dash-initial-comparison/
     ├── Dockerfile                # Build de Vite + Nginx con COOP/COEP
     └── src/
         ├── App.tsx               # Estado global, registro de muestras y export CSV
+        ├── main.tsx              # Dashboard o, en /campaign, la página de campañas
         ├── types.ts
         ├── lib/
         │   ├── clock.ts          # Sincronización con el reloj del servidor
         │   ├── glass.ts          # Lectura del timecode y medidor glass-to-glass
+        │   ├── samples.ts        # Fila de cada segundo del CSV (dashboard y trabajador de campañas)
         │   └── trace.ts          # Seguimiento de frames por etapas en el navegador
         └── components/
             ├── ControlPanel.tsx
@@ -991,7 +1003,10 @@ moq-dash-initial-comparison/
             ├── PipelineDiagram.tsx
             ├── DashPlayer.tsx
             ├── MoqPlayer.tsx
-            └── MetricsDashboard.tsx
+            ├── MetricsDashboard.tsx
+            ├── CampaignPage.tsx  # /campaign: lista, monitor y trabajador
+            ├── CampaignEditor.tsx
+            └── CampaignWorker.tsx # Monta los reproductores de cada prueba y sube sus filas
 ```
 
 

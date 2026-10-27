@@ -9,10 +9,10 @@ interface NetworkPanelProps {
   onApply: (profile: NetworkProfile) => void;
 }
 
-const CLEAR: LinkProfile = { rate_kbit: null, delay_ms: 0, jitter_ms: 0, loss_pct: 0, queue_ms: 100 };
+export const CLEAR: LinkProfile = { rate_kbit: null, delay_ms: 0, jitter_ms: 0, loss_pct: 0, queue_ms: 100 };
 
 // Perfiles orientativos para arrancar una prueba; no reproducen ninguna red medida
-const PRESETS: { label: string; profile: NetworkProfile }[] = [
+export const PRESETS: { label: string; profile: NetworkProfile }[] = [
   { label: 'Sin restricción', profile: { down: CLEAR, up: CLEAR } },
   { label: 'RTT 100 ms', profile: { down: { ...CLEAR, delay_ms: 50 }, up: { ...CLEAR, delay_ms: 50 } } },
   { label: 'Pérdida 1 %', profile: { down: { ...CLEAR, delay_ms: 20, loss_pct: 1 }, up: { ...CLEAR, delay_ms: 20, loss_pct: 1 } } },

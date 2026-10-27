@@ -8,7 +8,7 @@ import { meters } from '../lib/qoe';
 import { MoqBufferMeter, MoqTracer } from '../lib/trace';
 import { MoqProbeAbr } from '../lib/moqProbe';
 import { MoqExplain } from './MoqExplain';
-import type { MoqAbr, MoqSwitching, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
+import type { MoqAbr, MoqSwitching, PlayerMetrics, PlayerPreset, Rendition, TimecodeLayout } from '../types';
 
 const SWITCHING_KEY = 'testbed.moqSwitching';
 const ABR_KEY = 'testbed.moqAbr';
@@ -37,6 +37,9 @@ interface MoqPlayerProps {
   timecodes?: TimecodeLayout[];
   renditions?: Rendition[];
   audible: boolean; // sonido activado (selector de sonido del dashboard)
+  // Ajustes de una prueba de campaña. Con ellos, adaptación y cambio de calidad son los de @moq/watch, no
+  // los experimentos recordados en el navegador
+  preset?: PlayerPreset;
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
 
@@ -47,6 +50,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   timecodes,
   renditions,
   audible,
+  preset,
   onMetricsUpdate,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -54,7 +58,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   const [status, setStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
   // 0 = auto: no se fija nada y @moq/watch dimensiona el búfer con el RTT que le comunica el relay
-  const [targetLatencyMs, setTargetLatencyMs] = useState<number>(0);
+  const [targetLatencyMs, setTargetLatencyMs] = useState<number>(preset?.targetMs ?? 0);
   const [resolvedDelayMs, setResolvedDelayMs] = useState<number | null>(null);
   // Milisegundos como el tipo de la librería. Vale para la versión publicada (Net.Time.Milli) y para la de main,
   // donde Milli pasó a @moq/clock: en las dos es un número con otro nombre de tipo.
@@ -73,7 +77,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   // opción no existe, el selector se desactiva y el CSV la deja vacía.
   // Se recuerda en el navegador, como los reproductores activos: la opción solo actúa en el siguiente cambio y
   // el primero llega a los pocos segundos de cargar, así que tiene que estar puesta antes de conectar.
-  const [switching, setSwitching] = useState<MoqSwitching>(loadSwitching);
+  const [switching, setSwitching] = useState<MoqSwitching>(() => (preset ? 'seamless' : loadSwitching()));
   const switchingSignalRef = useRef(new Signal<MoqSwitching>(switching));
   const [switchingSupported, setSwitchingSupported] = useState<boolean | null>(null);
   const handleSwitchingChange = (value: MoqSwitching) => {
@@ -89,7 +93,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
 
   // Adaptación: 'watch' deja decidir a @moq/watch (el comportamiento que se mide); 'probe' es el experimento de
   // README 6.3, un controlador propio con sondeo por prioridad que pide la calidad a la librería por target.name.
-  const [abr, setAbr] = useState<MoqAbr>(loadAbr);
+  const [abr, setAbr] = useState<MoqAbr>(() => (preset ? 'watch' : loadAbr()));
   const [showExplain, setShowExplain] = useState(false);
   const abrRef = useRef<MoqAbr>(abr);
   const probeAbrRef = useRef<MoqProbeAbr | null>(null);
@@ -123,8 +127,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
 
   // Calidad: 'auto' deja toda la decisión a @moq/watch, sin intervenir; un número fija la rendition con
   // esa altura. Se aplica en el muestreo, cuando el catálogo ya la anuncia.
-  const [quality, setQuality] = useState<number | 'auto'>('auto');
-  const qualityRef = useRef<number | 'auto'>('auto');
+  const [quality, setQuality] = useState<number | 'auto'>(preset?.quality ?? 'auto');
+  const qualityRef = useRef<number | 'auto'>(preset?.quality ?? 'auto');
   const switchesRef = useRef(0);
   const lastTrackRef = useRef<string | null>(null);
 

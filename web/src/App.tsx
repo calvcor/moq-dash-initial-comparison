@@ -6,21 +6,20 @@ import { MetricsDashboard } from './components/MetricsDashboard';
 import { ControlPanel } from './components/ControlPanel';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PipelineDiagram } from './components/PipelineDiagram';
-import { VersionsPanel, versionsLabel } from './components/VersionsPanel';
-import { RateWindow } from './lib/glass';
+import { VersionsPanel } from './components/VersionsPanel';
 import type { FrameTime } from './lib/glass';
 import { runQoETest } from './lib/qoe';
 import { QoEPanel } from './components/QoEPanel';
 import { gridCols } from './lib/layout';
-import { syncClock, getClockSync } from './lib/clock';
+import { syncClock } from './lib/clock';
+import { PLAYER_IDS, INITIAL_METRICS, IpRates, buildSampleRow } from './lib/samples';
+import type { PlayerId } from './lib/samples';
 import type { StreamConfig, ServerStatus, PlayerMetrics, SampleRow, NetworkProfile, VersionReport } from './types';
 import { Activity, Radio, Cpu, Network } from 'lucide-react';
 
 // Mismo origen que el dashboard: el punto de entrada (edge) reparte /api, /media/dash y el resto
 const API_BASE = '';
 
-type PlayerId = 'dash' | 'moq' | 'rtc';
-const PLAYER_IDS: PlayerId[] = ['dash', 'moq', 'rtc'];
 const PLAYERS_KEY = 'testbed.players';
 
 /** Reproductores activos, recordados en este navegador. Si no se puede leer, los tres. */
@@ -32,79 +31,6 @@ function loadPlayers(): Record<PlayerId, boolean> {
   return { dash: true, moq: true, rtc: true };
 }
 
-// Métricas de un reproductor sin medida: así queda también uno desactivado, para que el CSV lo deje vacío
-const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
-  dash: {
-      protocol: 'LL-DASH',
-      latencyMs: null,
-      reportedLatencyMs: null,
-      bitrateKbps: null,
-      networkKbps: null,
-      fps: null,
-      frameTimeSdMs: null,
-      frameTimeP95Ms: null,
-      frameTimeMaxMs: null,
-      frameTimes: [],
-      bufferLengthSec: null,
-      stalls: 0,
-      stallMs: 0,
-      restarts: 0,
-      targetLatencyMs: null,
-      renditionHeight: null,
-      renditionKbps: null,
-      qualitySwitches: 0,
-      bandwidthEstimateKbps: null,
-      qualityMode: 'auto',
-      status: 'idle',
-  },
-  moq: {
-      protocol: 'Media over QUIC',
-      latencyMs: null,
-      reportedLatencyMs: null,
-      bitrateKbps: null,
-      networkKbps: null,
-      fps: null,
-      frameTimeSdMs: null,
-      frameTimeP95Ms: null,
-      frameTimeMaxMs: null,
-      frameTimes: [],
-      bufferLengthSec: null,
-      stalls: 0,
-      stallMs: 0,
-      restarts: 0,
-      targetLatencyMs: null,
-      renditionHeight: null,
-      renditionKbps: null,
-      qualitySwitches: 0,
-      bandwidthEstimateKbps: null,
-      qualityMode: 'auto',
-      status: 'idle',
-  },
-  rtc: {
-      protocol: 'WebRTC',
-      latencyMs: null,
-      reportedLatencyMs: null,
-      bitrateKbps: null,
-      networkKbps: null,
-      fps: null,
-      frameTimeSdMs: null,
-      frameTimeP95Ms: null,
-      frameTimeMaxMs: null,
-      frameTimes: [],
-      bufferLengthSec: null,
-      stalls: 0,
-      stallMs: 0,
-      restarts: 0,
-      targetLatencyMs: null,
-      renditionHeight: null,
-      renditionKbps: null,
-      qualitySwitches: 0,
-      bandwidthEstimateKbps: null,
-      qualityMode: 'manual',
-      status: 'idle',
-  },
-};
-
 // Gráfica del tiempo en pantalla de cada frame: últimos 10 s
 const FRAME_HISTORY_MS = 10000;
 const appendFrames = (kept: FrameTime[], fresh: FrameTime[], now: number) => {
@@ -112,7 +38,6 @@ const appendFrames = (kept: FrameTime[], fresh: FrameTime[], now: number) => {
   return [...kept, ...fresh.filter((f) => f.t > last)].filter((f) => f.t > now - FRAME_HISTORY_MS);
 };
 
-const stage = (metrics: PlayerMetrics, key: string) => metrics.stages?.stages.find((s) => s.key === key)?.ms ?? null;
 
 export function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
@@ -196,11 +121,8 @@ export function App() {
   };
 
   // Tráfico IP por protocolo y sentido, a partir de los contadores acumulados del router
-  const ipWindows = useRef({ dash_down: new RateWindow(), dash_up: new RateWindow(), moq_down: new RateWindow(), moq_up: new RateWindow(), rtc_down: new RateWindow(), rtc_up: new RateWindow() });
-  const ipRates = () => {
-    const w = ipWindows.current;
-    return { dash_down: w.dash_down.kbps(), dash_up: w.dash_up.kbps(), moq_down: w.moq_down.kbps(), moq_up: w.moq_up.kbps(), rtc_down: w.rtc_down.kbps(), rtc_up: w.rtc_up.kbps() };
-  };
+  const ipWindows = useRef(new IpRates());
+  const ipRates = () => ipWindows.current.rates();
 
   // Mantener el reloj del navegador referido al del servidor que quema el timecode
   useEffect(() => {
@@ -217,11 +139,7 @@ export function App() {
         const data: ServerStatus = await res.json();
         setServerStatus(data);
         serverStatusRef.current = data;
-        if (data.network) {
-          for (const key of ['dash_down', 'dash_up', 'moq_down', 'moq_up', 'rtc_down', 'rtc_up'] as const) {
-            if (data.network.stats[key]) ipWindows.current[key].push(data.network.stats[key].bytes);
-          }
-        }
+        ipWindows.current.push(data);
         if (data.config && !hasInitializedConfig.current) {
           setConfig(data.config);
           hasInitializedConfig.current = true;
@@ -307,127 +225,18 @@ export function App() {
       const currentMoq = active.moq ? moqMetricsRef.current : INITIAL_METRICS.moq;
       const currentRtc = active.rtc ? rtcMetricsRef.current : INITIAL_METRICS.rtc;
 
-      const status = serverStatusRef.current;
-      const clock = getClockSync();
-      const net = status?.network?.profile;
-      const ip = ipRates();
-      samplesRef.current.push({
-        time_iso: new Date().toISOString(),
-        epoch: epochRef.current.epoch,
-        players: PLAYER_IDS.filter((id) => active[id]).join('|'),
-        fullscreen: (document.fullscreenElement as HTMLElement | null)?.dataset.player ?? null,
-        audio: audioPlayerRef.current,
-        rtc_audio: status?.config.rtc_audio ?? null,
-        elapsed_s: Math.round((performance.now() - epochRef.current.startedAt) / 1000),
-        source: status?.config.source ?? null,
-        fps: status?.config.fps ?? null,
-        gop_size: status?.config.gop_size ?? null,
-        ladder: status?.config.renditions.map((r) => `${r.height}p@${r.bitrate_kbps}`).join('|') ?? null,
-        dash_path: status?.dash_path ?? null,
-        seg_duration: status?.config.seg_duration ?? null,
-        frag_duration: status?.config.frag_duration ?? null,
-        dash_g2g_ms: currentDash.latencyMs,
-        dash_reported_ms: currentDash.reportedLatencyMs,
-        dash_kbps: currentDash.bitrateKbps,
-        dash_net_kbps: currentDash.networkKbps,
-        dash_fps: currentDash.fps,
-        dash_frametime_sd_ms: currentDash.frameTimeSdMs,
-        dash_frametime_p95_ms: currentDash.frameTimeP95Ms,
-        dash_frametime_max_ms: currentDash.frameTimeMaxMs,
-        dash_buffer_s: currentDash.bufferLengthSec,
-        dash_stalls: currentDash.stalls,
-        dash_stall_ms: currentDash.stallMs,
-        dash_player_restarts: currentDash.restarts,
-        dash_target_ms: currentDash.targetLatencyMs,
-        dash_height: currentDash.renditionHeight,
-        dash_rendition_kbps: currentDash.renditionKbps,
-        dash_quality_switches: currentDash.qualitySwitches,
-        dash_bw_estimate_kbps: currentDash.bandwidthEstimateKbps,
-        dash_quality_mode: currentDash.qualityMode,
-        dash_max_drift_s: currentDash.maxDriftSec ?? null,
-        dash_playback_buffer_min_s: currentDash.playbackBufferMinSec ?? null,
-        dash_abr: currentDash.abr ?? null,
-        moq_g2g_ms: currentMoq.latencyMs,
-        moq_reported_ms: currentMoq.reportedLatencyMs,
-        moq_kbps: currentMoq.bitrateKbps,
-        moq_net_kbps: currentMoq.networkKbps,
-        moq_fps: currentMoq.fps,
-        moq_frametime_sd_ms: currentMoq.frameTimeSdMs,
-        moq_frametime_p95_ms: currentMoq.frameTimeP95Ms,
-        moq_frametime_max_ms: currentMoq.frameTimeMaxMs,
-        moq_jitter_buffer_s: currentMoq.bufferLengthSec,
-        moq_stalls: currentMoq.stalls,
-        moq_stall_ms: currentMoq.stallMs,
-        moq_player_restarts: currentMoq.restarts,
-        moq_target_ms: currentMoq.targetLatencyMs,
-        moq_height: currentMoq.renditionHeight,
-        moq_selected_height: currentMoq.selectedHeight ?? null,
-        moq_rendition_kbps: currentMoq.renditionKbps,
-        moq_quality_switches: currentMoq.qualitySwitches,
-        moq_bw_estimate_kbps: currentMoq.bandwidthEstimateKbps,
-        moq_quality_mode: currentMoq.qualityMode,
-        moq_switching: currentMoq.switching ?? null,
-        moq_abr: currentMoq.moqAbr ?? 'watch',
-        moq_probing: currentMoq.probing == null ? null : currentMoq.probing ? 1 : 0,
-        moq_probe_capacity_kbps: currentMoq.probeCapacityKbps ?? null,
-        dash_stage_encode_ms: stage(currentDash, 'encode'),
-        dash_stage_package_ms: stage(currentDash, 'package'),
-        dash_stage_deliver_ms: stage(currentDash, 'deliver'),
-        dash_stage_player_ms: stage(currentDash, 'player'),
-        moq_stage_encode_ms: stage(currentMoq, 'encode'),
-        moq_stage_ingest_ms: stage(currentMoq, 'ingest'),
-        moq_stage_transport_ms: stage(currentMoq, 'transport'),
-        moq_stage_player_ms: stage(currentMoq, 'player'),
-        rtc_g2g_ms: currentRtc.latencyMs,
-        rtc_kbps: currentRtc.bitrateKbps,
-        rtc_net_kbps: currentRtc.networkKbps,
-        rtc_fps: currentRtc.fps,
-        rtc_frametime_sd_ms: currentRtc.frameTimeSdMs,
-        rtc_frametime_p95_ms: currentRtc.frameTimeP95Ms,
-        rtc_frametime_max_ms: currentRtc.frameTimeMaxMs,
-        rtc_jitter_buffer_s: currentRtc.bufferLengthSec,
-        rtc_stalls: currentRtc.stalls,
-        rtc_stall_ms: currentRtc.stallMs,
-        rtc_player_restarts: currentRtc.restarts,
-        rtc_target_ms: currentRtc.targetLatencyMs,
-        rtc_height: currentRtc.renditionHeight,
-        rtc_packets_lost: currentRtc.packetsLost ?? null,
-        rtc_stage_encode_ms: stage(currentRtc, 'encode'),
-        rtc_stage_ingest_ms: stage(currentRtc, 'ingest'),
-        rtc_stage_transport_ms: stage(currentRtc, 'transport'),
-        rtc_stage_player_ms: stage(currentRtc, 'player'),
-        clock_offset_ms: clock ? Number(clock.offsetMs.toFixed(2)) : null,
-        clock_rtt_ms: clock ? Number(clock.rttMs.toFixed(2)) : null,
-        ingest_anomalies: status?.ingest_anomalies
-          ? status.ingest_anomalies.master + status.ingest_anomalies.dash + status.ingest_anomalies.moq + (status.ingest_anomalies.rtc ?? 0)
-          : null,
-        dash_availability_drift_ms: status?.dash_availability_drift_ms ?? null,
-        pipeline_restarts: status?.restarts ? status.restarts.master + status.restarts.dash + status.restarts.moq + (status.restarts.rtc ?? 0) : null,
-        net_down_rate_kbit: net?.down.rate_kbit ?? null,
-        net_down_delay_ms: net?.down.delay_ms ?? null,
-        net_down_jitter_ms: net?.down.jitter_ms ?? null,
-        net_down_loss_pct: net?.down.loss_pct ?? null,
-        net_down_queue_ms: net?.down.queue_ms ?? null,
-        net_up_rate_kbit: net?.up.rate_kbit ?? null,
-        net_up_delay_ms: net?.up.delay_ms ?? null,
-        net_up_jitter_ms: net?.up.jitter_ms ?? null,
-        net_up_loss_pct: net?.up.loss_pct ?? null,
-        net_up_queue_ms: net?.up.queue_ms ?? null,
-        dash_ip_down_kbps: ip.dash_down,
-        dash_ip_up_kbps: ip.dash_up,
-        moq_ip_down_kbps: ip.moq_down,
-        moq_ip_up_kbps: ip.moq_up,
-        rtc_ip_down_kbps: ip.rtc_down,
-        rtc_ip_up_kbps: ip.rtc_up,
-        dash_down_dropped: status?.network?.stats.dash_down.dropped ?? null,
-        moq_down_dropped: status?.network?.stats.moq_down.dropped ?? null,
-        dash_up_dropped: status?.network?.stats.dash_up.dropped ?? null,
-        moq_up_dropped: status?.network?.stats.moq_up.dropped ?? null,
-        rtc_down_dropped: status?.network?.stats.rtc_down?.dropped ?? null,
-        rtc_up_dropped: status?.network?.stats.rtc_up?.dropped ?? null,
-        tab_hidden: document.hidden,
-        versions: versionsLabel(versionsRef.current),
-      });
+      samplesRef.current.push(
+        buildSampleRow({
+          epoch: epochRef.current.epoch,
+          epochStartedAt: epochRef.current.startedAt,
+          active,
+          metrics: { dash: dashMetricsRef.current, moq: moqMetricsRef.current, rtc: rtcMetricsRef.current },
+          status: serverStatusRef.current,
+          ip: ipRates(),
+          audioPlayer: audioPlayerRef.current,
+          versions: versionsRef.current,
+        }),
+      );
 
       const now = performance.now();
       setHistory((prev) => {
@@ -550,6 +359,10 @@ export function App() {
   };
 
   const isStreaming = serverStatus?.status === 'running';
+  // Con una campaña en marcha los reproductores de esta pestaña no se montan: compartirían la cola de emulación
+  // con los del trabajador y falsearían sus medidas
+  const campaign = serverStatus?.campaign;
+  const campaignRunning = campaign?.state === 'running';
 
   // Cada reproductor se remonta cuando cambia el identificador de su emisión en el servidor, sea quien sea
   // quien la haya reiniciado (esta pestaña, otra, la API o el supervisor).
@@ -583,6 +396,9 @@ export function App() {
           </div>
 
           <div className="flex items-center space-x-4 text-xs font-mono">
+            <a href="/campaign" className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-indigo-300 hover:border-indigo-500">
+              Campañas de medida
+            </a>
             <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
               <Cpu className="w-4 h-4 text-slate-400" />
               <span className="text-slate-400">Pipeline:</span>
@@ -602,6 +418,14 @@ export function App() {
         </header>
 
         <VersionsPanel report={versions} />
+
+        {campaignRunning && (
+          <div className="px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-950/40 text-xs text-amber-200">
+            Campaña de medida en marcha (<span className="font-semibold">{campaign.name}</span>): la emisión y la red las lleva ella y los
+            reproductores de esta pestaña no se montan, para no compartir la red emulada con los del trabajador.{' '}
+            <a href="/campaign" className="underline hover:text-white">Ir a la campaña</a>
+          </div>
+        )}
 
         {/* Panel de Mandos */}
         <ControlPanel
@@ -669,7 +493,7 @@ export function App() {
 
         {/* Reproductores lado a lado */}
         <div className={`grid gap-4 ${gridCols(players)}`}>
-          {players.dash && <DashPlayer
+          {players.dash && !campaignRunning && <DashPlayer
             key={`dash-${dashStreamId}`}
             url={serverStatus?.dash_url || '/media/dash/manifest.mpd'}
             timecodes={serverStatus?.timecodes}
@@ -679,7 +503,7 @@ export function App() {
             onMetricsUpdate={(m) => setDashMetrics((prev) => ({ ...prev, ...m }))}
           />}
 
-          {players.moq && <MoqPlayer
+          {players.moq && !campaignRunning && <MoqPlayer
             key={`moq-${moqStreamId}`}
             url={`https://${serverStatus?.moq_host || window.location.hostname}:${serverStatus?.moq_port ?? 4433}/anon`}
             spkiFingerprint={serverStatus?.spki_fingerprint}
@@ -690,7 +514,7 @@ export function App() {
             onMetricsUpdate={(m) => setMoqMetrics((prev) => ({ ...prev, ...m }))}
           />}
 
-          {players.rtc && <RtcPlayer
+          {players.rtc && !campaignRunning && <RtcPlayer
             key={`rtc-${rtcStreamId}`}
             timecodes={serverStatus?.timecodes}
             isStreaming={isStreaming}

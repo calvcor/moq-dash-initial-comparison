@@ -5,7 +5,7 @@ import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, W
 import { meters } from '../lib/qoe';
 import { DashTracer } from '../lib/trace';
 import { DashExplain } from './DashExplain';
-import type { DashAbr, PlayerMetrics, Rendition, TimecodeLayout } from '../types';
+import type { DashAbr, PlayerMetrics, PlayerPreset, Rendition, TimecodeLayout } from '../types';
 
 // Modo de corrección de latencia de dash.js: LoL+, que además de la latencia mira el búfer y frena por debajo
 // de playbackBufferMin (0,5 s). Hasta el 27-10-2026 aquí ponía 'liveCatchupModeLoLp', que dash.js no reconoce,
@@ -18,6 +18,7 @@ interface DashPlayerProps {
   timecodes?: TimecodeLayout[];
   renditions?: Rendition[];
   audible: boolean; // sonido activado (selector de sonido del dashboard); el audio se descarga igual
+  preset?: PlayerPreset; // ajustes de una prueba de campaña
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
 
@@ -27,6 +28,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   timecodes,
   renditions,
   audible,
+  preset,
   onMetricsUpdate,
 }) => {
   // El servidor da la ruta del manifiesto relativa al punto de entrada; dash.js la necesita absoluta
@@ -44,7 +46,10 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [playerStatus, setPlayerStatus] = useState<'idle' | 'connecting' | 'playing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
-  const [targetLatency, setTargetLatency] = useState<number>(0.3);
+  // En segundos. null (solo en campañas): no se fija liveDelay y dash.js usa el suyo (README, 4.8)
+  const [targetLatency, setTargetLatency] = useState<number | null>(() =>
+    preset ? (preset.targetMs === null ? null : preset.targetMs / 1000) : 0.3,
+  );
   // Desvío respecto al objetivo a partir del cual dash.js deja de corregir con la velocidad de
   // reproducción y salta al directo, abortando las descargas en curso. 0 = no saltar nunca.
   const [maxDrift, setMaxDrift] = useState<number>(1.5);
@@ -80,8 +85,8 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   const [attempt, setAttempt] = useState(0);
 
   // Calidad: 'auto' deja decidir al ABR de dash.js; un número fija la calidad con esa altura
-  const [quality, setQuality] = useState<number | 'auto'>('auto');
-  const qualityRef = useRef<number | 'auto'>('auto');
+  const [quality, setQuality] = useState<number | 'auto'>(preset?.quality ?? 'auto');
+  const qualityRef = useRef<number | 'auto'>(preset?.quality ?? 'auto');
   const switchesRef = useRef(0);
   const lastHeightRef = useRef<number | null>(null);
 
@@ -137,7 +142,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   };
 
   useEffect(() => {
-    onMetricsUpdate({ targetLatencyMs: Math.round(targetLatency * 1000), maxDriftSec: maxDrift, playbackBufferMinSec: playbackBufferMin, abr });
+    onMetricsUpdate({ targetLatencyMs: targetLatency === null ? null : Math.round(targetLatency * 1000), maxDriftSec: maxDrift, playbackBufferMinSec: playbackBufferMin, abr });
   }, [targetLatency, maxDrift, playbackBufferMin, abr]);
 
   useEffect(() => {
@@ -233,7 +238,8 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
       player.updateSettings({
         streaming: {
           delay: {
-            liveDelay: targetLatency,
+            // NaN es el valor de fábrica de dash.js: calcula el retardo a partir del manifiesto
+            liveDelay: targetLatency ?? NaN,
           },
           liveCatchup: {
             enabled: true,
@@ -410,7 +416,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
       <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-xs">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
           <span className="text-slate-400 font-medium whitespace-nowrap">Latencia objetivo:</span>
-          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">{targetLatency.toFixed(2)}s ({Math.round(targetLatency * 1000)}ms)</span>
+          <span className="font-mono text-blue-400 font-semibold whitespace-nowrap">{targetLatency === null ? 'de fábrica (dash.js)' : `${targetLatency.toFixed(2)}s (${Math.round(targetLatency * 1000)}ms)`}</span>
         </div>
         <div className="flex items-center space-x-3 flex-1 min-w-[10rem] max-w-xs ml-auto">
           <span className="text-[10px] text-slate-500 font-mono">0.05s</span>
@@ -419,7 +425,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
             min={0.05}
             max={2.0}
             step={0.05}
-            value={targetLatency}
+            value={targetLatency ?? 0.3}
             onChange={(e) => handleLatencyChange(parseFloat(e.target.value))}
             className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
@@ -537,7 +543,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           <DashExplain
             abr={abr}
             quality={quality}
-            targetLatency={targetLatency}
+            targetLatency={targetLatency ?? playerRef.current?.getTargetLiveDelay() ?? 0}
             maxDrift={maxDrift}
             playbackBufferMin={playbackBufferMin}
           />

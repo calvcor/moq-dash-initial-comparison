@@ -24,7 +24,7 @@ Cada control_every pruebas se intercala una de control, sin restricción de red,
 
 La latencia objetivo de cada prueba se pasa a cada reproductor tal como lo entiende su implementación
 (liveDelay de dash.js, delay de @moq/watch, jitterBufferTarget de WebRTC): no significan lo mismo y se
-declara así. None es el valor por defecto de la implementación.
+declara así. None es el valor de fábrica de la implementación (en DASH, sin liveDelay: unos 8 s, README 4.8).
 
 Al terminar (o al cancelar) la red vuelve a quedar sin restricción y la emisión como estaba al empezar.
 Si el orquestador se reinicia con una campaña en marcha, al arrancar la retoma: la prueba en curso se repite.
@@ -56,8 +56,10 @@ MOUNT_WAIT_S = 60
 NETWORK_SETTLE_S = 2
 # Tras la medida, para recibir las últimas filas (el trabajador las sube por lotes)
 UPLOAD_GRACE_S = 8
-# Por debajo de esta fracción de filas con latencia medida, la prueba no vale
-MIN_COVERAGE = 0.8
+# Por debajo de esta fracción de las filas esperadas (una por segundo), la prueba no vale: el trabajador no
+# estuvo midiendo. Los segundos sin latencia de un reproductor no cuentan aquí: un vídeo parado o que no
+# arranca es un resultado del protocolo (coverage en el resumen), y repetir esas pruebas sesgaría la campaña
+MIN_ROWS = 0.8
 # Duración aproximada de la preparación y el montaje, para la estimación de la campaña
 OVERHEAD_S = 10
 
@@ -634,10 +636,8 @@ class Campaigns:
         wanted = "|".join(p for p in PLAYERS if p in run["players"])
         if any(r.get("players") != wanted for r in rows):
             reasons.append("reproductores activos distintos de los de la prueba")
-        for p in run["players"]:
-            measured = len(column(rows, f"{p}_g2g_ms"))
-            if measured < MIN_COVERAGE * plan["measure_s"]:
-                reasons.append(f"{p}: latencia medida en {measured} de {round(plan['measure_s'])} s")
+        if len(rows) < MIN_ROWS * plan["measure_s"]:
+            reasons.append(f"faltan filas: {len(rows)} de {round(plan['measure_s'])} s")
         return reasons
 
     def retry(self, campaign: dict, run: dict):
@@ -702,7 +702,8 @@ class Campaigns:
         writer = csv.DictWriter(out, fieldnames=keys, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+            # Booleanos como en el CSV del dashboard (true/false)
+            writer.writerow({k: "" if v is None else str(v).lower() if isinstance(v, bool) else v for k, v in row.items()})
         return out.getvalue()
 
 
