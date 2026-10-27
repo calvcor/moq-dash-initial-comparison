@@ -157,7 +157,7 @@ export const CampaignWorker: React.FC = () => {
     const at = serverNowMs();
     if (at === null || !statusRef.current || !wanted.players || !wanted.run) return;
     const presets = Object.fromEntries(
-      PLAYER_IDS.map((p) => [p, { targetMs: wanted.targets?.[p] ?? null, quality: wanted.quality ?? 'auto' }]),
+      PLAYER_IDS.map((p) => [p, { targetMs: wanted.targets?.[p] ?? null, quality: wanted.quality ?? 'auto', options: wanted.options }]),
     ) as Record<PlayerId, PlayerPreset>;
     metricsRef.current = { ...INITIAL_METRICS };
     setLastG2g({});

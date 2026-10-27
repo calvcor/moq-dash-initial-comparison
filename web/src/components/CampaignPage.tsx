@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, Download, FlaskConical, Pause, Pencil, Play, Square, Trash2, X } from 'lucide-react';
-import { CampaignEditor, formatDuration } from './CampaignEditor';
+import { CampaignEditor, DEFAULT_PLAYER_OPTIONS, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
 import type { Campaign, CampaignRun, PlayerId, ServerStatus } from '../types';
 
@@ -30,6 +30,21 @@ const STATE_STYLE: Record<string, string> = {
   ready: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
 };
 const PLAYER_SHORT: Record<PlayerId, string> = { dash: 'DASH', moq: 'MoQ', rtc: 'RTC' };
+
+const ABR_LABEL: Record<string, string> = { default: 'por defecto', l2a: 'L2A', lolp: 'LoL+', watch: 'librería', probe: 'sondeo (experimento)' };
+const SWITCHING_LABEL: Record<string, string> = { seamless: 'sin corte', cancel: 'cancelar (experimento)', priority: 'prioridad (experimento)' };
+
+/** Ajustes de los reproductores de la campaña, de los protocolos que prueba. Sin player_options (campañas
+ * anteriores), los del dashboard al abrirse. */
+function optionsText(plan: Campaign['plan']): string {
+  const o = { ...DEFAULT_PLAYER_OPTIONS, ...(plan.player_options ?? {}) };
+  const parts = [];
+  if (plan.players.includes('dash'))
+    parts.push(`DASH: ABR ${ABR_LABEL[o.dash_abr]}, salto al directo ${o.dash_max_drift_s ? `${o.dash_max_drift_s} s` : 'nunca'}, búfer mínimo ${o.dash_playback_buffer_min_s} s`);
+  if (plan.players.includes('moq')) parts.push(`MoQ: adaptación ${ABR_LABEL[o.moq_abr]}, cambio ${SWITCHING_LABEL[o.moq_switching]}`);
+  if (plan.players.includes('rtc')) parts.push('WebRTC');
+  return `${parts.join(' · ')} · ${plan.player_mode === 'each' ? 'de uno en uno' : 'a la vez'} · calidad ${plan.quality ? `${plan.quality}p` : 'auto'}`;
+}
 
 const fmt = (v: number | null | undefined, digits = 0) => (v === null || v === undefined ? '--' : v.toFixed(digits));
 
@@ -228,6 +243,7 @@ const Monitor: React.FC<{ campaign: Campaign; lean: boolean; onChanged: () => vo
           <span>
             {plan.networks.length} redes × {plan.targets.length} objetivos × {plan.repetitions} repeticiones · {plan.warmup_s} + {plan.measure_s} s · semilla {plan.seed}
           </span>
+          <span>{optionsText(plan)}</span>
         </div>
       </div>
 

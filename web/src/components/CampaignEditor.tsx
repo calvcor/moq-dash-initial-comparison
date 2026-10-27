@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { CLEAR, PRESETS } from './NetworkPanel';
 import { PLAYER_IDS } from '../lib/samples';
-import type { CampaignNetwork, CampaignPlan, CampaignTarget, LinkProfile, PlayerId, StreamConfig } from '../types';
+import type { CampaignNetwork, CampaignPlan, CampaignTarget, DashAbr, LinkProfile, MoqAbr, MoqSwitching, PlayerId, PlayerOptions, StreamConfig } from '../types';
 
 // Editor de campañas (README, 4.8): emisiones, condiciones de red, latencias objetivo y diseño. El servidor
 // sortea las pruebas al crearla; aquí solo se estima cuántas salen y cuánto tardan.
@@ -10,6 +10,14 @@ import type { CampaignNetwork, CampaignPlan, CampaignTarget, LinkProfile, Player
 type Stream = CampaignPlan['streams'][number];
 
 const PLAYER_LABEL: Record<PlayerId, string> = { dash: 'LL-DASH', moq: 'MoQ', rtc: 'WebRTC' };
+// Los del dashboard al abrirse (DashPlayer y MoqPlayer); los mismos que pone el servidor si faltan
+export const DEFAULT_PLAYER_OPTIONS: PlayerOptions = {
+  dash_abr: 'default',
+  dash_max_drift_s: 1.5,
+  dash_playback_buffer_min_s: 0,
+  moq_abr: 'watch',
+  moq_switching: 'seamless',
+};
 // Lo que añade el servidor a cada prueba además del calentamiento y la medida (campaign.py: OVERHEAD_S y
 // UPLOAD_GRACE_S)
 const RUN_OVERHEAD_S = 18;
@@ -127,6 +135,9 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
   const [players, setPlayers] = useState<PlayerId[]>([...PLAYER_IDS]);
   const [playerMode, setPlayerMode] = useState<'together' | 'each'>('together');
   const [quality, setQuality] = useState<number | null>(null);
+  const [options, setOptions] = useState<PlayerOptions>(DEFAULT_PLAYER_OPTIONS);
+  const setOption = <K extends keyof PlayerOptions>(key: K, value: PlayerOptions[K]) => setOptions((o) => ({ ...o, [key]: value }));
+  const moqExperiment = options.moq_abr !== 'watch' || options.moq_switching !== 'seamless';
   const [repetitions, setRepetitions] = useState(3);
   const [warmup, setWarmup] = useState(30);
   const [measure, setMeasure] = useState(120);
@@ -170,6 +181,7 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
       players: PLAYER_IDS.filter((p) => players.includes(p)),
       player_mode: playerMode,
       quality,
+      player_options: options,
       repetitions,
       warmup_s: warmup,
       measure_s: measure,
@@ -202,6 +214,87 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
           <input className={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Barrido de RTT con una calidad" />
         </label>
       </div>
+
+      {/* Protocolos y ajustes de sus reproductores, fijos en toda la campaña */}
+      <section className="space-y-2">
+        <h3 className="font-semibold text-slate-200">Protocolos y reproductores</h3>
+        <div className="grid gap-3 md:grid-cols-3">
+          {PLAYER_IDS.map((p) => {
+            const on = players.includes(p);
+            return (
+              <div key={p} className={`rounded-lg border p-3 space-y-2 ${on ? 'border-indigo-600/60 bg-slate-950/60' : 'border-slate-800 opacity-60'}`}>
+                <label className="flex items-center gap-2 font-semibold text-slate-100 cursor-pointer">
+                  <input type="checkbox" checked={on} onChange={(e) => setPlayers((all) => (e.target.checked ? [...all, p] : all.filter((q) => q !== p)))} />
+                  {PLAYER_LABEL[p]}
+                </label>
+                {p === 'dash' && (
+                  <div className="flex flex-wrap gap-3">
+                    <label className="flex flex-col gap-1" title="Reglas de adaptación de dash.js en Auto. Por defecto: las de fábrica (caudal y BOLA, búfer insuficiente, historial de cambios, abandono de peticiones). L2A y LoL+: sus reglas para baja latencia, cada una en solitario.">
+                      <span className={label}>ABR</span>
+                      <select className={input} disabled={!on} value={options.dash_abr} onChange={(e) => setOption('dash_abr', e.target.value as DashAbr)}>
+                        <option value="default">Por defecto</option>
+                        <option value="l2a">L2A</option>
+                        <option value="lolp">LoL+</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 w-28" title="liveCatchup.maxDrift: si la latencia se desvía del objetivo más que esto, dash.js salta al directo en vez de corregir con la velocidad. 0 = no saltar nunca.">
+                      <span className={label}>Salto al directo (s)</span>
+                      <input className={input} disabled={!on} type="number" min={0} max={10} step={0.5} value={options.dash_max_drift_s} onChange={(e) => setOption('dash_max_drift_s', Number(e.target.value))} />
+                    </label>
+                    <label className="flex flex-col gap-1 w-28" title="liveCatchup.playbackBufferMin (LoL+): por debajo de este búfer dash.js frena para rellenarlo; hace de suelo de la latencia. 0 = no frenar nunca; 0,5 s es el de fábrica.">
+                      <span className={label}>Búfer mínimo (s)</span>
+                      <input className={input} disabled={!on} type="number" min={0} max={2} step={0.05} value={options.dash_playback_buffer_min_s} onChange={(e) => setOption('dash_playback_buffer_min_s', Number(e.target.value))} />
+                    </label>
+                  </div>
+                )}
+                {p === 'moq' && (
+                  <>
+                    <div className="flex flex-wrap gap-3">
+                      <label className="flex flex-col gap-1" title="Librería: decide @moq/watch (lo que se mide). Sondeo: el controlador propio con sondeo por prioridad de README 6.3, un experimento.">
+                        <span className={label}>Adaptación</span>
+                        <select className={input} disabled={!on} value={options.moq_abr} onChange={(e) => setOption('moq_abr', e.target.value as MoqAbr)}>
+                          <option value="watch">Librería</option>
+                          <option value="probe">Sondeo (experimento)</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1" title="Qué hacer al bajar de calidad (opción switching del parche de web/patches, README 6.1). Sin corte: el original de @moq/watch. Cancelar y Prioridad son el experimento. Sin el parche no tiene efecto.">
+                        <span className={label}>Cambio</span>
+                        <select className={input} disabled={!on} value={options.moq_switching} onChange={(e) => setOption('moq_switching', e.target.value as MoqSwitching)}>
+                          <option value="seamless">Sin corte</option>
+                          <option value="cancel">Cancelar (experimento)</option>
+                          <option value="priority">Prioridad (experimento)</option>
+                        </select>
+                      </label>
+                    </div>
+                    {moqExperiment && <p className="text-amber-300">No es el comportamiento de @moq/watch: la campaña es un experimento declarado (README 6.1 y 6.3).</p>}
+                  </>
+                )}
+                {p === 'rtc' && <p className="text-slate-500">Sin ajustes: una calidad, sin adaptación. La latencia objetivo va a jitterBufferTarget.</p>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="flex flex-col gap-1" title="De uno en uno mide cuánto se estorban los reproductores en el navegador">
+            <span className={label}>En cada prueba</span>
+            <select className={input} value={playerMode} onChange={(e) => setPlayerMode(e.target.value as 'together' | 'each')}>
+              <option value="together">Todos a la vez</option>
+              <option value="each">De uno en uno</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={label}>Calidad</span>
+            <select className={input} value={quality ?? ''} onChange={(e) => setQuality(e.target.value === '' ? null : Number(e.target.value))}>
+              <option value="">Auto (adaptación de cada reproductor)</option>
+              {[...new Set(streams.flatMap((s) => s.renditions.map((r) => r.height)))].map((h) => (
+                <option key={h} value={h}>
+                  Fija en {h}p
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
 
       {/* Emisiones */}
       <section className="space-y-2">
@@ -406,39 +499,6 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
       <section className="space-y-2">
         <h3 className="font-semibold text-slate-200">Diseño</h3>
         <div className="flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1">
-            <span className={label}>Reproductores</span>
-            <div className="flex gap-2">
-              {PLAYER_IDS.map((p) => (
-                <label key={p} className="flex items-center gap-1 text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={players.includes(p)}
-                    onChange={(e) => setPlayers((all) => (e.target.checked ? [...all, p] : all.filter((q) => q !== p)))}
-                  />
-                  {PLAYER_LABEL[p]}
-                </label>
-              ))}
-            </div>
-          </div>
-          <label className="flex flex-col gap-1" title="De uno en uno mide cuánto se estorban los reproductores en el navegador">
-            <span className={label}>En cada prueba</span>
-            <select className={input} value={playerMode} onChange={(e) => setPlayerMode(e.target.value as 'together' | 'each')}>
-              <option value="together">Todos a la vez</option>
-              <option value="each">De uno en uno</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className={label}>Calidad</span>
-            <select className={input} value={quality ?? ''} onChange={(e) => setQuality(e.target.value === '' ? null : Number(e.target.value))}>
-              <option value="">Auto (adaptación de cada reproductor)</option>
-              {[...new Set(streams.flatMap((s) => s.renditions.map((r) => r.height)))].map((h) => (
-                <option key={h} value={h}>
-                  Fija en {h}p
-                </option>
-              ))}
-            </select>
-          </label>
           {(
             [
               ['Repeticiones', repetitions, setRepetitions, 1],

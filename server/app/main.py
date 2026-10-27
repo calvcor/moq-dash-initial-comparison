@@ -171,6 +171,19 @@ class CampaignTarget(BaseModel):
     moq_ms: Optional[int] = Field(None, ge=0, le=10000)
     rtc_ms: Optional[int] = Field(None, ge=0, le=10000)
 
+class PlayerOptions(BaseModel):
+    """Ajustes de los reproductores, iguales en todas las pruebas de la campaña. Por defecto, los del dashboard al
+    abrirse: reglas ABR de fábrica de dash.js y adaptación y cambio de calidad de @moq/watch. Los otros valores de
+    MoQ son los experimentos de README 6.1 y 6.3: una campaña con ellos es un experimento declarado."""
+    dash_abr: Literal["default", "l2a", "lolp"] = "default"
+    # liveCatchup.maxDrift de dash.js: desvío a partir del cual salta al directo (0 = nunca)
+    dash_max_drift_s: float = Field(1.5, ge=0, le=10)
+    # liveCatchup.playbackBufferMin de dash.js (LoL+): 0 = no frenar nunca por búfer; 0,5 s es el de fábrica
+    dash_playback_buffer_min_s: float = Field(0, ge=0, le=2)
+    moq_abr: Literal["watch", "probe"] = "watch"
+    # Cambio de calidad hacia abajo (opción switching del parche de web/patches); sin el parche no tiene efecto
+    moq_switching: Literal["seamless", "cancel", "priority"] = "seamless"
+
 class CampaignRequest(BaseModel):
     """Plan de una campaña de medida (ver campaign.py)."""
     name: str = Field(..., min_length=1, max_length=120)
@@ -184,6 +197,7 @@ class CampaignRequest(BaseModel):
     player_mode: Literal["together", "each"] = "together"
     # None: la adaptación de cada reproductor; una altura fija la desactiva
     quality: Optional[int] = Field(None, ge=144, le=1080)
+    player_options: PlayerOptions = PlayerOptions()
     repetitions: int = Field(3, ge=1, le=50)
     warmup_s: float = Field(30, ge=5, le=600)
     measure_s: float = Field(120, ge=10, le=3600)

@@ -164,6 +164,16 @@ export type PlayerId = 'dash' | 'moq' | 'rtc';
 export interface PlayerPreset {
   targetMs: number | null; // latencia objetivo en el mando del reproductor; null = la de fábrica de su implementación
   quality: number | 'auto';
+  options?: Partial<PlayerOptions>; // lo que falte, como el dashboard al abrirse
+}
+
+// Ajustes de los reproductores de una campaña, iguales en todas sus pruebas (README, 4.8)
+export interface PlayerOptions {
+  dash_abr: DashAbr;
+  dash_max_drift_s: number; // salto al directo (liveCatchup.maxDrift); 0 = nunca
+  dash_playback_buffer_min_s: number; // búfer mínimo de LoL+ (liveCatchup.playbackBufferMin)
+  moq_abr: MoqAbr;
+  moq_switching: MoqSwitching;
 }
 
 // Una fila por segundo del registro exportable de la sesión
@@ -310,6 +320,7 @@ export interface CampaignPlan {
   players: PlayerId[];
   player_mode: 'together' | 'each';
   quality: number | null; // null = la adaptación de cada reproductor
+  player_options: PlayerOptions;
   repetitions: number;
   warmup_s: number;
   measure_s: number;
@@ -386,6 +397,7 @@ export interface CampaignAssignment {
   target_label?: string;
   network_label?: string;
   quality?: number | null;
+  options?: Partial<PlayerOptions>;
   kind?: 'test' | 'control';
   rep?: number;
   ends_ms?: number | null;

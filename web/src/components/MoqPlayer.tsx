@@ -37,8 +37,8 @@ interface MoqPlayerProps {
   timecodes?: TimecodeLayout[];
   renditions?: Rendition[];
   audible: boolean; // sonido activado (selector de sonido del dashboard)
-  // Ajustes de una prueba de campaña. Con ellos, adaptación y cambio de calidad son los de @moq/watch, no
-  // los experimentos recordados en el navegador
+  // Ajustes de una prueba de campaña. Con ellos, adaptación y cambio de calidad son los de la campaña (por
+  // defecto, los de @moq/watch), no los recordados en el navegador
   preset?: PlayerPreset;
   onMetricsUpdate: (metrics: Partial<PlayerMetrics>) => void;
 }
@@ -77,7 +77,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
   // opción no existe, el selector se desactiva y el CSV la deja vacía.
   // Se recuerda en el navegador, como los reproductores activos: la opción solo actúa en el siguiente cambio y
   // el primero llega a los pocos segundos de cargar, así que tiene que estar puesta antes de conectar.
-  const [switching, setSwitching] = useState<MoqSwitching>(() => (preset ? 'seamless' : loadSwitching()));
+  const [switching, setSwitching] = useState<MoqSwitching>(() => (preset ? (preset.options?.moq_switching ?? 'seamless') : loadSwitching()));
   const switchingSignalRef = useRef(new Signal<MoqSwitching>(switching));
   const [switchingSupported, setSwitchingSupported] = useState<boolean | null>(null);
   const handleSwitchingChange = (value: MoqSwitching) => {
@@ -93,7 +93,7 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
 
   // Adaptación: 'watch' deja decidir a @moq/watch (el comportamiento que se mide); 'probe' es el experimento de
   // README 6.3, un controlador propio con sondeo por prioridad que pide la calidad a la librería por target.name.
-  const [abr, setAbr] = useState<MoqAbr>(() => (preset ? 'watch' : loadAbr()));
+  const [abr, setAbr] = useState<MoqAbr>(() => (preset ? (preset.options?.moq_abr ?? 'watch') : loadAbr()));
   const [showExplain, setShowExplain] = useState(false);
   const abrRef = useRef<MoqAbr>(abr);
   const probeAbrRef = useRef<MoqProbeAbr | null>(null);

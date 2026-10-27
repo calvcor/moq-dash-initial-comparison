@@ -400,6 +400,8 @@ class Campaigns:
                 target_label=target["label"],
                 network_label="control (sin restricción)" if run["network"] is None else plan["networks"][run["network"]]["label"],
                 quality=plan["quality"],
+                # Las campañas anteriores a estas opciones no las tienen: el trabajador usa entonces sus valores por defecto
+                options=plan.get("player_options") or {},
                 kind=run["kind"],
                 rep=run["rep"],
                 ends_ms=self.phase_end_ms(run, plan),
@@ -670,6 +672,9 @@ class Campaigns:
             "kind": run["kind"], "rep": run["rep"], "stream_idx": run["stream"],
             "network_label": network["label"], "target_label": target["label"],
             "players_run": "|".join(run["players"]),
+            "quality": plan["quality"],
+            # Ajustes de los reproductores de la campaña (también en cada fila de samples.csv)
+            **(plan.get("player_options") or {}),
             "invalid_reasons": "; ".join(run["invalid_reasons"]),
             "started_ms": run["started_ms"], "measure_start_ms": run["measure_start_ms"], "ended_ms": run["ended_ms"],
         }

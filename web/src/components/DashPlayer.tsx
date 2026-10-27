@@ -52,12 +52,12 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   );
   // Desvío respecto al objetivo a partir del cual dash.js deja de corregir con la velocidad de
   // reproducción y salta al directo, abortando las descargas en curso. 0 = no saltar nunca.
-  const [maxDrift, setMaxDrift] = useState<number>(1.5);
+  const [maxDrift, setMaxDrift] = useState<number>(preset?.options?.dash_max_drift_s ?? 1.5);
   // Búfer mínimo de la corrección LoL+ (liveCatchup.playbackBufferMin): por debajo, dash.js frena la
   // reproducción para rellenarlo, más cuanto menos búfer, y no persigue el objetivo hasta superarlo. Hace de
   // suelo de la latencia. 0 = no frenar nunca por búfer, el valor al abrir la página para que no limite los
   // objetivos bajos; 0,5 s es el de fábrica de dash.js.
-  const [playbackBufferMin, setPlaybackBufferMin] = useState<number>(0);
+  const [playbackBufferMin, setPlaybackBufferMin] = useState<number>(preset?.options?.dash_playback_buffer_min_s ?? 0);
   const [showExplain, setShowExplain] = useState(false);
 
   // Actualizar liveDelay en caliente si el reproductor está activo
@@ -115,7 +115,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // de dash.js para baja latencia; según su documentación están probadas en solitario, así que se activa
   // solo la elegida, como en su ejemplo de baja latencia. Cambiarlo recrea el reproductor: el ejemplo
   // oficial pide recargar porque las dos guardan estado desde el arranque.
-  const [abr, setAbr] = useState<DashAbr>('default');
+  const [abr, setAbr] = useState<DashAbr>(preset?.options?.dash_abr ?? 'default');
   const abrSettings = (mode: DashAbr) =>
     mode === 'default'
       ? {}
