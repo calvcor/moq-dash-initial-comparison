@@ -980,6 +980,15 @@ def create_campaign(req: CampaignRequest):
     """Crea una campaña con sus pruebas ya sorteadas; no arranca hasta POST .../start."""
     return campaigns.create(req.model_dump())
 
+@app.put("/api/campaigns/{cid}")
+def replace_campaign_plan(cid: str, req: CampaignRequest):
+    """Sustituye el plan de una campaña que aún no ha empezado y vuelve a sortear sus pruebas."""
+    campaign_or_404(cid)
+    try:
+        return campaigns.replace_plan(cid, req.model_dump())
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
 def campaign_or_404(cid: str) -> dict:
     campaign = campaigns.get(cid)
     if campaign is None:

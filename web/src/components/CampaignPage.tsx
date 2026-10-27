@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Download, FlaskConical, Pause, Pencil, Play, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Download, FlaskConical, Pause, Pencil, Play, Settings2, Square, Trash2, X } from 'lucide-react';
 import { CampaignEditor, DEFAULT_PLAYER_OPTIONS, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
-import type { Campaign, CampaignRun, PlayerId, ServerStatus } from '../types';
+import type { Campaign, CampaignPlan, CampaignRun, PlayerId, ServerStatus } from '../types';
 
 // Página de campañas de medida (/campaign; README, 4.8): editor, monitor y, en la misma pestaña o en otra
 // (/campaign?worker=1), el trabajador que monta los reproductores. Con el trabajador activo el monitor se
@@ -112,7 +112,16 @@ const RunsTable: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
   );
 };
 
-const Monitor: React.FC<{ campaign: Campaign; lean: boolean; onChanged: () => void; onDeleted: () => void }> = ({ campaign, lean, onChanged, onDeleted }) => {
+// Lo que muestra el editor: una campaña nueva, la copia de otra o el plan de una que aún no ha empezado
+type EditorMode = { initial?: CampaignPlan; editId?: string };
+
+const Monitor: React.FC<{
+  campaign: Campaign;
+  lean: boolean;
+  onChanged: () => void;
+  onDeleted: () => void;
+  onEdit: (mode: EditorMode) => void;
+}> = ({ campaign, lean, onChanged, onDeleted, onEdit }) => {
   const [error, setError] = useState<string | null>(null);
   const [showRuns, setShowRuns] = useState(!lean);
   // Nombre en edición; null si no se está editando
@@ -202,6 +211,23 @@ const Monitor: React.FC<{ campaign: Campaign; lean: boolean; onChanged: () => vo
               <Pause className="w-3.5 h-3.5" /> Pausa
             </button>
           )}
+          {/* Lista = aún no ha arrancado nunca (al arrancar pasa a en marcha y de ahí nunca vuelve) */}
+          {campaign.state === 'ready' && (
+            <button
+              className="flex items-center gap-1 px-3 py-1 rounded border border-slate-700 text-slate-300 hover:border-indigo-500"
+              title="Cambiar el plan: solo antes de arrancarla. Las pruebas se vuelven a sortear."
+              onClick={() => onEdit({ initial: campaign.plan, editId: campaign.id })}
+            >
+              <Settings2 className="w-3.5 h-3.5" /> Editar
+            </button>
+          )}
+          <button
+            className="flex items-center gap-1 px-3 py-1 rounded border border-slate-700 text-slate-300 hover:border-indigo-500"
+            title="Campaña nueva con este plan, para repetirla o variar algo. La original no cambia."
+            onClick={() => onEdit({ initial: campaign.plan })}
+          >
+            <Copy className="w-3.5 h-3.5" /> Duplicar
+          </button>
           {(campaign.state === 'running' || campaign.state === 'paused' || campaign.state === 'ready') && (
             <button
               className="flex items-center gap-1 px-3 py-1 rounded bg-rose-800 hover:bg-rose-700 text-white"
@@ -290,7 +316,9 @@ export const CampaignPage: React.FC = () => {
   const [list, setList] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Campaign | null>(null);
-  const [editing, setEditing] = useState(false);
+  // Editor abierto (y con qué plan); null, el monitor
+  const [editor, setEditor] = useState<EditorMode | null>(null);
+  const editing = editor !== null;
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [tick, setTick] = useState(0);
   const refresh = () => setTick((t) => t + 1);
@@ -382,15 +410,15 @@ export const CampaignPage: React.FC = () => {
               className={`px-2.5 py-1 rounded-lg border flex items-center gap-2 ${c.id === selectedId && !editing ? 'border-indigo-500 bg-indigo-900/40 text-indigo-100' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
               onClick={() => {
                 setSelectedId(c.id);
-                setEditing(false);
+                setEditor(null);
               }}
             >
               {c.name} <Badge state={c.state} />
             </button>
           ))}
           <button
-            className={`px-2.5 py-1 rounded-lg border ${editing ? 'border-emerald-500 bg-emerald-900/40 text-emerald-100' : 'border-slate-700 text-emerald-300 hover:border-emerald-500'}`}
-            onClick={() => setEditing(true)}
+            className={`px-2.5 py-1 rounded-lg border ${editing && !editor.initial ? 'border-emerald-500 bg-emerald-900/40 text-emerald-100' : 'border-slate-700 text-emerald-300 hover:border-emerald-500'}`}
+            onClick={() => setEditor({})}
           >
             + Nueva campaña
           </button>
@@ -398,10 +426,12 @@ export const CampaignPage: React.FC = () => {
 
         {editing ? (
           <CampaignEditor
-            key={status ? 'ready' : 'loading'}
+            key={`${status ? 'ready' : 'loading'}-${editor.editId ?? ''}-${editor.initial ? 'plan' : 'new'}`}
             defaultStream={defaultStream}
+            initial={editor.initial}
+            editId={editor.editId}
             onCreated={(id) => {
-              setEditing(false);
+              setEditor(null);
               setSelectedId(id);
               refresh();
             }}
@@ -411,6 +441,7 @@ export const CampaignPage: React.FC = () => {
             campaign={selected}
             lean={worker}
             onChanged={refresh}
+            onEdit={setEditor}
             onDeleted={() => {
               setSelectedId(null);
               refresh();

@@ -117,38 +117,50 @@ export const formatDuration = (s: number) => {
 const input = 'bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500';
 const label = 'text-[11px] text-slate-400';
 
+const uniformTarget = (t: CampaignTarget) => t.dash_ms === t.moq_ms && t.moq_ms === t.rtc_ms;
+const targetsToText = (targets: CampaignTarget[]) => targets.map((t) => (t.dash_ms === null ? 'auto' : String(t.dash_ms))).join(', ');
+
 interface Props {
   defaultStream: Stream;
+  // Plan del que partir: el de la campaña que se duplica o se edita. Sin él, una campaña nueva
+  initial?: CampaignPlan;
+  // Campaña que se edita (aún sin empezar): al guardar se sustituye su plan en vez de crear otra
+  editId?: string;
   onCreated: (id: string) => void;
 }
 
-export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) => {
-  const [name, setName] = useState('');
-  const [streams, setStreams] = useState<Stream[]>([defaultStream]);
-  const [ladders, setLadders] = useState<string[]>([ladderText(defaultStream)]);
-  const [networks, setNetworks] = useState<CampaignNetwork[]>([]);
+export const CampaignEditor: React.FC<Props> = ({ defaultStream, initial, editId, onCreated }) => {
+  const [name, setName] = useState(initial ? (editId ? initial.name : `${initial.name} (copia)`) : '');
+  const [streams, setStreams] = useState<Stream[]>(initial?.streams ?? [defaultStream]);
+  const [ladders, setLadders] = useState<string[]>((initial?.streams ?? [defaultStream]).map(ladderText));
+  const [networks, setNetworks] = useState<CampaignNetwork[]>(initial ? JSON.parse(JSON.stringify(initial.networks)) : []);
   const [sweepParam, setSweepParam] = useState<SweepParam>('rtt');
   const [sweepValues, setSweepValues] = useState(SWEEPS.rtt.example);
   const [sweepBaseRtt, setSweepBaseRtt] = useState(0);
   const [sweepQueue, setSweepQueue] = useState(200);
-  const [targetsText, setTargetsText] = useState('auto, 100, 300, 600, 1000');
-  const [players, setPlayers] = useState<PlayerId[]>([...PLAYER_IDS]);
-  const [playerMode, setPlayerMode] = useState<'together' | 'each'>('together');
-  const [quality, setQuality] = useState<number | null>(null);
-  const [options, setOptions] = useState<PlayerOptions>(DEFAULT_PLAYER_OPTIONS);
+  const [targetsText, setTargetsText] = useState(initial ? targetsToText(initial.targets) : 'auto, 100, 300, 600, 1000');
+  // Objetivos distintos por rama (solo se crean por la API): se conservan tal cual mientras no se edite el texto
+  const [keptTargets, setKeptTargets] = useState<CampaignTarget[] | null>(
+    initial && !initial.targets.every(uniformTarget) ? initial.targets : null,
+  );
+  const [players, setPlayers] = useState<PlayerId[]>(initial?.players ?? [...PLAYER_IDS]);
+  const [playerMode, setPlayerMode] = useState<'together' | 'each'>(initial?.player_mode ?? 'together');
+  const [quality, setQuality] = useState<number | null>(initial?.quality ?? null);
+  const [options, setOptions] = useState<PlayerOptions>({ ...DEFAULT_PLAYER_OPTIONS, ...(initial?.player_options ?? {}) });
   const setOption = <K extends keyof PlayerOptions>(key: K, value: PlayerOptions[K]) => setOptions((o) => ({ ...o, [key]: value }));
   const moqExperiment = options.moq_abr !== 'watch' || options.moq_switching !== 'seamless';
-  const [repetitions, setRepetitions] = useState(3);
-  const [warmup, setWarmup] = useState(30);
-  const [measure, setMeasure] = useState(120);
-  const [controlEvery, setControlEvery] = useState(10);
-  const [maxAttempts, setMaxAttempts] = useState(2);
-  const [settle, setSettle] = useState(15);
-  const [seed, setSeed] = useState('');
+  const [repetitions, setRepetitions] = useState(initial?.repetitions ?? 3);
+  const [warmup, setWarmup] = useState(initial?.warmup_s ?? 30);
+  const [measure, setMeasure] = useState(initial?.measure_s ?? 120);
+  const [controlEvery, setControlEvery] = useState(initial?.control_every ?? 10);
+  const [maxAttempts, setMaxAttempts] = useState(initial?.max_attempts ?? 2);
+  const [settle, setSettle] = useState(initial?.stream_settle_s ?? 15);
+  // Al duplicar, sorteo nuevo (la semilla vacía la elige el servidor); al editar, la misma
+  const [seed, setSeed] = useState(editId && initial?.seed != null ? String(initial.seed) : '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const targets = parseTargets(targetsText);
+  const targets = keptTargets ?? parseTargets(targetsText);
   const ladderOk = ladders.map((t) => parseLadder(t) !== null);
 
   // Misma cuenta que el servidor (campaign.py: expand y estimate_s)
@@ -192,7 +204,7 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
     };
     setSaving(true);
     try {
-      const res = await fetch('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
+      const res = await fetch(editId ? `/api/campaigns/${editId}` : '/api/campaigns', { method: editId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         const detail = body?.detail;
@@ -208,6 +220,11 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-5 text-xs">
+      {initial && (
+        <p className="text-indigo-300 font-medium">
+          {editId ? `Editando «${initial.name}», que aún no ha empezado` : `Copia de «${initial.name}»: se creará como una campaña nueva`}
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 flex-1 min-w-[16rem]">
           <span className={label}>Nombre</span>
@@ -489,7 +506,19 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
       {/* Latencias objetivo */}
       <section className="space-y-2">
         <h3 className="font-semibold text-slate-200">Latencias objetivo</h3>
-        <input className={`${input} w-full max-w-xl ${targets ? '' : 'border-rose-500'}`} value={targetsText} onChange={(e) => setTargetsText(e.target.value)} />
+        <input
+          className={`${input} w-full max-w-xl ${targets ? '' : 'border-rose-500'}`}
+          value={targetsText}
+          onChange={(e) => {
+            setTargetsText(e.target.value);
+            setKeptTargets(null);
+          }}
+        />
+        {keptTargets && (
+          <p className="text-amber-300">
+            Esta campaña tiene objetivos distintos por rama ({keptTargets.map((t) => `${t.label}: DASH ${t.dash_ms ?? 'auto'}, MoQ ${t.moq_ms ?? 'auto'}, WebRTC ${t.rtc_ms ?? 'auto'}`).join(' · ')}). Se conservan; si editas el texto, se sustituyen por el mismo valor en los tres.
+          </p>
+        )}
         <p className="text-slate-500">
           En ms, separadas por comas; <span className="font-mono">auto</span> es la de fábrica de cada reproductor. Cada valor va al mando de cada reproductor tal como lo entiende su implementación, que no significa lo mismo: <span className="font-mono">liveDelay</span> de dash.js (de extremo a extremo), <span className="font-mono">delay</span> de @moq/watch (búfer, más el jitter del catálogo) y <span className="font-mono">jitterBufferTarget</span> de WebRTC (solo el búfer). El primero es también el de las pruebas de control.
         </p>
@@ -526,9 +555,14 @@ export const CampaignEditor: React.FC<Props> = ({ defaultStream, onCreated }) =>
           {tests} pruebas{controls ? ` + ${controls} de control` : ''} · unas <span className="font-semibold text-white">{formatDuration(etaS)}</span>
         </span>
         <button disabled={saving} className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium disabled:opacity-50" onClick={create}>
-          Crear campaña
+          {editId ? 'Guardar cambios' : 'Crear campaña'}
         </button>
-        <span className="text-slate-500">Se crea sin arrancar: revisa las pruebas sorteadas y arráncala desde el monitor.</span>
+        <span className="text-slate-500">
+          {editId
+            ? 'Las pruebas se vuelven a sortear con el plan nuevo.'
+            : 'Se crea sin arrancar: revisa las pruebas sorteadas y arráncala desde el monitor.'}
+          {initial && !editId && ' La semilla se deja vacía para un sorteo nuevo; escribe la de la original para repetir el mismo orden.'}
+        </span>
         {error && <span className="text-rose-300 w-full">{error}</span>}
       </div>
     </div>

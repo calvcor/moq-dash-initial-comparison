@@ -246,6 +246,20 @@ class Campaigns:
             self.save(campaign)
             return self.view(campaign)
 
+    def replace_plan(self, cid: str, plan: dict) -> dict:
+        """Cambia el plan de una campaña que no ha empezado y vuelve a sortear sus pruebas. Una que ya ha medido
+        no se edita, para no mezclar en ella pruebas de dos planes: se duplica y se edita la copia."""
+        with self.lock:
+            campaign = self.campaigns[cid]
+            if campaign["state"] != "ready" or campaign["restore"] is not None:
+                raise RuntimeError("Solo se puede editar una campaña que no ha empezado: duplícala y edita la copia")
+            if plan.get("seed") is None:
+                plan["seed"] = random.randrange(2 ** 31)
+            campaign.update(name=plan["name"], plan=plan, runs=self.expand(plan))
+            self.log(campaign, "Plan editado: pruebas sorteadas de nuevo")
+            self.save(campaign)
+            return self.view(campaign)
+
     def view(self, campaign: dict, runs: bool = True) -> dict:
         counts = {}
         for run in campaign["runs"]:
