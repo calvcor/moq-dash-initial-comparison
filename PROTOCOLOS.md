@@ -271,7 +271,7 @@ cada 2 s. Los datos de cada petición llegan repartidos a lo largo de esos 2 s.
 - **Catch-up** (`liveCatchup`). Si la latencia real se desvía del objetivo, `dash.js` la corrige
   **cambiando la velocidad de reproducción**: hasta un 50 % más rápido o más lento por defecto. Aquí
   está en modo LoL+ (`liveCatchupModeLoLP`): si el búfer baja de `playbackBufferMin` (el slider
-  "Búfer mínimo", 0,5 s de fábrica), frena para rellenarlo, más cuanto menos búfer (con 0,5 s de
+  "Búfer mínimo": 0 al abrir la página, 0,5 s de fábrica), frena para rellenarlo, más cuanto menos búfer (con 0,5 s de
   mínimo, 0,77× con 0,3 s de búfer y 0,58× vacío) y no persigue el objetivo hasta superarlo; si no,
   corrige según la latencia (a 1× si está a menos de un 2 % del objetivo). Como la latencia nunca es
   menor que el búfer, el mínimo hace de suelo: con un objetivo por debajo de él, el búfer no llega a
@@ -447,7 +447,7 @@ testbed:
 | `streaming.delay.liveDelay` | Sin fijar; lo deduce del manifiesto | Slider, 0,05 a 6 s (0,3 s al abrir) | Distancia al directo. |
 | `streaming.liveCatchup.enabled` | Automático | `true` | Activa la corrección de latencia. |
 | `streaming.liveCatchup.mode` | `liveCatchupModeDefault` | `liveCatchupModeLoLP` (hasta el 27-10-2026, por una errata, el por defecto: ver 3.5) | Algoritmo de corrección. LoL+ mira la latencia y también el búfer. |
-| `streaming.liveCatchup.playbackBufferMin` | 0,5 s | Slider "Búfer mínimo", 0 a 2 s (0,5 s al abrir) | Búfer por debajo del cual LoL+ frena y no persigue el objetivo. Suelo de la latencia. |
+| `streaming.liveCatchup.playbackBufferMin` | 0,5 s | Slider "Búfer mínimo", 0 a 2 s (0 al abrir) | Búfer por debajo del cual LoL+ frena y no persigue el objetivo. Suelo de la latencia. |
 | `streaming.liveCatchup.maxDrift` | 12 s | Slider, 0 a 10 s (1,5 s al abrir) | Desvío a partir del cual salta al directo en vez de corregir con la velocidad. |
 | `streaming.retryAttempts` | Menos | 15 para manifiesto, inicialización y segmentos | Reintentos ante un fallo de descarga. |
 | `streaming.retryIntervals` | — | 1000 ms | Espera entre reintentos. |
@@ -462,8 +462,10 @@ Y los que se dejan en su valor de fábrica, pero afectan a lo que se mide:
 | `streaming.buffer.stallThreshold`, `lowLatencyStallThreshold` | 0,3 s | Por debajo de este búfer lo declara vacío y lo anota en sus métricas (en el modo de corrección por defecto, además, deja de acelerar). No baja la calidad ni detiene el vídeo. Con LoL+ no cambia la reproducción. |
 | `streaming.utcSynchronization.enabled` | `true` | Sincronización de reloj con el servidor. |
 
-Dos de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo
-de corrección LoL+ (efectivo desde el 27-10-2026, ver 3.5) y el `maxDrift` de 1,5 s.
+Tres de las elecciones del testbed se apartan de `dash.js` de fábrica y conviene declararlas: el modo
+de corrección LoL+ (efectivo desde el 27-10-2026, ver 3.5), el `playbackBufferMin` de 0 al abrir la
+página (desde el mismo día; con él, LoL+ no frena por búfer y solo corrige la latencia) y el
+`maxDrift` de 1,5 s.
 
 **Lo que el testbed añade alrededor**, sin tocar la librería:
 
