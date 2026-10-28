@@ -62,10 +62,25 @@ async function call(path: string, method = 'GET', payload?: unknown): Promise<an
   return body;
 }
 
-const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void; onPreview: (run: CampaignRun) => void }> = ({ campaign, onChanged, onPreview }) => {
+// focus: la prueba pulsada en los resultados (n cambia en cada clic, para volver a ella aunque sea la misma)
+const RunsTable: React.FC<{
+  campaign: Campaign;
+  focus: { id: string; n: number } | null;
+  onChanged: () => void;
+  onPreview: (run: CampaignRun) => void;
+}> = ({ campaign, focus, onChanged, onPreview }) => {
   const plan = campaign.plan;
   const runs = campaign.runs ?? [];
   const [error, setError] = useState<string | null>(null);
+  // Resaltada unos segundos, para encontrarla en la tabla
+  const [highlight, setHighlight] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    document.getElementById(`run-${campaign.id}-${focus.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlight(focus.id);
+    const timer = setTimeout(() => setHighlight(null), 6000);
+    return () => clearTimeout(timer);
+  }, [focus, campaign.id]);
   // Se repite una prueba terminada que no tenga ya su repetición (la de la copia se repite en la copia)
   const repeated = new Set(runs.map((r) => r.retry_of).filter(Boolean));
   const repeat = async (run: CampaignRun) => {
@@ -96,7 +111,13 @@ const RunsTable: React.FC<{ campaign: Campaign; onChanged: () => void; onPreview
         </thead>
         <tbody className="font-mono">
           {runs.map((run: CampaignRun) => (
-            <tr key={run.id} className={`border-t border-slate-800/60 ${run.id === campaign.current ? 'bg-indigo-950/40' : ''}`}>
+            <tr
+              key={run.id}
+              id={`run-${campaign.id}-${run.id}`}
+              className={`border-t border-slate-800/60 transition-colors ${
+                run.id === highlight ? 'bg-amber-900/40 outline outline-1 outline-amber-500/70' : run.id === campaign.current ? 'bg-indigo-950/40' : ''
+              }`}
+            >
               <td className="py-1 pr-2 text-slate-300">
                 {run.id}
                 {run.kind === 'control' && <span className="text-slate-500"> control</span>}
@@ -176,6 +197,11 @@ const Monitor: React.FC<{
   const [showRuns, setShowRuns] = useState(!lean);
   // Con el trabajador en esta pestaña, las gráficas van plegadas: no se dibujan mientras mide
   const [showResults, setShowResults] = useState(!lean);
+  const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
+  const selectRun = (id: string) => {
+    setShowRuns(true);
+    setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
+  };
   // Nombre en edición; null si no se está editando
   const [draftName, setDraftName] = useState<string | null>(null);
   const saveName = async () => {
@@ -365,12 +391,12 @@ const Monitor: React.FC<{
       <button className="text-indigo-300 hover:text-indigo-200" onClick={() => setShowRuns((v) => !v)}>
         {showRuns ? 'Ocultar las pruebas ▴' : 'Ver las pruebas ▾'}
       </button>
-      {showRuns && <RunsTable campaign={campaign} onChanged={onChanged} onPreview={onPreview} />}
+      {showRuns && <RunsTable campaign={campaign} focus={focus} onChanged={onChanged} onPreview={onPreview} />}
 
       <button className="block text-indigo-300 hover:text-indigo-200" onClick={() => setShowResults((v) => !v)}>
         {showResults ? 'Ocultar los resultados ▴' : 'Ver los resultados ▾'}
       </button>
-      {showResults && <CampaignResults campaign={campaign} />}
+      {showResults && <CampaignResults campaign={campaign} onSelectRun={selectRun} />}
     </div>
   );
 };

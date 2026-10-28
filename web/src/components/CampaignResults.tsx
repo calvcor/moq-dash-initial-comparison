@@ -66,12 +66,31 @@ const median = (values: number[]) => {
 const GRID = '#334155';
 const TICK = '#94a3b8';
 
-function chartOptions(metric: Metric, log: boolean, xTitle: string): ChartOptions<'line'> {
+// La prueba del punto bajo el puntero, si es el de una prueba (no el de la mediana ni el del objetivo)
+const runAt = (chart: ChartJS, event: { native: Event | null }): string | null => {
+  if (!event.native) return null;
+  const hits = chart.getElementsAtEventForMode(event.native, 'nearest', { intersect: true }, true);
+  for (const hit of hits) {
+    const raw = chart.data.datasets[hit.datasetIndex].data[hit.index] as { run?: string } | undefined;
+    if (raw?.run) return raw.run;
+  }
+  return null;
+};
+
+function chartOptions(metric: Metric, log: boolean, xTitle: string, onSelectRun?: (id: string) => void): ChartOptions<'line'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
     interaction: { mode: 'nearest', intersect: false },
+    // Pulsar el punto de una prueba la busca en la tabla de pruebas, para repetirla o verla
+    onClick: (event, _elements, chart) => {
+      const run = onSelectRun && runAt(chart, event);
+      if (run) onSelectRun!(run);
+    },
+    onHover: (event, _elements, chart) => {
+      chart.canvas.style.cursor = onSelectRun && runAt(chart, event) ? 'pointer' : 'default';
+    },
     scales: {
       x: { type: 'category', grid: { color: GRID }, ticks: { color: TICK }, title: { display: true, text: xTitle, color: TICK } },
       y: {
@@ -150,7 +169,7 @@ const Panel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, 
   </div>
 );
 
-export const CampaignResults: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
+export const CampaignResults: React.FC<{ campaign: Campaign; onSelectRun?: (id: string) => void }> = ({ campaign, onSelectRun }) => {
   const plan = campaign.plan;
   const [metricKey, setMetricKey] = useState('g2g_p50');
   const [xAxis, setXAxis] = useState<'network' | 'target'>('network');
@@ -170,7 +189,7 @@ export const CampaignResults: React.FC<{ campaign: Campaign }> = ({ campaign }) 
   const categories = xAxis === 'network' ? networkLabels : targetLabels;
   const facets = xAxis === 'network' ? plan.targets.map((_, i) => i) : plan.networks.map((_, i) => i);
   const xOf = (r: CampaignRun) => (xAxis === 'network' ? networkLabels[r.network!] : targetLabels[r.target]);
-  const options = chartOptions(metric, log, xAxis === 'network' ? 'Condición de red' : 'Latencia objetivo');
+  const options = chartOptions(metric, log, xAxis === 'network' ? 'Condición de red' : 'Latencia objetivo', onSelectRun);
 
   // Línea del objetivo pedido, si es la misma en los tres reproductores y numérica (en auto no hay valor que pintar)
   const targetLine = (targetIdx: number[]): ChartDataset<'line'> | null => {
@@ -223,6 +242,7 @@ export const CampaignResults: React.FC<{ campaign: Campaign }> = ({ campaign }) 
         </label>
         <span className="text-slate-500 pb-1">
           Línea: mediana de las repeticiones; puntos: cada prueba válida ({tests.length} de prueba, {controls.length} de control).
+          {onSelectRun && ' Pulsa un punto para ir a su prueba.'}
         </span>
       </div>
 
@@ -245,7 +265,7 @@ export const CampaignResults: React.FC<{ campaign: Campaign }> = ({ campaign }) 
                 labels: controls.map((r) => r.id),
                 datasets: datasets(controls, players, (r) => r.id, controls.map((r) => r.id), metric),
               }}
-              options={chartOptions(metric, log, 'Prueba de control')}
+              options={chartOptions(metric, log, 'Prueba de control', onSelectRun)}
             />
           </Panel>
         )}
