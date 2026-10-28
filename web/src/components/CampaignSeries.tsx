@@ -19,12 +19,14 @@ const PLAYER_COLOR: Record<PlayerId, string> = { dash: '#3b82f6', moq: '#10b981'
 const RUN_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 const MAX_RUNS = RUN_COLORS.length;
 
-const METRICS: Record<string, { label: string; unit: string; field: string }> = {
+const METRICS: Record<string, { label: string; unit: string; field: string; only?: PlayerId }> = {
   g2g: { label: 'Glass-to-glass', unit: 'ms', field: 'g2g_ms' },
   kbps: { label: 'Bitrate de vídeo recibido', unit: 'kbit/s', field: 'kbps' },
   height: { label: 'Altura reproducida', unit: 'p', field: 'height' },
   stall: { label: 'Tiempo parado acumulado', unit: 'ms', field: 'stall_ms' },
   frametime: { label: 'Tiempo en pantalla p95', unit: 'ms', field: 'frametime_p95_ms' },
+  // Media de cada segundo; solo DASH cambia la velocidad del vídeo
+  rate: { label: 'Velocidad de reproducción', unit: '×', field: 'playback_rate', only: 'dash' },
 };
 
 interface Series {
@@ -152,7 +154,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const byId = Object.fromEntries(runs.map((r) => [r.id, r]));
   const chosen = selected.filter((id) => byId[id]);
   const aligned = chosen.some((id) => data[id]?.aligned === 'measure') ? 'measure' : 'source';
-  const players = plan.players.filter((p) => chosen.some((id) => byId[id].players.includes(p)));
+  const players = plan.players.filter((p) => (!metric.only || metric.only === p) && chosen.some((id) => byId[id].players.includes(p)));
   // El eje abarca todas las filas de las pruebas elegidas, tengan medida o no: un reproductor con pocos puntos
   // no encoge su gráfica, y todas comparten escala
   const times = chosen.flatMap((id) => (data[id]?.rows ?? []).map((r) => r.t_s));
@@ -179,7 +181,8 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
         },
       },
       y: {
-        min: 0,
+        // La velocidad oscila alrededor de 1×: desde 0 no se verían sus cambios
+        min: metric.unit === '×' ? undefined : 0,
         grid: { color: GRID },
         ticks: { color: TICK },
         title: { display: true, text: `${metric.label} (${metric.unit})`, color: TICK },
@@ -192,7 +195,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
           title: (items) => (items.length ? `${(items[0].raw as { x: number }).x.toFixed(0)} s` : ''),
           label: (ctx) => {
             const y = (ctx.raw as { y: number | null }).y;
-            return `${ctx.dataset.label}: ${y === null ? '--' : `${y.toFixed(0)} ${metric.unit}`}`;
+            return `${ctx.dataset.label}: ${y === null ? '--' : `${y.toFixed(metric.unit === '×' ? 3 : 0)} ${metric.unit}`}`;
           },
         },
       },

@@ -213,6 +213,13 @@ const Telemetry: React.FC<{
       <Stat label="Bitrate vídeo recibido" value={fmt(metrics.bitrateKbps, 'kbps')} hint={VIDEO_HINT} />
       <Stat label="Descarga total" value={fmt(metrics.networkKbps, 'kbps')} hint={networkHint} />
       <Stat label={bufferLabel} value={fmt(metrics.bufferLengthSec, 's')} hint={bufferHint} />
+      {metrics.playbackRate !== undefined && (
+        <Stat
+          label="Velocidad de reproducción"
+          value={metrics.playbackRate === null ? '--' : `${metrics.playbackRate.toFixed(2)}×`}
+          hint="La que dash.js pone al <video> para acercarse a la latencia objetivo (más de 1×) o, con LoL+, para rellenar el búfer (menos de 1×). En el CSV, media, mínimo y máximo de cada segundo y el tiempo por debajo y por encima de 1×."
+        />
+      )}
       <Stat label="Congelados" value={`${metrics.stalls} (${metrics.stallMs} ms)`} />
     </div>
     <p className="mt-3 text-[11px] font-mono text-slate-400">

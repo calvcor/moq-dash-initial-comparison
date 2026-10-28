@@ -3,6 +3,7 @@ import { FullscreenButton, toggleFullscreen } from './FullscreenButton';
 import * as dashjs from 'dashjs';
 import { GlassMeter, RateWindow, grabFromVideo, DEFAULT_TIMECODE, WATCHDOG_MS, WATCHDOG_GRACE_MS } from '../lib/glass';
 import { meters } from '../lib/qoe';
+import { PlaybackRateTracker, rateTrackers } from '../lib/playbackRate';
 import { DashTracer } from '../lib/trace';
 import { DashExplain } from './DashExplain';
 import type { DashAbr, PlayerMetrics, PlayerPreset, Rendition, TimecodeLayout } from '../types';
@@ -77,6 +78,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
   // El medidor vive lo que el componente, no lo que cada intento de reproducción: así los congelados
   // se siguen contando mientras la vigilancia recrea el reproductor.
   const meterRef = useRef<GlassMeter | null>(null);
+  const rateTrackerRef = useRef<PlaybackRateTracker | null>(null);
   const ladderRef = useRef(renditions);
   ladderRef.current = renditions;
   const timecodesRef = useRef<TimecodeLayout[]>([DEFAULT_TIMECODE]);
@@ -149,9 +151,15 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
     const glassMeter = new GlassMeter(() => grabFromVideo(videoRef.current), () => timecodesRef.current);
     meterRef.current = glassMeter;
     meters.dash = glassMeter;
+    // Velocidad que pone dash.js al <video> (catch-up y LoL+); cada fila recoge su ventana
+    const rateTracker = videoRef.current ? new PlaybackRateTracker(videoRef.current) : null;
+    rateTrackerRef.current = rateTracker;
+    if (rateTracker) rateTrackers.dash = rateTracker;
     return () => {
       glassMeter.close();
       if (meters.dash === glassMeter) delete meters.dash;
+      rateTracker?.close();
+      if (rateTrackers.dash === rateTracker) delete rateTrackers.dash;
     };
   }, []);
 
@@ -323,6 +331,7 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           latencyMs: glass.latencyMs,
           reportedLatencyMs: liveLatency > 0 ? Math.round(liveLatency * 1000) : null,
           bufferLengthSec: Number((p.getBufferLength('video') || 0).toFixed(2)),
+          playbackRate: rateTrackerRef.current?.current ?? null,
           bitrateKbps: rate.kbps(),
           networkKbps: networkRate.kbps(),
           fps: glass.fps,

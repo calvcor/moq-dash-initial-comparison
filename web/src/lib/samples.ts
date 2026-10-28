@@ -3,6 +3,7 @@
 import { RateWindow } from './glass';
 import { getClockSync } from './clock';
 import { meters } from './qoe';
+import { rateTrackers } from './playbackRate';
 import { versionsLabel } from '../components/VersionsPanel';
 import type { PlayerId, PlayerMetrics, SampleRow, ServerStatus, VersionReport } from '../types';
 
@@ -23,6 +24,7 @@ export const INITIAL_METRICS: Record<PlayerId, PlayerMetrics> = {
       frameTimeMaxMs: null,
       frameTimes: [],
       bufferLengthSec: null,
+      playbackRate: null, // solo DASH tiene velocidad variable: así su tarjeta la muestra y las demás no
       stalls: 0,
       stallMs: 0,
       restarts: 0,
@@ -129,6 +131,8 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
   const currentRtc = active.rtc ? metrics.rtc : INITIAL_METRICS.rtc;
   const clock = getClockSync();
   const net = status?.network?.profile;
+  // Velocidad de DASH desde la fila anterior; recogerla la vacía, como los parones
+  const rate = active.dash ? rateTrackers.dash?.take() : undefined;
   const spans = Object.fromEntries(PLAYER_IDS.map((p) => [p, stallSpans(p, active[p])])) as Record<PlayerId, ReturnType<typeof stallSpans>>;
   return {
   time_iso: new Date().toISOString(),
@@ -154,6 +158,11 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
   dash_frametime_p95_ms: currentDash.frameTimeP95Ms,
   dash_frametime_max_ms: currentDash.frameTimeMaxMs,
   dash_buffer_s: currentDash.bufferLengthSec,
+  dash_playback_rate: rate?.mean ?? null,
+  dash_playback_rate_min: rate?.min ?? null,
+  dash_playback_rate_max: rate?.max ?? null,
+  dash_playback_slow_ms: rate ? rate.slowMs : null,
+  dash_playback_fast_ms: rate ? rate.fastMs : null,
   dash_stalls: currentDash.stalls,
   dash_stall_ms: currentDash.stallMs,
   dash_stall_spans: spans.dash.spans,

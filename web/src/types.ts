@@ -119,6 +119,7 @@ export interface PlayerMetrics {
   frameTimeMaxMs: number | null;
   frameTimes: FrameTime[]; // los de los últimos 2 s, para la gráfica
   bufferLengthSec: number | null;
+  playbackRate?: number | null; // solo DASH: velocidad que dash.js pone al <video> ahora mismo (1 = normal)
   stalls: number;
   stallMs: number;
   restarts: number; // veces que la vigilancia ha tenido que recrear el reproductor
@@ -202,6 +203,13 @@ export interface SampleRow {
   dash_frametime_p95_ms: number | null;
   dash_frametime_max_ms: number | null;
   dash_buffer_s: number | null;
+  // Velocidad del <video> que pone dash.js, desde la fila anterior: media ponderada por tiempo, mínimo, máximo y
+  // ms por debajo y por encima de 1× (README, tabla de métricas)
+  dash_playback_rate: number | null;
+  dash_playback_rate_min: number | null;
+  dash_playback_rate_max: number | null;
+  dash_playback_slow_ms: number | null;
+  dash_playback_fast_ms: number | null;
   dash_stalls: number;
   dash_stall_ms: number;
   dash_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor

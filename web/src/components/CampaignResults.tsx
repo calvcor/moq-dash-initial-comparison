@@ -46,6 +46,10 @@ const METRICS: Record<string, Metric> = {
   switches: { label: 'Cambios de calidad', unit: '', get: (s) => s.quality_switches },
   frametime: { label: 'Tiempo en pantalla p95 (mediana)', unit: 'ms', get: (s) => s.frametime_p95_ms_median },
   startup: { label: 'Del montaje a la primera latencia', unit: 's', get: (s) => s.first_g2g_s },
+  // Solo DASH: las demás ramas no cambian la velocidad del vídeo
+  rate: { label: 'Velocidad de reproducción media (DASH)', unit: '×', get: (s) => s.playback_rate_mean },
+  slow: { label: 'Tiempo frenando, por debajo de 1× (DASH)', unit: '%', get: (s) => (s.playback_slow_share == null ? null : s.playback_slow_share * 100) },
+  fast: { label: 'Tiempo acelerando, por encima de 1× (DASH)', unit: '%', get: (s) => (s.playback_fast_share == null ? null : s.playback_fast_share * 100) },
 };
 
 const median = (values: number[]) => {
@@ -79,7 +83,7 @@ function chartOptions(metric: Metric, log: boolean, xTitle: string): ChartOption
         callbacks: {
           label: (ctx) => {
             const raw = ctx.raw as { y: number; rep?: number; run?: string };
-            const value = `${raw.y.toFixed(metric.unit === 'ms' || metric.unit === 'kbit/s' ? 0 : 1)}${metric.unit ? ` ${metric.unit}` : ''}`;
+            const value = `${raw.y.toFixed(metric.unit === 'ms' || metric.unit === 'kbit/s' ? 0 : metric.unit === '×' ? 3 : 1)}${metric.unit ? ` ${metric.unit}` : ''}`;
             const name = String(ctx.dataset.label).replace(/^· /, '');
             return raw.run ? `${name}, ${raw.run} (rep. ${(raw.rep ?? 0) + 1}): ${value}` : `${name}: ${value}`;
           },

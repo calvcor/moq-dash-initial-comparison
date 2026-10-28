@@ -107,6 +107,8 @@ def summarize_player(player: str, rows: list[dict], measure_s: float, target_ms:
     top = max(heights) if heights else None
     stall_ms = increase(rows, f"{player}_stall_ms")
     mean = lambda key: rounded(statistics.fmean(column(rows, key))) if column(rows, key) else None
+    # Velocidad del <video> (solo DASH; en las demás ramas no hay columnas y queda vacío)
+    rates, slow, fast = column(rows, f"{player}_playback_rate"), column(rows, f"{player}_playback_slow_ms"), column(rows, f"{player}_playback_fast_ms")
     median = lambda key: rounded(statistics.median(column(rows, key))) if column(rows, key) else None
     return {
         "samples": len(g2g),
@@ -134,6 +136,12 @@ def summarize_player(player: str, rows: list[dict], measure_s: float, target_ms:
         "player_restarts": increase(rows, f"{player}_player_restarts"),
         "down_dropped": increase(rows, f"{player}_down_dropped"),
         "packets_lost": increase(rows, "rtc_packets_lost") if player == "rtc" else None,
+        "playback_rate_mean": rounded(statistics.fmean(rates), 3) if rates else None,
+        "playback_rate_min": rounded(min(column(rows, f"{player}_playback_rate_min")), 3) if column(rows, f"{player}_playback_rate_min") else None,
+        "playback_rate_max": rounded(max(column(rows, f"{player}_playback_rate_max")), 3) if column(rows, f"{player}_playback_rate_max") else None,
+        # Fracción de la medida por debajo (frenando) y por encima (acelerando) de 1×
+        "playback_slow_share": rounded(sum(slow) / (measure_s * 1000), 4) if slow and measure_s else None,
+        "playback_fast_share": rounded(sum(fast) / (measure_s * 1000), 4) if fast and measure_s else None,
     }
 
 
@@ -837,7 +845,7 @@ class Campaigns:
 
     # Columnas de cada reproductor que se devuelven en las series (las mismas del CSV de muestras)
     # stall_spans y stall_open_since_ms: parones exactos, en reloj del servidor (desde el 28-10-2026)
-    SERIES_FIELDS = ("g2g_ms", "kbps", "height", "stall_ms", "frametime_p95_ms", "stall_spans", "stall_open_since_ms")
+    SERIES_FIELDS = ("g2g_ms", "kbps", "height", "stall_ms", "frametime_p95_ms", "stall_spans", "stall_open_since_ms", "playback_rate")
 
     def series(self, cid: str, ids: list[str]) -> dict:
         """Por prueba, sus filas del último intento (calentamiento y medida) con el tiempo relativo.
