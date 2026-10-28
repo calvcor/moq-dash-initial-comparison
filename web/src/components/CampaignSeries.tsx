@@ -19,9 +19,12 @@ const PLAYER_COLOR: Record<PlayerId, string> = { dash: '#3b82f6', moq: '#10b981'
 const RUN_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 const MAX_RUNS = RUN_COLORS.length;
 
-const METRICS: Record<string, { label: string; unit: string; field: string; only?: PlayerId }> = {
+// source 'ip': de las lecturas del router que hace el servidor cada segundo, no de las filas del navegador
+const METRICS: Record<string, { label: string; unit: string; field: string; only?: PlayerId; source?: 'ip' }> = {
   g2g: { label: 'Glass-to-glass', unit: 'ms', field: 'g2g_ms' },
   kbps: { label: 'Bitrate de vídeo recibido', unit: 'kbit/s', field: 'kbps' },
+  ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', field: 'ip_down_kbps', source: 'ip' },
+  ip_up: { label: 'Tráfico IP de subida en el router', unit: 'kbit/s', field: 'ip_up_kbps', source: 'ip' },
   height: { label: 'Altura reproducida', unit: 'p', field: 'height' },
   stall: { label: 'Tiempo parado acumulado', unit: 'ms', field: 'stall_ms' },
   frametime: { label: 'Tiempo en pantalla p95', unit: 'ms', field: 'frametime_p95_ms' },
@@ -36,6 +39,7 @@ interface Series {
   aligned: 'source' | 'measure';
   zero_ms?: number; // el cero del eje en reloj del servidor
   rows: ({ t_s: number; phase: 'warmup' | 'measuring' } & Record<string, number | null | string>)[];
+  ip?: Series['rows']; // tráfico IP de cada intervalo; t_s es su final
 }
 
 // Sombreado de los parones: cada parón como una franja vertical del color de su línea, de su inicio a su fin
@@ -252,7 +256,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
       .map((id) => {
         const color = together ? PLAYER_COLOR[p] : RUN_COLORS[selected.indexOf(id) % RUN_COLORS.length];
         // Los segundos sin valor se quedan como y: null, para que la línea se corte ahí (spanGaps: false)
-        const points = (data[id]?.rows ?? []).map((row) => ({ x: row.t_s, y: (row[`${p}_${metric.field}`] as number | null) ?? null, phase: row.phase }));
+        const points = ((metric.source === 'ip' ? data[id]?.ip : data[id]?.rows) ?? []).map((row) => ({ x: row.t_s, y: (row[`${p}_${metric.field}`] as number | null) ?? null, phase: row.phase }));
         return {
           label: together ? `${PLAYER_LABEL[p]}, ${id} (rep. ${byId[id].rep + 1})` : `${id} (rep. ${byId[id].rep + 1})`,
           protocol: p,

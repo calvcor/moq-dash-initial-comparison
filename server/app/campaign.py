@@ -68,6 +68,11 @@ UNRESTRICTED = {
     for direction in ("down", "up")
 }
 
+# Tráfico IP en el router por protocolo y sentido: el orquestador lee sus contadores cada IP_PERIOD_S durante
+# el calentamiento y la medida, con su propio reloj, y guarda lo exacto de cada intervalo en ip.jsonl
+IP_KEYS = tuple(f"{p}_{d}" for p in PLAYERS for d in ("down", "up"))
+IP_PERIOD_S = 1
+
 # Columna del búfer de cada reproductor en las filas del dashboard
 BUFFER_COLUMN = {"dash": "dash_buffer_s", "moq": "moq_jitter_buffer_s", "rtc": "rtc_jitter_buffer_s"}
 
@@ -149,6 +154,18 @@ def summarize_player(player: str, rows: list[dict], measure_s: float, target_ms:
     }
 
 
+def summarize_ip(player: str, samples: list[dict]) -> dict:
+    """Tráfico IP en el router durante la medida, de las lecturas del orquestador: la media exacta (bytes
+    entre duración) y el p95 de los intervalos de un segundo."""
+    out = {}
+    for d in ("down", "up"):
+        valid = [s for s in samples if s.get(f"{player}_{d}_bytes") is not None]
+        ms = sum(s["t_server_ms"] - s["from_ms"] for s in valid)
+        out[f"ip_{d}_kbps"] = rounded(sum(s[f"{player}_{d}_bytes"] for s in valid) * 8 / ms) if ms else None
+        out[f"ip_{d}_kbps_p95"] = rounded(percentile([s[f"{player}_{d}_kbps"] for s in valid], 95))
+    return out
+
+
 class Campaigns:
     def __init__(self, root: str):
         self.root = root
@@ -158,6 +175,9 @@ class Campaigns:
         self.active: Optional[str] = None
         # Filas de la prueba en curso, para su resumen (en disco van todas a samples.jsonl)
         self.rows: dict[str, list[dict]] = {}
+        # Tráfico IP de la prueba en curso, intervalo a intervalo (en disco, ip.jsonl), y la última lectura
+        self.ip: dict[str, list[dict]] = {}
+        self.ip_last: Optional[dict] = None
         # mounted_at_ms: cuándo creó el trabajador los reproductores de la prueba montada, en reloj del servidor
         self.worker = {"id": None, "seen": 0.0, "mounted": None, "mounted_at_ms": None, "info": {}}
         # Vista previa de una prueba (preview): su red y su emisión aplicadas, y cómo estaba todo antes
@@ -167,6 +187,8 @@ class Campaigns:
         self.apply_network: Callable[[dict], None] = lambda profile: None
         self.stop_stream: Callable[[], None] = lambda: None
         self.snapshot: Callable[[], dict] = lambda: {}
+        # Contadores acumulados del router por cola ({"dash_down": {"bytes": ...}, ...}); None si no responde
+        self.read_counters: Callable[[], Optional[dict]] = lambda: None
 
     # --- ficheros ---
 
@@ -609,6 +631,7 @@ class Campaigns:
                 run.update(state="preparing", started_ms=int(time.time() * 1000), mounted_ms=None, warmup_start_ms=None,
                            measure_start_ms=None, ended_ms=None, invalid_reasons=[], summary=None)
                 self.rows.pop(run["id"], None)
+                self.ip.pop(run["id"], None)
                 self.save(campaign)
 
             # Sin trabajador no tiene sentido tocar nada: se espera a que se conecte
@@ -706,6 +729,7 @@ class Campaigns:
             run.update(state="pending", mounted_ms=None, measure_start_ms=None)
             campaign["current"] = None
             self.rows.pop(run["id"], None)
+            self.ip.pop(run["id"], None)
             self.save(campaign)
 
     def close(self, campaign: dict, run: dict, before: dict, reasons: list[str]):
@@ -727,6 +751,9 @@ class Campaigns:
                 },
                 "players": {p: summarize_player(p, rows, plan["measure_s"], target.get(f"{p}_ms")) for p in run["players"]},
             }
+            ip = [s for s in self.ip.pop(run["id"], []) if s["phase"] == "measuring"]
+            for p in run["players"]:
+                run["summary"]["players"][p].update(summarize_ip(p, ip))
             # Del montaje a la primera fila con latencia medida, con la resolución de una fila por segundo
             for p in run["players"]:
                 first = next((r["t_server_ms"] for r in warmup if r.get(f"{p}_g2g_ms") is not None), None)
@@ -847,6 +874,59 @@ class Campaigns:
                        "ingest_anomalies": summary["server"]["ingest_anomalies"], **values}
                 f.write(json.dumps(row) + "\n")
 
+    # --- tráfico IP ---
+
+    def ip_sampler(self):
+        """Hilo: lee los contadores del router al empezar cada segundo mientras una prueba calienta o mide.
+
+        Cada lectura con la anterior de la misma prueba da un intervalo exacto (bytes y su duración en reloj del
+        servidor), sin pasar por el navegador: no carga al medidor y no depende de cuándo sube sus filas. El
+        intervalo es de la fase en que termina."""
+        while True:
+            time.sleep(IP_PERIOD_S - time.time() % IP_PERIOD_S)
+            with self.lock:
+                campaign = self.campaigns.get(self.active) if self.active else None
+                run = self.find_run(campaign, campaign["current"]) if campaign and campaign.get("current") else None
+                if run is None or run["state"] not in ("warmup", "measuring"):
+                    self.ip_last = None
+                    continue
+                key = (run["id"], run["started_ms"])
+            t0 = time.time()
+            try:
+                counters = self.read_counters()
+            except Exception:
+                counters = None
+            t = int((t0 + time.time()) / 2 * 1000)  # la lectura cae hacia la mitad de la petición
+            if not counters:
+                self.ip_last = None
+                continue
+            last, self.ip_last = self.ip_last, {"key": key, "t": t, "counters": counters}
+            if last is None or last["key"] != key or t <= last["t"]:
+                continue
+            with self.lock:
+                if run["state"] not in ("warmup", "measuring") or (run["id"], run["started_ms"]) != key:
+                    continue
+                end_ms = run["measure_start_ms"] + int(campaign["plan"]["measure_s"] * 1000) if run["measure_start_ms"] else None
+                if run["measure_start_ms"] is None or t < run["measure_start_ms"]:
+                    phase = "warmup"
+                elif t <= end_ms:
+                    phase = "measuring"
+                else:
+                    continue
+                sample = {"campaign": campaign["id"], "run_id": run["id"], "attempt": run["attempt"], "run_started_ms": run["started_ms"],
+                          "phase": phase, "from_ms": last["t"], "t_server_ms": t}
+                dt = t - last["t"]
+                for q in IP_KEYS:
+                    a = (last["counters"].get(q) or {}).get("bytes")
+                    b = (counters.get(q) or {}).get("bytes")
+                    # Sin contador o con el contador reiniciado (router recreado), el intervalo queda vacío
+                    size = b - a if isinstance(a, int) and isinstance(b, int) and b >= a else None
+                    sample[f"{q}_bytes"] = size
+                    sample[f"{q}_kbps"] = round(size * 8 / dt, 1) if size is not None else None
+                self.ip.setdefault(run["id"], []).append(sample)
+                with open(self.path(campaign["id"], "ip.jsonl"), "a") as f:
+                    f.write(json.dumps(sample) + "\n")
+
     # Columnas de cada reproductor que se devuelven en las series (las mismas del CSV de muestras)
     # stall_spans y stall_open_since_ms: parones exactos, en reloj del servidor (desde el 28-10-2026)
     SERIES_FIELDS = ("g2g_ms", "kbps", "height", "stall_ms", "frametime_p95_ms", "stall_spans", "stall_open_since_ms", "playback_rate", "content_speed", "content_skipped_ms")
@@ -859,7 +939,7 @@ class Campaigns:
         reloj del servidor, para situar en el mismo eje los parones exactos (stall_spans)."""
         campaign = self.campaigns[cid]
         runs = {r["id"]: r for r in campaign["runs"] if r["id"] in ids}
-        out = {rid: {"aligned": "measure", "rows": []} for rid in runs}
+        out = {rid: {"aligned": "measure", "rows": [], "ip": []} for rid in runs}
         try:
             with open(self.path(cid, "samples.jsonl")) as f:
                 for line in f:
@@ -881,6 +961,27 @@ class Campaigns:
                     out[run["id"]]["rows"].append(point)
         except OSError:
             pass
+        # Tráfico IP de cada intervalo, en el mismo eje (t_s: el final del intervalo)
+        try:
+            with open(self.path(cid, "ip.jsonl")) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    sample = json.loads(line)
+                    run = runs.get(sample.get("run_id"))
+                    if run is None or sample.get("run_started_ms") != run["started_ms"]:
+                        continue
+                    restarted = self.restarts_each_run(campaign["plan"], run["stream"]) and run.get("source_started_ms")
+                    zero = run["source_started_ms"] if restarted else run["measure_start_ms"]
+                    if zero is None:
+                        continue
+                    point = {"t_s": round((sample["t_server_ms"] - zero) / 1000, 2), "phase": sample["phase"]}
+                    for p in run["players"]:
+                        for d in ("down", "up"):
+                            point[f"{p}_ip_{d}_kbps"] = sample.get(f"{p}_{d}_kbps")
+                    out[run["id"]]["ip"].append(point)
+        except OSError:
+            pass
         return out
 
     def export_csv(self, cid: str, name: str) -> str:
@@ -900,7 +1001,7 @@ class Campaigns:
                 run = runs.get(row.get("run_id"))
                 if run and run["state"] == "replaced" and row.get("state") == "done":
                     row.update(state="replaced", replaced_by=run.get("replaced_by"))
-        if name == "samples.jsonl":
+        if name in ("samples.jsonl", "ip.jsonl"):
             # Las columnas de la condición, delante de las del dashboard
             campaign = self.campaigns[cid]
             runs = {r["id"]: r for r in campaign["runs"]}

@@ -42,6 +42,9 @@ const METRICS: Record<string, Metric> = {
   stall: { label: 'Tiempo parado', unit: '%', get: (s) => (s.stall_ratio == null ? null : s.stall_ratio * 100) },
   coverage: { label: 'Segundos con latencia medida', unit: '%', get: (s) => (s.coverage == null ? null : s.coverage * 100) },
   kbps: { label: 'Bitrate de vídeo recibido', unit: 'kbit/s', get: (s) => s.kbps_mean },
+  // Leído por el servidor en el router: cabeceras y retransmisiones incluidas (desde el 28-10-2026)
+  ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', get: (s) => s.ip_down_kbps },
+  ip_up: { label: 'Tráfico IP de subida en el router', unit: 'kbit/s', get: (s) => s.ip_up_kbps },
   height: { label: 'Altura media reproducida', unit: 'p', get: (s) => s.height_mean },
   switches: { label: 'Cambios de calidad', unit: '', get: (s) => s.quality_switches },
   frametime: { label: 'Tiempo en pantalla p95 (mediana)', unit: 'ms', get: (s) => s.frametime_p95_ms_median },

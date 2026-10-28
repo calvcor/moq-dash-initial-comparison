@@ -1079,8 +1079,9 @@ def delete_campaign(cid: str):
     return {"deleted": cid}
 
 @app.get("/api/campaigns/{cid}/{name}.csv", response_class=PlainTextResponse)
-def export_campaign(cid: str, name: Literal["runs", "samples"]):
-    """runs: una fila por prueba y reproductor con su resumen; samples: las filas de cada segundo."""
+def export_campaign(cid: str, name: Literal["runs", "samples", "ip"]):
+    """runs: una fila por prueba y reproductor con su resumen; samples: las filas de cada segundo; ip: el tráfico IP
+    en el router de cada segundo, leído por el orquestador."""
     campaign_or_404(cid)
     return PlainTextResponse(
         campaigns.export_csv(cid, f"{name}.jsonl"), media_type="text/csv",
@@ -1194,7 +1195,9 @@ def on_startup():
     campaigns.stop_stream = stop_pipeline
     campaigns.snapshot = campaign_snapshot
     campaigns.load()
+    campaigns.read_counters = lambda: (router_call() or {}).get("stats")
     threading.Thread(target=campaigns.scheduler, daemon=True).start()
+    threading.Thread(target=campaigns.ip_sampler, daemon=True).start()
 
 @app.on_event("shutdown")
 def on_shutdown():

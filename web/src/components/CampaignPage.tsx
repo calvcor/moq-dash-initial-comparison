@@ -289,14 +289,20 @@ const Monitor: React.FC<{
               <Square className="w-3.5 h-3.5" /> Cancelar
             </button>
           )}
-          {(['runs', 'samples'] as const).map((name) => (
+          {(['runs', 'samples', 'ip'] as const).map((name) => (
             <a
               key={name}
               className="flex items-center gap-1 px-3 py-1 rounded border border-slate-700 text-slate-300 hover:border-indigo-500"
               href={`/api/campaigns/${campaign.id}/${name}.csv`}
-              title={name === 'runs' ? 'Una fila por prueba y reproductor, con su resumen' : 'Todas las filas de cada segundo, con la condición de su prueba'}
+              title={
+                name === 'runs'
+                  ? 'Una fila por prueba y reproductor, con su resumen'
+                  : name === 'samples'
+                    ? 'Todas las filas de cada segundo, con la condición de su prueba'
+                    : 'Tráfico IP en el router de cada segundo, por protocolo y sentido, leído por el servidor'
+              }
             >
-              <Download className="w-3.5 h-3.5" /> {name === 'runs' ? 'Resumen CSV' : 'Muestras CSV'}
+              <Download className="w-3.5 h-3.5" /> {name === 'runs' ? 'Resumen CSV' : name === 'samples' ? 'Muestras CSV' : 'Tráfico IP CSV'}
             </a>
           ))}
           {campaign.state !== 'running' && (
