@@ -836,13 +836,15 @@ class Campaigns:
                 f.write(json.dumps(row) + "\n")
 
     # Columnas de cada reproductor que se devuelven en las series (las mismas del CSV de muestras)
-    SERIES_FIELDS = ("g2g_ms", "kbps", "height", "stall_ms", "frametime_p95_ms")
+    # stall_spans y stall_open_since_ms: parones exactos, en reloj del servidor (desde el 28-10-2026)
+    SERIES_FIELDS = ("g2g_ms", "kbps", "height", "stall_ms", "frametime_p95_ms", "stall_spans", "stall_open_since_ms")
 
     def series(self, cid: str, ids: list[str]) -> dict:
         """Por prueba, sus filas del último intento (calentamiento y medida) con el tiempo relativo.
 
         t_s: segundos desde que arrancó la fuente si la prueba la reinició (el segundo del vídeo, el mismo en
-        todas), o desde el inicio de la medida si no (en el calentamiento, negativo)."""
+        todas), o desde el inicio de la medida si no (en el calentamiento, negativo). zero_ms es ese instante en
+        reloj del servidor, para situar en el mismo eje los parones exactos (stall_spans)."""
         campaign = self.campaigns[cid]
         runs = {r["id"]: r for r in campaign["runs"] if r["id"] in ids}
         out = {rid: {"aligned": "measure", "rows": []} for rid in runs}
@@ -859,7 +861,7 @@ class Campaigns:
                     zero = run["source_started_ms"] if restarted else run["measure_start_ms"]
                     if zero is None:
                         continue
-                    out[run["id"]]["aligned"] = "source" if restarted else "measure"
+                    out[run["id"]].update(aligned="source" if restarted else "measure", zero_ms=zero)
                     point = {"t_s": round((row["t_server_ms"] - zero) / 1000, 1), "phase": row["phase"]}
                     for p in run["players"]:
                         for field in self.SERIES_FIELDS:

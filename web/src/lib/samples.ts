@@ -2,6 +2,7 @@
 // trabajador de las campañas, que sube las mismas filas al servidor.
 import { RateWindow } from './glass';
 import { getClockSync } from './clock';
+import { meters } from './qoe';
 import { versionsLabel } from '../components/VersionsPanel';
 import type { PlayerId, PlayerMetrics, SampleRow, ServerStatus, VersionReport } from '../types';
 
@@ -111,6 +112,16 @@ export interface SampleContext {
   versions: VersionReport | null;
 }
 
+/**
+ * Parones exactos del medidor desde la fila anterior, "inicio-fin;inicio-fin" en ms del reloj del servidor, y el
+ * inicio del que siga en curso. Recogerlos los vacía: cada parón aparece en una sola fila.
+ */
+function stallSpans(player: PlayerId, active: boolean): { spans: string | null; openSince: number | null } {
+  const taken = active ? meters[player]?.takeStallSpans() : undefined;
+  if (!taken) return { spans: null, openSince: null };
+  return { spans: taken.spans.map(([a, b]) => `${a}-${b}`).join(';'), openSince: taken.openSinceMs === null ? null : Math.round(taken.openSinceMs) };
+}
+
 export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status, ip, audioPlayer, versions }: SampleContext): SampleRow {
   // Un reproductor desactivado aporta su fila vacía, nunca su último valor
   const currentDash = active.dash ? metrics.dash : INITIAL_METRICS.dash;
@@ -118,6 +129,7 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
   const currentRtc = active.rtc ? metrics.rtc : INITIAL_METRICS.rtc;
   const clock = getClockSync();
   const net = status?.network?.profile;
+  const spans = Object.fromEntries(PLAYER_IDS.map((p) => [p, stallSpans(p, active[p])])) as Record<PlayerId, ReturnType<typeof stallSpans>>;
   return {
   time_iso: new Date().toISOString(),
   epoch: epoch,
@@ -144,6 +156,8 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
   dash_buffer_s: currentDash.bufferLengthSec,
   dash_stalls: currentDash.stalls,
   dash_stall_ms: currentDash.stallMs,
+  dash_stall_spans: spans.dash.spans,
+  dash_stall_open_since_ms: spans.dash.openSince,
   dash_player_restarts: currentDash.restarts,
   dash_target_ms: currentDash.targetLatencyMs,
   dash_height: currentDash.renditionHeight,
@@ -165,6 +179,8 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
   moq_jitter_buffer_s: currentMoq.bufferLengthSec,
   moq_stalls: currentMoq.stalls,
   moq_stall_ms: currentMoq.stallMs,
+  moq_stall_spans: spans.moq.spans,
+  moq_stall_open_since_ms: spans.moq.openSince,
   moq_player_restarts: currentMoq.restarts,
   moq_target_ms: currentMoq.targetLatencyMs,
   moq_height: currentMoq.renditionHeight,
@@ -195,6 +211,8 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
   rtc_jitter_buffer_s: currentRtc.bufferLengthSec,
   rtc_stalls: currentRtc.stalls,
   rtc_stall_ms: currentRtc.stallMs,
+  rtc_stall_spans: spans.rtc.spans,
+  rtc_stall_open_since_ms: spans.rtc.openSince,
   rtc_player_restarts: currentRtc.restarts,
   rtc_target_ms: currentRtc.targetLatencyMs,
   rtc_height: currentRtc.renditionHeight,

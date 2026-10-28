@@ -204,6 +204,8 @@ export interface SampleRow {
   dash_buffer_s: number | null;
   dash_stalls: number;
   dash_stall_ms: number;
+  dash_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor
+  dash_stall_open_since_ms: number | null; // inicio del parón en curso, si lo hay
   dash_player_restarts: number;
   dash_target_ms: number | null;
   dash_height: number | null;
@@ -225,6 +227,8 @@ export interface SampleRow {
   moq_jitter_buffer_s: number | null; // tiempo medio retenido en el reproductor, como rtc_jitter_buffer_s
   moq_stalls: number;
   moq_stall_ms: number;
+  moq_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor
+  moq_stall_open_since_ms: number | null; // inicio del parón en curso, si lo hay
   moq_player_restarts: number;
   moq_target_ms: number | null;
   moq_height: number | null;
@@ -257,6 +261,8 @@ export interface SampleRow {
   rtc_jitter_buffer_s: number | null;
   rtc_stalls: number;
   rtc_stall_ms: number;
+  rtc_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor
+  rtc_stall_open_since_ms: number | null; // inicio del parón en curso, si lo hay
   rtc_player_restarts: number;
   rtc_target_ms: number | null;
   rtc_height: number | null;

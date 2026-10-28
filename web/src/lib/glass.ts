@@ -86,6 +86,8 @@ export class GlassMeter {
   #inStall = false;
   #stalls = 0;
   #stallMs = 0;
+  // Parones terminados que aún no ha recogido la fila de cada segundo: [inicio, fin] en reloj del servidor
+  #spans: [number, number][] = [];
   #samples: { t: number; latency: number }[] = [];
   #frameTimes: FrameTime[] = [];
   #log: ViewLog | null = null;
@@ -115,6 +117,26 @@ export class GlassMeter {
   startLog() {
     const now = serverNowMs();
     this.#log = { frames: [], gaps: [], unreadable: 0, startMs: now ?? 0, endMs: 0, missingClock: now === null ? 1 : 0 };
+  }
+
+  /**
+   * Parones terminados desde la llamada anterior y el inicio del que esté en curso, en reloj del servidor. Cada
+   * parón sale una sola vez: lo recoge la fila de cada segundo (lib/samples.ts), que es la única que llama.
+   */
+  takeStallSpans(): { spans: [number, number][]; openSinceMs: number | null } {
+    const spans = this.#spans;
+    this.#spans = [];
+    return { spans, openSinceMs: this.#inStall ? serverNowMs(this.#lastChange) : null };
+  }
+
+  /** Cierra el parón en curso en el instante end (performance.now): empezó con el último frame nuevo. */
+  #endSpan(end: number) {
+    const from = serverNowMs(this.#lastChange);
+    const to = serverNowMs(end);
+    if (from === null || to === null) return;
+    this.#spans.push([Math.round(from), Math.round(to)]);
+    // Sin nadie que las recoja (vista previa, reproductor fuera de una sesión) no crecen sin límite
+    if (this.#spans.length > 500) this.#spans.splice(0, this.#spans.length - 500);
   }
 
   /** Termina el registro y lo devuelve, o null si no se había empezado. */
@@ -176,7 +198,10 @@ export class GlassMeter {
     // Si el muestreo estuvo parado no se puede distinguir un congelado real: no se cuenta
     if (t - this.#lastTick > SAMPLER_GAP_MS) {
       // Lo que llevaba el parón hasta el último muestreo sí se sabe (y ya se ha mostrado): se conserva
-      if (this.#inStall) this.#stallMs += this.#lastTick - this.#lastChange;
+      if (this.#inStall) {
+        this.#stallMs += this.#lastTick - this.#lastChange;
+        this.#endSpan(this.#lastTick);
+      }
       this.#lastChange = t;
       this.#inStall = false;
       this.#changeValid = false;
@@ -208,6 +233,7 @@ export class GlassMeter {
 
     if (this.#inStall) {
       this.#stallMs += t - this.#lastChange;
+      this.#endSpan(t);
       this.#inStall = false;
     }
     // Lo que estuvo en pantalla el frame anterior. Va en refrescos de pantalla: t es la hora del

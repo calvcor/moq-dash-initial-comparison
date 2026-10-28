@@ -29,17 +29,41 @@ const METRICS: Record<string, { label: string; unit: string; field: string }> = 
 
 interface Series {
   aligned: 'source' | 'measure';
+  zero_ms?: number; // el cero del eje en reloj del servidor
   rows: ({ t_s: number; phase: 'warmup' | 'measuring' } & Record<string, number | null | string>)[];
 }
 
-// Sombreado de los parones: cada segundo con tiempo parado (lo que sube el contador del medidor entre dos filas)
-// se pinta como una franja vertical del color de su línea, más opaca cuanto mayor la fracción del segundo
-// parada. La resolución es la de las filas, un segundo; la franja no dice en qué parte del segundo fue. Con los
+// Sombreado de los parones: cada parón como una franja vertical del color de su línea, de su inicio a su fin
+// exactos (stall_spans, que el medidor anota desde el 28-10-2026). En pruebas anteriores solo está el contador
+// de cada fila: entonces se sombrea cada segundo con tiempo parado, más opaco cuanto mayor la fracción del
+// segundo parada, porque no se sabe en qué parte del segundo fue. Con los
 // protocolos superpuestos, franjas de alto completo de tres colores se mezclarían: cada protocolo va entonces en
 // su propio carril, una banda estrecha en lo alto de la gráfica.
-type StallSpan = [number, number, number]; // [desde, hasta (s del eje), fracción parada]
+type StallSpan = [number, number, number]; // [desde, hasta (s del eje), fracción parada; 1 si es exacto]
 
-function stallSpans(rows: Series['rows'], player: PlayerId): StallSpan[] {
+/** Parones de un reproductor en una prueba; exact dice si son los intervalos del medidor o la aproximación por segundo. */
+function stallSpans(series: Series | undefined, player: PlayerId): { spans: StallSpan[]; exact: boolean } {
+  const rows = series?.rows ?? [];
+  const zero = series?.zero_ms;
+  // Las filas con medidor nuevo traen el campo como texto (vacío si no hubo parón); las anteriores, null
+  if (zero !== undefined && rows.some((r) => typeof r[`${player}_stall_spans`] === 'string')) {
+    const spans: StallSpan[] = [];
+    for (const row of rows) {
+      for (const part of String(row[`${player}_stall_spans`] ?? '').split(';')) {
+        const [a, b] = part.split('-').map(Number);
+        if (Number.isFinite(a) && Number.isFinite(b) && b > a) spans.push([(a - zero) / 1000, (b - zero) / 1000, 1]);
+      }
+    }
+    // El parón que seguía abierto en la última fila llega hasta ella
+    const last = rows[rows.length - 1];
+    const open = last?.[`${player}_stall_open_since_ms`] as number | null | undefined;
+    if (last && open != null) spans.push([(open - zero) / 1000, last.t_s, 1]);
+    return { spans, exact: true };
+  }
+  return { spans: bySecond(rows, player), exact: false };
+}
+
+function bySecond(rows: Series['rows'], player: PlayerId): StallSpan[] {
   const out: StallSpan[] = [];
   for (let i = 1; i < rows.length; i++) {
     const a = rows[i - 1][`${player}_stall_ms`] as number | null;
@@ -65,11 +89,12 @@ const shadeStalls: Plugin<'line'> = {
       const spans = (d as any).stalls as StallSpan[] | undefined;
       if (!spans || !chart.isDatasetVisible(i)) return;
       const lane = (d as any).stallLane as number | undefined;
+      const exact = !!(d as any).stallsExact;
       const top = lane === undefined ? chartArea.top : chartArea.top + lane * (LANE_PX + 2);
       const height = lane === undefined ? chartArea.height : LANE_PX;
       ctx.fillStyle = d.borderColor as string;
       for (const [x0, x1, frac] of spans) {
-        ctx.globalAlpha = lane === undefined ? 0.12 + 0.3 * frac : 0.25 + 0.75 * frac;
+        ctx.globalAlpha = exact ? (lane === undefined ? 0.28 : 0.85) : lane === undefined ? 0.12 + 0.3 * frac : 0.25 + 0.75 * frac;
         const left = scales.x.getPixelForValue(x0);
         ctx.fillRect(left, top, scales.x.getPixelForValue(x1) - left, height);
       }
@@ -165,7 +190,10 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
       tooltip: {
         callbacks: {
           title: (items) => (items.length ? `${(items[0].raw as { x: number }).x.toFixed(0)} s` : ''),
-          label: (ctx) => `${ctx.dataset.label}: ${(ctx.raw as { y: number }).y.toFixed(0)} ${metric.unit}`,
+          label: (ctx) => {
+            const y = (ctx.raw as { y: number | null }).y;
+            return `${ctx.dataset.label}: ${y === null ? '--' : `${y.toFixed(0)} ${metric.unit}`}`;
+          },
         },
       },
     },
@@ -217,19 +245,27 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
       .filter((id) => byId[id].players.includes(p))
       .map((id) => {
         const color = together ? PLAYER_COLOR[p] : RUN_COLORS[selected.indexOf(id) % RUN_COLORS.length];
-        const points = (data[id]?.rows ?? [])
-          .map((row) => ({ x: row.t_s, y: row[`${p}_${metric.field}`] as number | null, phase: row.phase }))
-          .filter((pt) => pt.y !== null && pt.y !== undefined);
+        // Los segundos sin valor se quedan como y: null, para que la línea se corte ahí (spanGaps: false)
+        const points = (data[id]?.rows ?? []).map((row) => ({ x: row.t_s, y: (row[`${p}_${metric.field}`] as number | null) ?? null, phase: row.phase }));
         return {
           label: together ? `${PLAYER_LABEL[p]}, ${id} (rep. ${byId[id].rep + 1})` : `${id} (rep. ${byId[id].rep + 1})`,
           protocol: p,
-          stalls: shade ? stallSpans(data[id]?.rows ?? [], p) : undefined,
+          ...(() => {
+            if (!shade) return {};
+            const { spans, exact } = stallSpans(data[id], p);
+            return { stalls: spans, stallsExact: exact };
+          })(),
           stallLane: together ? players.indexOf(p) : undefined,
           data: points as any,
           borderColor: color,
           backgroundColor: color,
           borderWidth: 2,
-          pointRadius: 0,
+          // Un segundo con medida entre dos sin ella no forma línea: se pinta como punto para que no desaparezca
+          pointRadius: (ctx: any) => {
+            const i = ctx.dataIndex;
+            const isolated = points[i]?.y !== null && points[i - 1]?.y == null && points[i + 1]?.y == null;
+            return isolated ? 2.5 : 0;
+          },
           pointHoverRadius: 4,
           // Sin medida no se une: un hueco es un segundo sin latencia, no un valor intermedio
           spanGaps: false,
@@ -267,7 +303,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
           <input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} />
           Superponer los protocolos
         </label>
-        <label className="flex items-center gap-1.5 pb-1 text-slate-300" title="Franja vertical del color de la línea en cada segundo con tiempo parado, más opaca cuanto más del segundo estuvo parado (con los protocolos superpuestos, un carril por protocolo en lo alto de la gráfica). Resolución de un segundo">
+        <label className="flex items-center gap-1.5 pb-1 text-slate-300" title="Cada parón como una franja vertical del color de su línea, de su inicio a su fin exactos (con los protocolos superpuestos, un carril por protocolo en lo alto de la gráfica). En pruebas medidas antes del 28-10-2026 no hay intervalos: se sombrea cada segundo con tiempo parado, más opaco cuanto más del segundo estuvo parado">
           <input type="checkbox" checked={shade} onChange={(e) => setShade(e.target.checked)} />
           Sombrear los parones
         </label>
