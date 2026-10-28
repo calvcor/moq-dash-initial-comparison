@@ -25,6 +25,9 @@ const METRICS: Record<string, { label: string; unit: string; field: string; only
   height: { label: 'Altura reproducida', unit: 'p', field: 'height' },
   stall: { label: 'Tiempo parado acumulado', unit: 'ms', field: 'stall_ms' },
   frametime: { label: 'Tiempo en pantalla p95', unit: 'ms', field: 'frametime_p95_ms' },
+  // Según el timecode, en las tres ramas: ms de la fuente por ms reales y ms de la fuente que no se pintaron
+  content: { label: 'Avance del contenido', unit: '×', field: 'content_speed' },
+  skipped: { label: 'Contenido no reproducido en cada segundo', unit: 'ms', field: 'content_skipped_ms' },
   // Media de cada segundo; solo DASH cambia la velocidad del vídeo
   rate: { label: 'Velocidad de reproducción', unit: '×', field: 'playback_rate', only: 'dash' },
 };

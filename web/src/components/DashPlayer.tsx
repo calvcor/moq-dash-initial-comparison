@@ -341,6 +341,8 @@ export const DashPlayer: React.FC<DashPlayerProps> = ({
           frameTimes: glass.frameTimes,
           stalls: glass.stalls,
           stallMs: glass.stallMs,
+          contentSpeed: glass.contentSpeed,
+          contentSkippedMs: glass.contentSkippedMs,
           restarts: restartsRef.current,
           renditionHeight: height,
           renditionKbps: representation ? Math.round(representation.bandwidth / 1000) : null,

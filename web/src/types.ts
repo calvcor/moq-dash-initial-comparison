@@ -122,6 +122,10 @@ export interface PlayerMetrics {
   playbackRate?: number | null; // solo DASH: velocidad que dash.js pone al <video> ahora mismo (1 = normal)
   stalls: number;
   stallMs: number;
+  // Avance del contenido según el timecode: ms de la fuente por ms reales (últimos 2 s) y ms de la fuente que no
+  // llegaron a pintarse desde que arrancó el medidor
+  contentSpeed: number | null;
+  contentSkippedMs: number;
   restarts: number; // veces que la vigilancia ha tenido que recrear el reproductor
   targetLatencyMs: number | null; // latencia objetivo fijada en el slider del reproductor
   // Adaptación de calidad
@@ -212,6 +216,8 @@ export interface SampleRow {
   dash_playback_fast_ms: number | null;
   dash_stalls: number;
   dash_stall_ms: number;
+  dash_content_speed: number | null; // ms de la fuente por ms reales desde la fila anterior (1 = tiempo real)
+  dash_content_skipped_ms: number | null; // ms de la fuente que no se pintaron desde la fila anterior
   dash_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor
   dash_stall_open_since_ms: number | null; // inicio del parón en curso, si lo hay
   dash_player_restarts: number;
@@ -235,6 +241,8 @@ export interface SampleRow {
   moq_jitter_buffer_s: number | null; // tiempo medio retenido en el reproductor, como rtc_jitter_buffer_s
   moq_stalls: number;
   moq_stall_ms: number;
+  moq_content_speed: number | null; // ms de la fuente por ms reales desde la fila anterior (1 = tiempo real)
+  moq_content_skipped_ms: number | null; // ms de la fuente que no se pintaron desde la fila anterior
   moq_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor
   moq_stall_open_since_ms: number | null; // inicio del parón en curso, si lo hay
   moq_player_restarts: number;
@@ -269,6 +277,8 @@ export interface SampleRow {
   rtc_jitter_buffer_s: number | null;
   rtc_stalls: number;
   rtc_stall_ms: number;
+  rtc_content_speed: number | null; // ms de la fuente por ms reales desde la fila anterior (1 = tiempo real)
+  rtc_content_skipped_ms: number | null; // ms de la fuente que no se pintaron desde la fila anterior
   rtc_stall_spans: string | null; // parones exactos desde la fila anterior: "inicio-fin;..." en ms del reloj del servidor
   rtc_stall_open_since_ms: number | null; // inicio del parón en curso, si lo hay
   rtc_player_restarts: number;

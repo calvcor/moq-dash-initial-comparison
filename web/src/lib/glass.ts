@@ -35,6 +35,11 @@ const FPS_WINDOW_MS = 2000;
 // parones de DASH con pérdidas (README, 4.8).
 const STALL_MS = 150; // ~9 frames a 60 fps sin imagen nueva
 const SAMPLER_GAP_MS = 250; // el propio muestreo se detuvo (pestaña oculta, hilo bloqueado)
+// Avance del contenido: un salto del timecode mayor que esto, o hacia atrás, es una discontinuidad (reproductor
+// recreado, emisión reiniciada) y no cuenta ni como contenido visto ni como saltado
+const CONTENT_JUMP_MS = 10000;
+// Duración de un frame de la fuente, estimada con los avances normales del timecode de los últimos frames
+const FRAME_PERIOD_SAMPLES = 120;
 
 // Vigilancia de los reproductores: sin imagen nueva durante WATCHDOG_MS se recrea el reproductor,
 // dejando WATCHDOG_GRACE_MS desde cada arranque para conectar y llenar el búfer.
@@ -70,6 +75,16 @@ export interface GlassSnapshot {
   frameTimeP95Ms: number | null;
   frameTimeMaxMs: number | null;
   frameTimes: FrameTime[]; // los de los últimos 2 s, para la gráfica
+  // Avance del contenido: ms del timecode por ms reales en los últimos 2 s (1 = tiempo real), y ms del contenido
+  // que no llegaron a pintarse desde que se creó el medidor
+  contentSpeed: number | null;
+  contentSkippedMs: number;
+}
+
+/** Avance del contenido desde la recogida anterior (una fila de cada segundo; lib/samples.ts). */
+export interface ContentWindow {
+  speed: number | null; // ms del timecode por ms reales
+  skippedMs: number; // ms del contenido de la fuente que no se pintaron
 }
 
 export class GlassMeter {
@@ -92,6 +107,14 @@ export class GlassMeter {
   #frameTimes: FrameTime[] = [];
   #log: ViewLog | null = null;
   #changeValid = false; // #lastChange es el pintado de un frame, no el reinicio tras un parón del muestreo
+  // Avance del contenido: [hora de pintado, ms de timecode avanzados] de los últimos 2 s, avances normales (un
+  // frame) para estimar la duración de un frame, y lo acumulado para la fila de cada segundo y el panel
+  #advances: { t: number; ms: number }[] = [];
+  #steps: number[] = [];
+  #skippedMs = 0;
+  #windowContentMs = 0;
+  #windowSkippedMs = 0;
+  #windowStart = performance.now();
 
   constructor(grab: FrameGrabber, getLayouts: () => TimecodeLayout[] = () => [DEFAULT_TIMECODE]) {
     this.#grab = grab;
@@ -129,6 +152,52 @@ export class GlassMeter {
     return { spans, openSinceMs: this.#inStall ? serverNowMs(this.#lastChange) : null };
   }
 
+  /**
+   * Avance del contenido desde la llamada anterior: cuánto avanzó el timecode por cada ms real y cuánto contenido
+   * no se pintó. Lo recoge la fila de cada segundo, la única que llama; recogerlo abre la ventana siguiente.
+   */
+  takeContent(): ContentWindow {
+    const now = performance.now();
+    const elapsed = now - this.#windowStart;
+    const out = {
+      speed: elapsed > 0 && this.#changeValid ? Math.round((this.#windowContentMs / elapsed) * 1000) / 1000 : null,
+      skippedMs: Math.round(this.#windowSkippedMs),
+    };
+    this.#windowContentMs = this.#windowSkippedMs = 0;
+    this.#windowStart = now;
+    return out;
+  }
+
+  /** Duración de un frame de la fuente: media de los avances que rondan la mediana (los de un frame). */
+  #framePeriod(): number | null {
+    if (this.#steps.length < 10) return null;
+    const sorted = [...this.#steps].sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1];
+    const normal = sorted.filter((v) => v > median * 0.5 && v < median * 1.5);
+    return normal.reduce((a, b) => a + b, 0) / normal.length;
+  }
+
+  /**
+   * Un frame nuevo con el timecode avanzado content ms y pintado dt ms después del anterior. Salto es lo que el
+   * contenido avanzó de más respecto a los refrescos que pasaron: si el propio medidor no llegó a leer un frame
+   * (su lectura es asíncrona), avanzan dos frames en dos refrescos y no es salto; si el reproductor retiene uno,
+   * avanza uno en dos refrescos y tampoco. Tras un parón no se descuenta el tiempo transcurrido: lo que avanzó
+   * el contenido mientras la imagen estaba congelada no se pintó (salto al directo); si reanuda donde se quedó,
+   * avanza un frame y no hay salto.
+   */
+  #advance(t: number, content: number, dt: number) {
+    this.#advances.push({ t, ms: content });
+    this.#windowContentMs += content;
+    const period = this.#framePeriod();
+    this.#steps.push(content);
+    if (this.#steps.length > FRAME_PERIOD_SAMPLES) this.#steps.shift();
+    if (period === null) return;
+    const shown = dt < STALL_MS ? Math.max(1, Math.round(dt / period)) : 1;
+    const skipped = Math.max(0, Math.round(content / period) - shown) * period;
+    this.#skippedMs += skipped;
+    this.#windowSkippedMs += skipped;
+  }
+
   /** Cierra el parón en curso en el instante end (performance.now): empezó con el último frame nuevo. */
   #endSpan(end: number) {
     const from = serverNowMs(this.#lastChange);
@@ -156,10 +225,10 @@ export class GlassMeter {
   snapshot(): GlassSnapshot {
     // El parón en curso cuenta ya: si no, uno abierto al acabar la medida se perdería entero
     const open = this.#inStall ? this.#lastTick - this.#lastChange : 0;
-    const counters = { stalls: this.#stalls, stallMs: Math.round(this.#stallMs + open) };
+    const counters = { stalls: this.#stalls, stallMs: Math.round(this.#stallMs + open), contentSkippedMs: Math.round(this.#skippedMs) };
     // Con el muestreo parado (pestaña oculta) no hay medida actual
     if (performance.now() - this.#lastTick > SAMPLER_GAP_MS) {
-      return { latencyMs: null, fps: null, frameTimeSdMs: null, frameTimeP95Ms: null, frameTimeMaxMs: null, frameTimes: [], ...counters };
+      return { latencyMs: null, fps: null, frameTimeSdMs: null, frameTimeP95Ms: null, frameTimeMaxMs: null, frameTimes: [], contentSpeed: null, ...counters };
     }
 
     // Las ventanas se anclan al último frame muestreado, no al instante de la consulta: las muestras
@@ -167,6 +236,7 @@ export class GlassMeter {
     const end = this.#lastTick;
     this.#samples = this.#samples.filter((s) => s.t > end - FPS_WINDOW_MS);
     this.#frameTimes = this.#frameTimes.filter((f) => f.t > end - FPS_WINDOW_MS);
+    this.#advances = this.#advances.filter((a) => a.t > end - FPS_WINDOW_MS);
     const times = this.#frameTimes.filter((f) => f.t > end - WINDOW_MS).map((f) => f.dt).sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / times.length;
     const round = (v: number) => Math.round(v * 10) / 10;
@@ -182,6 +252,7 @@ export class GlassMeter {
       frameTimeP95Ms: times.length ? round(times[Math.min(times.length - 1, Math.floor(0.95 * times.length))]) : null,
       frameTimeMaxMs: times.length ? round(times[times.length - 1]) : null,
       frameTimes: [...this.#frameTimes],
+      contentSpeed: this.#advances.length ? Math.round((this.#advances.reduce((a, b) => a + b.ms, 0) / FPS_WINDOW_MS) * 100) / 100 : null,
       ...counters,
     };
   }
@@ -241,6 +312,12 @@ export class GlassMeter {
     // cuentan como congelados, y uno solo dispararía la desviación típica y el máximo
     const dt = t - this.#lastChange;
     if (this.#changeValid && dt < STALL_MS) this.#frameTimes.push({ t, dt });
+    // Cuánto avanzó el contenido (el timecode da la vuelta cada 2^bits ms)
+    if (this.#changeValid && this.#lastCode !== null) {
+      const span = 2 ** DEFAULT_TIMECODE.bits;
+      const content = (((code - this.#lastCode) % span) + span) % span;
+      if (content > 0 && content < CONTENT_JUMP_MS) this.#advance(t, content, dt);
+    }
     if (this.#log) {
       const painted = serverNowMs(t);
       if (painted === null) this.#log.missingClock++;

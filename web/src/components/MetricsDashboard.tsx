@@ -221,6 +221,11 @@ const Telemetry: React.FC<{
         />
       )}
       <Stat label="Congelados" value={`${metrics.stalls} (${metrics.stallMs} ms)`} />
+      <Stat
+        label="Contenido · no reproducido"
+        value={`${metrics.contentSpeed === null ? '--' : `${metrics.contentSpeed.toFixed(2)}×`} · ${(metrics.contentSkippedMs / 1000).toFixed(1)} s`}
+        hint="Según el timecode de cada frame pintado. Primero, cuánto avanza el contenido por cada segundo real en los últimos 2 s (1× = tiempo real; más, el reproductor recupera latencia saltando frames o acelerando; menos, se retrasa). Después, cuánto contenido de la fuente no llegó a pintarse desde que arrancó el reproductor: frames saltados y lo que avanzó durante un parón tras el que se salta al directo. Un reproductor que reanuda donde se quedó no salta nada."
+      />
     </div>
     <p className="mt-3 text-[11px] font-mono text-slate-400">
       {stats

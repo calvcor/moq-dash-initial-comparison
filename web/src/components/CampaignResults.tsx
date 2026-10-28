@@ -46,6 +46,8 @@ const METRICS: Record<string, Metric> = {
   switches: { label: 'Cambios de calidad', unit: '', get: (s) => s.quality_switches },
   frametime: { label: 'Tiempo en pantalla p95 (mediana)', unit: 'ms', get: (s) => s.frametime_p95_ms_median },
   startup: { label: 'Del montaje a la primera latencia', unit: 's', get: (s) => s.first_g2g_s },
+  skipped: { label: 'Contenido no reproducido', unit: '%', get: (s) => (s.content_skipped_share == null ? null : s.content_skipped_share * 100) },
+  content: { label: 'Avance del contenido medio', unit: '×', get: (s) => s.content_speed_mean },
   // Solo DASH: las demás ramas no cambian la velocidad del vídeo
   rate: { label: 'Velocidad de reproducción media (DASH)', unit: '×', get: (s) => s.playback_rate_mean },
   slow: { label: 'Tiempo frenando, por debajo de 1× (DASH)', unit: '%', get: (s) => (s.playback_slow_share == null ? null : s.playback_slow_share * 100) },

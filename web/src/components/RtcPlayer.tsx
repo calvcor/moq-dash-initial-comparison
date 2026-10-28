@@ -206,6 +206,8 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
           bufferLengthSec: bufferSec === null ? null : Number(bufferSec.toFixed(3)),
           stalls: glass.stalls,
           stallMs: glass.stallMs,
+          contentSpeed: glass.contentSpeed,
+          contentSkippedMs: glass.contentSkippedMs,
           restarts: restartsRef.current,
           renditionHeight: inbound.frameHeight ?? null,
           renditionKbps: null,

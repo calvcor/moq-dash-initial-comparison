@@ -352,6 +352,8 @@ export const MoqPlayer: React.FC<MoqPlayerProps> = ({
               bufferLengthSec: held === null ? null : Number(held.toFixed(3)),
               stalls: glass.stalls,
               stallMs: glass.stallMs,
+              contentSpeed: glass.contentSpeed,
+              contentSkippedMs: glass.contentSkippedMs,
               restarts: restartsRef.current,
               // Altura del frame que de verdad se está pintando y, aparte, la rendition seleccionada: la
               // librería cambia sin corte y mientras dura el cambio (que puede no completarse) no coinciden
