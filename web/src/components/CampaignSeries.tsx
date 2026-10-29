@@ -165,6 +165,8 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const [single, setSingle] = useState<string | null>(null);
   const [metricKeys, setMetricKeys] = useState<string[]>(['g2g', 'kbps', 'buffer', 'content']);
   const [hiddenPlayers, setHiddenPlayers] = useState<PlayerId[]>([]);
+  // En la vista de métricas: los protocolos en la misma franja o cada uno en su columna
+  const [stripOverlay, setStripOverlay] = useState(true);
   const hoverX = useRef<number | null>(null);
   const charts = useRef<Record<string, ChartJS<'line'> | null>>({});
   const [overlay, setOverlay] = useState(false);
@@ -312,7 +314,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     chosen
       .filter((id) => byId[id].players.includes(p))
       .map((id) => {
-        const color = together ? PLAYER_COLOR[p] : RUN_COLORS[selected.indexOf(id) % RUN_COLORS.length];
+        const color = together || view === 'metrics' ? PLAYER_COLOR[p] : RUN_COLORS[selected.indexOf(id) % RUN_COLORS.length];
         // Los segundos sin valor se quedan como y: null, para que la línea se corte ahí (spanGaps: false)
         const points = ((metric.source === 'ip' ? data[id]?.ip : data[id]?.rows) ?? []).map((row) => ({ x: row.t_s, y: (row[`${p}_${metric.field}`] as number | null) ?? null, phase: row.phase }));
         return {
@@ -369,7 +371,8 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
       }
     }
   };
-  const stripOptions = (m: Metric): ChartOptions<'line'> => {
+  // range: en columnas, la misma escala para los tres protocolos de una métrica, para poder compararlos
+  const stripOptions = (m: Metric, lanes: boolean, range?: { min?: number; max?: number }): ChartOptions<'line'> => {
     const base = optionsFor(m);
     return {
       ...base,
@@ -383,7 +386,8 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
         y: {
           ...(base.scales!.y as any),
           title: { display: true, text: m.unit, color: TICK },
-          grace: shade ? '12%' : 0,
+          grace: shade && lanes ? '12%' : 0,
+          ...(range ? { suggestedMin: range.min, suggestedMax: range.max } : {}),
           // Mismo ancho en todas: si no, el área de dibujo empieza donde acaben las etiquetas y el eje x se desalinea
           afterFit: (axis: { width: number }) => {
             axis.width = 72;
@@ -398,6 +402,15 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const togglePlayer = (p: PlayerId) => setHiddenPlayers((all) => (all.includes(p) ? all.filter((x) => x !== p) : [...all, p]));
   const singleRun = singleId ? byId[singleId] : undefined;
   const notes = Object.entries(METRICS).filter(([k, m]) => metricKeys.includes(k) && m.note);
+  const shown = (m: Metric) => players.filter((p) => (!m.only || m.only === p) && !hiddenPlayers.includes(p));
+  const rangeOf = (m: Metric) => {
+    const ys = chosen.flatMap((id) =>
+      ((m.source === 'ip' ? data[id]?.ip : data[id]?.rows) ?? []).flatMap((row) =>
+        shown(m).map((p) => row[`${p}_${m.field}`]).filter((y): y is number => typeof y === 'number'),
+      ),
+    );
+    return ys.length ? { min: m.unit === '×' ? Math.min(...ys) : 0, max: Math.max(...ys) } : undefined;
+  };
 
   if (!runs.length) return null;
 
@@ -440,6 +453,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
             </label>
           </>
         ) : (
+          <>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-slate-400">Prueba</span>
             <select className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono" value={singleId ?? ''} onChange={(e) => setSingle(e.target.value)}>
@@ -452,6 +466,11 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
                 ))}
             </select>
           </label>
+          <label className="flex items-center gap-1.5 pb-1 text-slate-300" title="Sin superponer, cada protocolo va en su columna, con la misma escala en las tres para cada métrica">
+            <input type="checkbox" checked={stripOverlay} onChange={(e) => setStripOverlay(e.target.checked)} />
+            Superponer los protocolos
+          </label>
+          </>
         )}
         <label className="flex items-center gap-1.5 pb-1 text-slate-300" title="Cada parón como una franja vertical del color de su línea, de su inicio a su fin exactos (con los protocolos superpuestos, un carril por protocolo en lo alto de la gráfica). En pruebas medidas antes del 28-10-2026 no hay intervalos: se sombrea cada segundo con tiempo parado, más opaco cuanto más del segundo estuvo parado">
           <input type="checkbox" checked={shade} onChange={(e) => setShade(e.target.checked)} />
@@ -507,7 +526,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
                 {PLAYER_LABEL[p]}
               </button>
             ))}
-            {shade && players.length > 1 && <span className="text-slate-500 text-[11px]">arriba de cada franja, un carril de parones por protocolo, en este orden</span>}
+            {shade && stripOverlay && players.length > 1 && <span className="text-slate-500 text-[11px]">arriba de cada franja, un carril de parones por protocolo, en este orden</span>}
           </div>
           {!metricKeys.length && <p className="text-slate-500">Elige al menos una métrica.</p>}
           {Object.entries(METRICS)
@@ -515,16 +534,43 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
             .map(([k, m]) => (
               <div key={k}>
                 <div className="text-[11px] text-slate-400">{m.label}</div>
-                <div className="h-44">
-                  <Line
-                    ref={(chart) => {
-                      charts.current[k] = chart ?? null;
-                    }}
-                    data={{ datasets: players.filter((p) => (!m.only || m.only === p) && !hiddenPlayers.includes(p)).flatMap((p) => datasetsFor(p, true, m)) }}
-                    options={stripOptions(m)}
-                    plugins={[shadeStalls, crosshairPlugin]}
-                  />
-                </div>
+                {stripOverlay ? (
+                  <div className="h-44">
+                    <Line
+                      ref={(chart) => {
+                        charts.current[k] = chart ?? null;
+                      }}
+                      data={{ datasets: shown(m).flatMap((p) => datasetsFor(p, true, m)) }}
+                      options={stripOptions(m, true)}
+                      plugins={[shadeStalls, crosshairPlugin]}
+                    />
+                  </div>
+                ) : (
+                  // Una columna por protocolo (las mismas en todas las filas, aunque la métrica no exista en alguno)
+                  <div className={`grid gap-2 ${players.length > 2 ? 'lg:grid-cols-3' : players.length > 1 ? 'lg:grid-cols-2' : ''}`}>
+                    {players.map((p) => (
+                      <div key={p} className={shown(m).includes(p) ? '' : 'hidden lg:block'}>
+                        <div className="text-[10px] mb-0.5" style={{ color: PLAYER_COLOR[p] }}>
+                          {PLAYER_LABEL[p]}
+                        </div>
+                        <div className="h-40">
+                          {shown(m).includes(p) ? (
+                            <Line
+                              ref={(chart) => {
+                                charts.current[`${k}-${p}`] = chart ?? null;
+                              }}
+                              data={{ datasets: datasetsFor(p, false, m) }}
+                              options={stripOptions(m, false, rangeOf(m))}
+                              plugins={[shadeStalls, crosshairPlugin]}
+                            />
+                          ) : (
+                            <div className="h-full flex items-center justify-center text-slate-600 text-[11px]">--</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           <div className="text-center text-[11px] text-slate-400">
