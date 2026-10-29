@@ -37,7 +37,7 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
    codificador que atienda sus peticiones de keyframe, qué reproductor tiene el sonido (MoQ solo baja el
    audio con él), bitrate del catálogo de MoQ (máximo medido) frente al del MPD
    (nominal), sliders de latencia que significan cosas distintas en cada rama, red del cliente, que sin límite de red la
-   estimación de caudal de dash.js sigue al bitrate descargado y no a la red (README, sección 6), y que
+   estimación de caudal de dash.js sigue al bitrate descargado y no a la red (README, sección 6), que leer el MPEG-TS retiene 1 frame en MediaMTX, 2 en el publicador de MoQ y 3 en FFmpeg, y solo en DASH cae en la etapa de entrada (PROTOCOLOS, 6.4), y que
    el jitter de netem desordena los paquetes (castiga casi solo a QUIC: README, sección 5), y con la
    cámara como fuente, que el contenido no se repite y la latencia no incluye el tramo cámara → servidor.
 5. **Distingue medida de deducción** al informar. Si algo sale del código y no de una prueba, dilo.
