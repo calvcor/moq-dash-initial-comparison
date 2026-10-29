@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Chart as ChartJS, LinearScale, PointElement, LineElement, Tooltip, Legend, type ChartDataset, type ChartOptions, type Plugin } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import type { Campaign, CampaignRun, PlayerId } from '../types';
@@ -133,10 +133,22 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const [error, setError] = useState<string | null>(null);
   const metric = METRICS[metricKey];
 
-  // Al cambiar de condición se eligen sus pruebas (sus repeticiones), hasta el máximo de colores
+  // Al cambiar de condición se eligen sus pruebas (sus repeticiones), hasta el máximo de colores. La campaña se
+  // recarga cada pocos segundos con un runs nuevo: se depende de sus ids, no del array, y si cambian (termina una
+  // prueba, otra queda sustituida) se añaden las nuevas sin volver a marcar las que se desmarcaron
+  const ids = runs.filter((r) => conditionOf(r) === condition).map((r) => r.id);
+  const idsKey = ids.join(',');
+  const known = useRef<{ condition: string; ids: string[] } | null>(null);
   useEffect(() => {
-    setSelected(runs.filter((r) => conditionOf(r) === condition).slice(0, MAX_RUNS).map((r) => r.id));
-  }, [condition, runs]);
+    const prev = known.current;
+    known.current = { condition, ids };
+    if (!prev || prev.condition !== condition) return setSelected(ids.slice(0, MAX_RUNS));
+    setSelected((all) => {
+      const kept = all.filter((id) => ids.includes(id));
+      const added = ids.filter((id) => !prev.ids.includes(id) && !kept.includes(id));
+      return [...kept, ...added].slice(0, MAX_RUNS);
+    });
+  }, [condition, idsKey]);
 
   useEffect(() => {
     if (!selected.length) return setData({});
