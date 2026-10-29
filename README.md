@@ -448,6 +448,7 @@ Lo que hay que saber para interpretarlo:
 - **La resolución es la de los puntos de medida, no la de cada caja del esquema.** Dentro de una etapa no se sabe cómo se reparte el tiempo; en MoQ, publicador, relay y red van juntos porque el relay es un binario de terceros.
 - **Incertidumbre:** las etapas con las dos horas en el servidor son exactas al milisegundo; las que cruzan al navegador añaden el error de sincronización de relojes (se muestra) y, en DASH, los 20 ms del sondeo del búfer.
 - **El PTS del frame 0** se obtiene arrancando las compuertas antes que la fuente. Si una medida no cuadra (codificación fuera de 0-1 s) se descarta en vez de mostrarse.
+- **El empaquetado de DASH no baja de unos 50 ms a 60 fps**, ni con fragmentos de 1 frame (medido el 29-10-2026: mediana de 51 ms en el servidor y 50,4 ms en local). Son 3 frames: FFmpeg retiene cada frame 2 frames al leer el MPEG-TS (33,5 ms, medido aislado) y uno más al escribir el fragmento y enviarlo. No influyen el audio ni el intercalado. Es un coste de FFmpeg y del formato intermedio, no del protocolo (PROTOCOLOS, C.4).
 
 Los puntos animados recorren cada carril a velocidad real: tardan en cada etapa lo medido. Las etapas van también al CSV (`dash_stage_*_ms`, `moq_stage_*_ms`).
 
