@@ -22,7 +22,7 @@ const ENCODE: Stage = {
   nodes: ['Fuente + timecode', 'x264', 'MPEG-TS / UDP'],
   includes: 'Escalado, codificación H.264 de esa calidad, multiplexado MPEG-TS junto al resto de calidades y al audio, y envío por UDP interno.',
   from: 'la marca de tiempo que FFmpeg quema en el frame antes de codificarlo',
-  to: 'la llegada del último paquete de ese frame al socket de la compuerta de la rama (hora que marca el kernel)',
+  to: 'la llegada del último paquete de ese frame al socket de tsgate, la compuerta de la rama (hora que marca el kernel)',
   uncertainty: 'server',
 };
 
@@ -39,10 +39,10 @@ const LANES: { id: LaneId; title: string; color: string; bar: string; stages: St
       {
         key: 'package',
         name: 'Empaquetado CMAF',
-        nodes: ['Compuerta', 'FFmpeg dash', 'Origen'],
+        nodes: ['tsgate', 'FFmpeg dash', 'Origen'],
         includes:
           'Espera a que se complete el fragmento CMAF que contiene el frame (hasta la duración de fragmento configurada), más el paso por FFmpeg y la escritura en el origen.',
-        from: 'la llegada del frame al socket de la compuerta',
+        from: 'la llegada del frame al socket de tsgate',
         to: 'el instante en que su fragmento queda completo en el origen',
         uncertainty: 'server',
       },
@@ -77,11 +77,11 @@ const LANES: { id: LaneId; title: string; color: string; bar: string; stages: St
       {
         key: 'ingest',
         name: 'Entrada al publicador',
-        nodes: ['Compuerta'],
+        nodes: ['tsgate'],
         includes:
-          'Tiempo que el frame, ya codificado, espera a que el publicador lo acepte. La compuerta le entrega los datos por una tubería y se bloquea si el publicador no la vacía; si esta etapa crece, el publicador (o lo que tiene detrás) no da abasto.',
-        from: 'la llegada del frame al socket de la compuerta',
-        to: 'el instante en que la compuerta lo lee y lo escribe hacia el publicador',
+          'Tiempo que el frame, ya codificado, espera a que el publicador lo acepte. tsgate le entrega los datos por una tubería y se bloquea si el publicador no la vacía; si esta etapa crece, el publicador (o lo que tiene detrás) no da abasto.',
+        from: 'la llegada del frame al socket de tsgate',
+        to: 'el instante en que tsgate lo lee y lo escribe hacia el publicador',
         uncertainty: 'server',
       },
       {
@@ -115,11 +115,11 @@ const LANES: { id: LaneId; title: string; color: string; bar: string; stages: St
       {
         key: 'ingest',
         name: 'Entrada al empaquetador',
-        nodes: ['Compuerta'],
+        nodes: ['tsgate'],
         includes:
-          'Tiempo que el frame, ya codificado, espera a que el FFmpeg que lo publica por RTSP lo acepte. La compuerta le entrega los datos por una tubería y se bloquea si no la vacía.',
-        from: 'la llegada del frame al socket de la compuerta',
-        to: 'el instante en que la compuerta lo lee y lo escribe hacia FFmpeg',
+          'Tiempo que el frame, ya codificado, espera a que el FFmpeg que lo publica por RTSP lo acepte. tsgate le entrega los datos por una tubería y se bloquea si no la vacía.',
+        from: 'la llegada del frame al socket de tsgate',
+        to: 'el instante en que tsgate lo lee y lo escribe hacia FFmpeg',
         uncertainty: 'server',
       },
       {
@@ -145,13 +145,13 @@ const LANES: { id: LaneId; title: string; color: string; bar: string; stages: St
   },
 ];
 
-// Con la ingesta directa de WebRTC (RTC_INGEST=udp) no hay FFmpeg intermedio: la compuerta envía el MPEG-TS
+// Con la ingesta directa de WebRTC (RTC_INGEST=udp) no hay FFmpeg intermedio: tsgate envía el MPEG-TS
 // por UDP a MediaMTX. Cambian las etapas que lo mencionan.
 const RTC_UDP_STAGES: Record<string, Partial<Stage>> = {
   ingest: {
     includes:
-      'Tiempo que el frame, ya codificado, pasa en la compuerta antes de salir por UDP hacia MediaMTX. Con la ingesta directa no hay nadie que pueda frenarla, así que debería ser casi cero.',
-    to: 'el instante en que la compuerta lo lee y lo envía por UDP a MediaMTX',
+      'Tiempo que el frame, ya codificado, pasa en tsgate antes de salir por UDP hacia MediaMTX. Con la ingesta directa no hay nadie que pueda frenarla, así que debería ser casi cero.',
+    to: 'el instante en que tsgate lo lee y lo envía por UDP a MediaMTX',
   },
   transport: {
     nodes: ['MediaMTX', 'Router (emulación)', 'Red SRTP'],

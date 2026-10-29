@@ -2440,8 +2440,8 @@ Los seis puntos, con el reloj en que se toma cada hora:
 | Punto | Dónde se toma | Reloj |
 | :--- | :--- | :--- |
 | Quemado | Filtro de FFmpeg en la fuente | Servidor |
-| Salida del codificador | Compuerta: llegada al sistema del último paquete del frame | Servidor |
-| Entrega al empaquetador | Compuerta: cuando lo lee y lo escribe hacia el empaquetador | Servidor |
+| Salida del codificador | `tsgate`: llegada al sistema del último paquete del frame | Servidor |
+| Entrega al empaquetador | `tsgate`: cuando lo lee y lo escribe hacia el empaquetador | Servidor |
 | Fragmento completo (DASH) | Origen | Servidor |
 | Llegada al reproductor | Página web | Navegador, convertido |
 | Pintado | Página web | Navegador, convertido |
