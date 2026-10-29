@@ -21,7 +21,15 @@ const MAX_RUNS = RUN_COLORS.length;
 
 // source 'ip': de las lecturas del router que hace el servidor cada segundo, no de las filas del navegador
 // note: aclaración que se muestra con la métrica elegida
-const METRICS: Record<string, { label: string; unit: string; field: string; only?: PlayerId; source?: 'ip'; note?: string }> = {
+interface Metric {
+  label: string;
+  unit: string;
+  field: string;
+  only?: PlayerId;
+  source?: 'ip';
+  note?: string;
+}
+const METRICS: Record<string, Metric> = {
   g2g: { label: 'Glass-to-glass', unit: 'ms', field: 'g2g_ms' },
   kbps: { label: 'Bitrate de vídeo recibido', unit: 'kbit/s', field: 'kbps' },
   ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', field: 'ip_down_kbps', source: 'ip' },
@@ -116,6 +124,27 @@ const shadeStalls: Plugin<'line'> = {
   },
 };
 
+// Cursor común de las franjas de una prueba: una línea vertical en el mismo segundo en todas
+const crosshair = (at: React.MutableRefObject<number | null>): Plugin<'line'> => ({
+  id: 'crosshair',
+  afterDatasetsDraw(chart) {
+    const x = at.current;
+    if (x === null) return;
+    const { ctx, chartArea, scales } = chart;
+    const px = scales.x.getPixelForValue(x);
+    if (px < chartArea.left || px > chartArea.right) return;
+    ctx.save();
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px, chartArea.top);
+    ctx.lineTo(px, chartArea.bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+});
+
 const GRID = '#334155';
 const TICK = '#94a3b8';
 
@@ -131,6 +160,13 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const [condition, setCondition] = useState(conditions[0] ?? '');
   const [selected, setSelected] = useState<string[]>([]);
   const [metricKey, setMetricKey] = useState('g2g');
+  // Vista: comparar pruebas (una métrica, varias pruebas) o varias métricas de una prueba, en franjas alineadas
+  const [view, setView] = useState<'runs' | 'metrics'>('runs');
+  const [single, setSingle] = useState<string | null>(null);
+  const [metricKeys, setMetricKeys] = useState<string[]>(['g2g', 'kbps', 'buffer', 'content']);
+  const [hiddenPlayers, setHiddenPlayers] = useState<PlayerId[]>([]);
+  const hoverX = useRef<number | null>(null);
+  const charts = useRef<Record<string, ChartJS<'line'> | null>>({});
   const [overlay, setOverlay] = useState(false);
   const [shade, setShade] = useState(true);
   const [data, setData] = useState<Record<string, Series>>({});
@@ -154,10 +190,14 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     });
   }, [condition, idsKey]);
 
+  // En la vista de métricas, la prueba elegida (por defecto, la primera marcada de la condición)
+  const singleId = single && runs.some((r) => r.id === single) ? single : (selected[0] ?? runs[0]?.id ?? null);
+  const fetchIds = view === 'metrics' ? (singleId ? [singleId] : []) : selected;
+
   useEffect(() => {
-    if (!selected.length) return setData({});
+    if (!fetchIds.length) return setData({});
     let cancelled = false;
-    fetch(`/api/campaigns/${campaign.id}/series?runs=${selected.join(',')}`)
+    fetch(`/api/campaigns/${campaign.id}/series?runs=${fetchIds.join(',')}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((body) => {
         if (!cancelled) {
@@ -169,22 +209,23 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     return () => {
       cancelled = true;
     };
-  }, [campaign.id, selected.join(',')]);
+  }, [campaign.id, fetchIds.join(',')]);
 
   const toggle = (id: string) =>
     setSelected((all) => (all.includes(id) ? all.filter((x) => x !== id) : all.length < MAX_RUNS ? [...all, id] : all));
 
   const byId = Object.fromEntries(runs.map((r) => [r.id, r]));
-  const chosen = selected.filter((id) => byId[id]);
+  const chosen = fetchIds.filter((id) => byId[id]);
   const aligned = chosen.some((id) => data[id]?.aligned === 'measure') ? 'measure' : 'source';
-  const players = plan.players.filter((p) => (!metric.only || metric.only === p) && chosen.some((id) => byId[id].players.includes(p)));
+  // En la vista de métricas, todos los de la prueba: cada franja quita los que no tengan esa métrica
+  const players = plan.players.filter((p) => (view === 'metrics' || !metric.only || metric.only === p) && chosen.some((id) => byId[id].players.includes(p)));
   // El eje abarca todas las filas de las pruebas elegidas, tengan medida o no: un reproductor con pocos puntos
   // no encoge su gráfica, y todas comparten escala
-  const times = chosen.flatMap((id) => (data[id]?.rows ?? []).map((r) => r.t_s));
+  const times = chosen.flatMap((id) => [...(data[id]?.rows ?? []), ...(data[id]?.ip ?? [])].map((r) => r.t_s));
   const xMin = times.length ? Math.floor(Math.min(...times)) : undefined;
   const xMax = times.length ? Math.ceil(Math.max(...times)) : undefined;
 
-  const options: ChartOptions<'line'> = {
+  const optionsFor = (metric: Metric): ChartOptions<'line'> => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
@@ -223,7 +264,8 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
         },
       },
     },
-  };
+  });
+  const options = optionsFor(metric);
 
   // Superpuestos: una entrada de la leyenda por protocolo, que muestra u oculta todas sus pruebas. Los carriles de
   // los parones ocupan lo alto de la gráfica: el eje y deja ese hueco por encima de las líneas
@@ -266,7 +308,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     },
   };
 
-  const datasetsFor = (p: PlayerId, together = false): ChartDataset<'line'>[] =>
+  const datasetsFor = (p: PlayerId, together = false, metric: Metric = METRICS[metricKey]): ChartDataset<'line'>[] =>
     chosen
       .filter((id) => byId[id].players.includes(p))
       .map((id) => {
@@ -292,6 +334,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
             const isolated = points[i]?.y !== null && points[i - 1]?.y == null && points[i + 1]?.y == null;
             return isolated ? 2.5 : 0;
           },
+          ...(view === 'metrics' ? { label: PLAYER_LABEL[p] } : {}),
           pointHoverRadius: 4,
           // Sin medida no se une: un hueco es un segundo sin latencia, no un valor intermedio
           spanGaps: false,
@@ -299,12 +342,76 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
         };
       });
 
+  // Franjas de una prueba: el puntero en una mueve el cursor y la ventana de valores en todas, en el mismo segundo
+  const syncHover = (source: ChartJS<'line'>, x: number | null) => {
+    hoverX.current = x;
+    for (const chart of Object.values(charts.current)) {
+      if (!chart) continue;
+      if (chart !== source) {
+        const active =
+          x === null
+            ? []
+            : chart.data.datasets.flatMap((d, datasetIndex) => {
+                if (!chart.isDatasetVisible(datasetIndex)) return [];
+                const points = d.data as unknown as { x: number; y: number | null }[];
+                let index = -1;
+                for (let i = 0; i < points.length; i++) {
+                  if (points[i].y === null) continue;
+                  if (index < 0 || Math.abs(points[i].x - x) < Math.abs(points[index].x - x)) index = i;
+                }
+                return index >= 0 && Math.abs(points[index].x - x) <= 1 ? [{ datasetIndex, index }] : [];
+              });
+        chart.setActiveElements(active);
+        chart.tooltip?.setActiveElements(active, { x: chart.scales.x.getPixelForValue(x ?? 0), y: chart.chartArea.top });
+        chart.update('none');
+      } else {
+        source.draw();
+      }
+    }
+  };
+  const stripOptions = (m: Metric): ChartOptions<'line'> => {
+    const base = optionsFor(m);
+    return {
+      ...base,
+      events: ['mousemove', 'mouseout'],
+      onHover: (event, _elements, chart) => {
+        const x = event.type === 'mouseout' || event.x === null ? null : chart.scales.x.getValueForPixel(event.x);
+        syncHover(chart as ChartJS<'line'>, x ?? null);
+      },
+      scales: {
+        x: { ...(base.scales!.x as any), title: { display: false } },
+        y: {
+          ...(base.scales!.y as any),
+          title: { display: true, text: m.unit, color: TICK },
+          grace: shade ? '12%' : 0,
+          // Mismo ancho en todas: si no, el área de dibujo empieza donde acaben las etiquetas y el eje x se desalinea
+          afterFit: (axis: { width: number }) => {
+            axis.width = 72;
+          },
+        },
+      },
+      plugins: { ...base.plugins, legend: { display: false } },
+    };
+  };
+  const crosshairPlugin = useMemo(() => crosshair(hoverX), []);
+  const toggleMetric = (k: string) => setMetricKeys((all) => (all.includes(k) ? all.filter((x) => x !== k) : [...all, k]));
+  const togglePlayer = (p: PlayerId) => setHiddenPlayers((all) => (all.includes(p) ? all.filter((x) => x !== p) : [...all, p]));
+  const singleRun = singleId ? byId[singleId] : undefined;
+  const notes = Object.entries(METRICS).filter(([k, m]) => metricKeys.includes(k) && m.note);
+
   if (!runs.length) return null;
 
   return (
     <div className="space-y-3 pt-2">
       <h4 className="text-xs font-semibold text-slate-200">Segundo a segundo</h4>
       <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-400">Vista</span>
+          <select className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" value={view} onChange={(e) => setView(e.target.value as 'runs' | 'metrics')}>
+            <option value="runs">Comparar pruebas (una métrica)</option>
+            <option value="metrics">Varias métricas de una prueba</option>
+          </select>
+        </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-400">Condición</span>
           <select className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" value={condition} onChange={(e) => setCondition(e.target.value)}>
@@ -315,20 +422,37 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-400">Métrica</span>
-          <select className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" value={metricKey} onChange={(e) => setMetricKey(e.target.value)}>
-            {Object.entries(METRICS).map(([k, m]) => (
-              <option key={k} value={k}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 pb-1 text-slate-300">
-          <input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} />
-          Superponer los protocolos
-        </label>
+        {view === 'runs' ? (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-slate-400">Métrica</span>
+              <select className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" value={metricKey} onChange={(e) => setMetricKey(e.target.value)}>
+                {Object.entries(METRICS).map(([k, m]) => (
+                  <option key={k} value={k}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 pb-1 text-slate-300">
+              <input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)} />
+              Superponer los protocolos
+            </label>
+          </>
+        ) : (
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-400">Prueba</span>
+            <select className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono" value={singleId ?? ''} onChange={(e) => setSingle(e.target.value)}>
+              {runs
+                .filter((r) => conditionOf(r) === condition)
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.id} · rep. {r.rep + 1}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
         <label className="flex items-center gap-1.5 pb-1 text-slate-300" title="Cada parón como una franja vertical del color de su línea, de su inicio a su fin exactos (con los protocolos superpuestos, un carril por protocolo en lo alto de la gráfica). En pruebas medidas antes del 28-10-2026 no hay intervalos: se sombrea cada segundo con tiempo parado, más opaco cuanto más del segundo estuvo parado">
           <input type="checkbox" checked={shade} onChange={(e) => setShade(e.target.checked)} />
           Sombrear los parones
@@ -337,10 +461,23 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
           {plan.content === 'restart'
             ? 'Contenido reiniciado en cada prueba: el mismo segundo del eje es el mismo tramo del vídeo en todas.'
             : 'Contenido continuo: cada prueba ve un tramo distinto del bucle; el eje solo alinea el inicio de la medida.'}{' '}
-          Discontinuo: calentamiento. Hasta {MAX_RUNS} pruebas.{metric.note && ` ${metric.label}: ${metric.note}`}
+          Discontinuo: calentamiento.{' '}
+          {view === 'runs'
+            ? `Hasta ${MAX_RUNS} pruebas.${metric.note ? ` ${metric.label}: ${metric.note}` : ''}`
+            : `Una franja por métrica, con el mismo eje de tiempo: el puntero marca el mismo segundo en todas.${notes.map(([, m]) => ` ${m.label}: ${m.note}`).join('')}`}
         </span>
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {view === 'metrics' && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {Object.entries(METRICS).map(([k, m]) => (
+            <label key={k} className="flex items-center gap-1 text-slate-300">
+              <input type="checkbox" checked={metricKeys.includes(k)} onChange={() => toggleMetric(k)} />
+              {m.label}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className={`flex flex-wrap gap-x-3 gap-y-1 ${view === 'metrics' ? 'hidden' : ''}`}>
         {runs
           .filter((r) => conditionOf(r) === condition || selected.includes(r.id))
           .map((r) => (
@@ -352,7 +489,49 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
           ))}
       </div>
       {error && <p className="text-rose-400">No se pudieron leer las series: {error}</p>}
-      {overlay ? (
+      {view === 'metrics' ? (
+        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3 space-y-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1">
+            <h4 className="text-xs font-medium text-slate-300">
+              <span className="font-mono">{singleId}</span>
+              {singleRun && <span className="text-slate-500 font-normal"> · {conditionLabel(conditionOf(singleRun))} · rep. {singleRun.rep + 1}</span>}
+            </h4>
+            {/* Leyenda común: muestra u oculta un protocolo en todas las franjas */}
+            {players.map((p) => (
+              <button
+                key={p}
+                className={`flex items-center gap-1.5 text-[11px] ${hiddenPlayers.includes(p) ? 'text-slate-600 line-through' : 'text-slate-300'}`}
+                onClick={() => togglePlayer(p)}
+              >
+                <span className="inline-block w-3 h-0.5" style={{ backgroundColor: PLAYER_COLOR[p] }} />
+                {PLAYER_LABEL[p]}
+              </button>
+            ))}
+            {shade && players.length > 1 && <span className="text-slate-500 text-[11px]">arriba de cada franja, un carril de parones por protocolo, en este orden</span>}
+          </div>
+          {!metricKeys.length && <p className="text-slate-500">Elige al menos una métrica.</p>}
+          {Object.entries(METRICS)
+            .filter(([k]) => metricKeys.includes(k))
+            .map(([k, m]) => (
+              <div key={k}>
+                <div className="text-[11px] text-slate-400">{m.label}</div>
+                <div className="h-44">
+                  <Line
+                    ref={(chart) => {
+                      charts.current[k] = chart ?? null;
+                    }}
+                    data={{ datasets: players.filter((p) => (!m.only || m.only === p) && !hiddenPlayers.includes(p)).flatMap((p) => datasetsFor(p, true, m)) }}
+                    options={stripOptions(m)}
+                    plugins={[shadeStalls, crosshairPlugin]}
+                  />
+                </div>
+              </div>
+            ))}
+          <div className="text-center text-[11px] text-slate-400">
+            {aligned === 'source' ? 'Segundo del vídeo (desde que arranca la fuente)' : 'Segundos desde el inicio de la medida'}
+          </div>
+        </div>
+      ) : overlay ? (
         <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
           <h4 className="text-xs font-medium text-slate-300 mb-2">{players.map((p) => PLAYER_LABEL[p]).join(', ')}: una línea por prueba, con el color del protocolo{shade && players.length > 1 && <span className="text-slate-500 font-normal"> · arriba, un carril de parones por protocolo, en el orden de la leyenda</span>}</h4>
           <div className="h-[28rem]">
