@@ -154,9 +154,17 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const conditionLabel = (key: string) => {
     if (key === 'control') return 'Pruebas de control';
     const [n, t] = key.split(':').map(Number);
-    return `${plan.networks[n].label} · objetivo ${plan.targets[t].label}`;
+    return `objetivo ${plan.targets[t].label} · ${plan.networks[n].label}`;
   };
-  const conditions = useMemo(() => [...new Set(runs.map(conditionOf))], [runs]);
+  // Por objetivo y, dentro de cada uno, por red, en el orden del plan; las de control al final
+  const conditions = useMemo(() => {
+    const rank = (key: string) => {
+      if (key === 'control') return Infinity;
+      const [n, t] = key.split(':').map(Number);
+      return t * plan.networks.length + n;
+    };
+    return [...new Set(runs.map(conditionOf))].sort((a, b) => rank(a) - rank(b));
+  }, [runs]);
   const [condition, setCondition] = useState(conditions[0] ?? '');
   const [selected, setSelected] = useState<string[]>([]);
   const [metricKey, setMetricKey] = useState('g2g');
