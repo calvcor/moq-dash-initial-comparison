@@ -20,12 +20,16 @@ const RUN_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008
 const MAX_RUNS = RUN_COLORS.length;
 
 // source 'ip': de las lecturas del router que hace el servidor cada segundo, no de las filas del navegador
-const METRICS: Record<string, { label: string; unit: string; field: string; only?: PlayerId; source?: 'ip' }> = {
+// note: aclaración que se muestra con la métrica elegida
+const METRICS: Record<string, { label: string; unit: string; field: string; only?: PlayerId; source?: 'ip'; note?: string }> = {
   g2g: { label: 'Glass-to-glass', unit: 'ms', field: 'g2g_ms' },
   kbps: { label: 'Bitrate de vídeo recibido', unit: 'kbit/s', field: 'kbps' },
   ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', field: 'ip_down_kbps', source: 'ip' },
   ip_up: { label: 'Tráfico IP de subida en el router', unit: 'kbit/s', field: 'ip_up_kbps', source: 'ip' },
   height: { label: 'Altura reproducida', unit: 'p', field: 'height' },
+  // DASH: vídeo descargado por delante en el instante de la fila; MoQ y WebRTC: espera media de los frames
+  // entregados desde la fila anterior
+  buffer: { label: 'Búfer', unit: 'ms', field: 'buffer_ms', note: 'No es la misma magnitud: en DASH, el vídeo descargado por delante del punto de reproducción; en MoQ y WebRTC, lo que espera de media cada frame en el reproductor (vacío si no sale ninguno, como en un parón).' },
   stall: { label: 'Tiempo parado acumulado', unit: 'ms', field: 'stall_ms' },
   frametime: { label: 'Tiempo en pantalla p95', unit: 'ms', field: 'frametime_p95_ms' },
   // Según el timecode, en las tres ramas: ms de la fuente por ms reales y ms de la fuente que no se pintaron
@@ -333,7 +337,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
           {plan.content === 'restart'
             ? 'Contenido reiniciado en cada prueba: el mismo segundo del eje es el mismo tramo del vídeo en todas.'
             : 'Contenido continuo: cada prueba ve un tramo distinto del bucle; el eje solo alinea el inicio de la medida.'}{' '}
-          Discontinuo: calentamiento. Hasta {MAX_RUNS} pruebas.
+          Discontinuo: calentamiento. Hasta {MAX_RUNS} pruebas.{metric.note && ` ${metric.label}: ${metric.note}`}
         </span>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1">

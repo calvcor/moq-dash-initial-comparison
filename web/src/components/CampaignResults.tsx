@@ -34,6 +34,7 @@ interface Metric {
   unit: string;
   get: (s: Record<string, number | null>) => number | null;
   latency?: boolean; // se compara con la latencia objetivo
+  note?: string; // aclaración que se muestra con la métrica elegida
 }
 
 const METRICS: Record<string, Metric> = {
@@ -46,6 +47,13 @@ const METRICS: Record<string, Metric> = {
   ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', get: (s) => s.ip_down_kbps },
   ip_up: { label: 'Tráfico IP de subida en el router', unit: 'kbit/s', get: (s) => s.ip_up_kbps },
   height: { label: 'Altura media reproducida', unit: 'p', get: (s) => s.height_mean },
+  // No es la misma magnitud en las tres ramas (README, tabla de métricas)
+  buffer: {
+    label: 'Búfer medio',
+    unit: 'ms',
+    get: (s) => (s.buffer_s_mean == null ? null : s.buffer_s_mean * 1000),
+    note: 'No es la misma magnitud: en DASH, el vídeo descargado por delante del punto de reproducción; en MoQ y WebRTC, lo que espera de media cada frame en el reproductor (vacío si no sale ninguno, como en un parón).',
+  },
   switches: { label: 'Cambios de calidad', unit: '', get: (s) => s.quality_switches },
   frametime: { label: 'Tiempo en pantalla p95 (mediana)', unit: 'ms', get: (s) => s.frametime_p95_ms_median },
   startup: { label: 'Del montaje a la primera latencia', unit: 's', get: (s) => s.first_g2g_s },
@@ -243,6 +251,7 @@ export const CampaignResults: React.FC<{ campaign: Campaign; onSelectRun?: (id: 
         <span className="text-slate-500 pb-1">
           Línea: mediana de las repeticiones; puntos: cada prueba válida ({tests.length} de prueba, {controls.length} de control).
           {onSelectRun && ' Pulsa un punto para ir a su prueba.'}
+          {metric.note && ` ${metric.label}: ${metric.note}`}
         </span>
       </div>
 

@@ -958,6 +958,9 @@ class Campaigns:
                     for p in run["players"]:
                         for field in self.SERIES_FIELDS:
                             point[f"{p}_{field}"] = row.get(f"{p}_{field}")
+                        # El búfer va en una columna distinta en cada reproductor (BUFFER_COLUMN): aquí, en ms
+                        buffer = row.get(BUFFER_COLUMN[p])
+                        point[f"{p}_buffer_ms"] = round(buffer * 1000) if isinstance(buffer, (int, float)) else None
                     out[run["id"]]["rows"].append(point)
         except OSError:
             pass
