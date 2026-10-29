@@ -349,7 +349,8 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     hoverX.current = x;
     for (const chart of Object.values(charts.current)) {
       if (!chart) continue;
-      if (chart !== source) {
+      // Al salir, también la propia: si el puntero sale del área de dibujo por un eje, Chart.js la deja activa
+      if (chart !== source || x === null) {
         const active =
           x === null
             ? []
@@ -377,10 +378,6 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     return {
       ...base,
       events: ['mousemove', 'mouseout'],
-      onHover: (event, _elements, chart) => {
-        const x = event.type === 'mouseout' || event.x === null ? null : chart.scales.x.getValueForPixel(event.x);
-        syncHover(chart as ChartJS<'line'>, x ?? null);
-      },
       scales: {
         x: { ...(base.scales!.x as any), title: { display: false } },
         y: {
@@ -398,6 +395,22 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
     };
   };
   const crosshairPlugin = useMemo(() => crosshair(hoverX), []);
+  // onHover solo llega con el puntero dentro del área de dibujo: este plugin ve también la salida del lienzo o
+  // el paso a los ejes, y entonces quita el cursor de todas las franjas
+  const syncRef = useRef(syncHover);
+  syncRef.current = syncHover;
+  const hoverPlugin = useMemo<Plugin<'line'>>(
+    () => ({
+      id: 'hoverSync',
+      afterEvent(chart, args) {
+        const e = args.event;
+        const x = e.type === 'mouseout' || !args.inChartArea || e.x === null ? null : (chart.scales.x.getValueForPixel(e.x) ?? null);
+        if (x === null && hoverX.current === null) return;
+        syncRef.current(chart, x);
+      },
+    }),
+    [],
+  );
   const toggleMetric = (k: string) => setMetricKeys((all) => (all.includes(k) ? all.filter((x) => x !== k) : [...all, k]));
   const togglePlayer = (p: PlayerId) => setHiddenPlayers((all) => (all.includes(p) ? all.filter((x) => x !== p) : [...all, p]));
   const singleRun = singleId ? byId[singleId] : undefined;
@@ -542,7 +555,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
                       }}
                       data={{ datasets: shown(m).flatMap((p) => datasetsFor(p, true, m)) }}
                       options={stripOptions(m, true)}
-                      plugins={[shadeStalls, crosshairPlugin]}
+                      plugins={[shadeStalls, crosshairPlugin, hoverPlugin]}
                     />
                   </div>
                 ) : (
@@ -561,7 +574,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
                               }}
                               data={{ datasets: datasetsFor(p, false, m) }}
                               options={stripOptions(m, false, rangeOf(m))}
-                              plugins={[shadeStalls, crosshairPlugin]}
+                              plugins={[shadeStalls, crosshairPlugin, hoverPlugin]}
                             />
                           ) : (
                             <div className="h-full flex items-center justify-center text-slate-600 text-[11px]">--</div>
