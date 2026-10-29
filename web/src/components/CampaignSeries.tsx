@@ -201,7 +201,9 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   }, [condition, idsKey]);
 
   // En la vista de métricas, la prueba elegida (por defecto, la primera marcada de la condición)
-  const singleId = single && runs.some((r) => r.id === single) ? single : (selected[0] ?? runs[0]?.id ?? null);
+  // La elegida solo vale si es de la condición actual: si no, al cambiar de condición se seguiría viendo la anterior
+  const inCondition = (id: string | null) => !!id && runs.some((r) => r.id === id && conditionOf(r) === condition);
+  const singleId = inCondition(single) ? single : (selected.find(inCondition) ?? ids[0] ?? null);
   const fetchIds = view === 'metrics' ? (singleId ? [singleId] : []) : selected;
 
   useEffect(() => {
