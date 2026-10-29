@@ -51,7 +51,7 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 | Origen LL-DASH | `server/app/origin.py` | En memoria; recalibra `availabilityStartTime` y reescribe `UTCTiming` al origen de la página |
 | Publicador MoQ | `moq import ts` (moq-cli) en el orquestador | El **publicador**; no confundir con el relay |
 | Relay MoQ | contenedor `moq-relay` | Solo reparte; el catálogo lo escribe el publicador |
-| WebRTC | MediaMTX (WHEP) | Recibe RTSP desde FFmpeg, sin recodificar |
+| WebRTC | MediaMTX (WHEP) | Lee el MPEG-TS por UDP de la compuerta (paths `liveudp`/`liveudpa`), sin recodificar; `RTC_INGEST=rtsp` en el `.env` vuelve al FFmpeg + RTSP anterior (README, 3.4b) |
 | Router | `router/agent.py` | DNAT + tc/netem, una cola por protocolo y sentido |
 | Entrada HTTP | `edge/nginx.conf` | Único puerto HTTP (80) |
 | Dashboard | `web/` (React + Vite) | Reproductores (cada uno se puede apagar; el CSV registra los activos en `players`), medidor, esquema de etapas, CSV |

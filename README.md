@@ -261,12 +261,24 @@ El segmento no puede ser más corto que el GOP; backend y frontend lo validan.
 
 ### 3.4b. Rama WebRTC
 
+Por defecto (`RTC_INGEST=udp`, desde el 29-10-2026), MediaMTX lee el MPEG-TS directamente por UDP, sin FFmpeg intermedio:
+
+```bash
+python3 tsgate.py 5003 rtc --udp 172.30.50.12:5003 --first-video          # sin audio: path liveudp
+python3 tsgate.py 5003 rtc --udp 172.30.50.12:5013 --first-video --audio  # con rtc_audio: path liveudpa
+```
+
+La versión anterior (`RTC_INGEST=rtsp`) remultiplexa con FFmpeg y publica por RTSP:
+
 ```bash
 python3 tsgate.py 5003 rtc | ffmpeg -fflags nobuffer -analyzeduration 1000000 -i pipe:0 \
   -map 0:v:0 -c:v copy -an -f rtsp -rtsp_transport tcp rtsp://mediamtx:8554/live
 ```
 
-- **MediaMTX** recibe por RTSP la calidad más alta, sin recodificar, y la sirve por WebRTC. El navegador negocia por WHEP (`/rtc/live/whep`, a través del punto de entrada) y recibe el vídeo directo por UDP 8189, pasando por el router de emulación.
+
+- **MediaMTX** recibe la calidad más alta, sin recodificar, y la sirve por WebRTC. El navegador negocia por WHEP (`/rtc/<path>/whep`, a través del punto de entrada; el path lo da `/api/status` en `rtc_path`) y recibe el vídeo directo por UDP 8189, pasando por el router de emulación.
+- **Ingesta directa por UDP (por defecto).** MediaMTX escucha MPEG-TS por UDP en dos paths fijados en `docker-compose.yml`: `liveudp` (puerto 5003, solo vídeo) y `liveudpa` (5013, vídeo y audio). MediaMTX no puede elegir pistas, así que la compuerta deja pasar solo el primer vídeo (y el audio con `rtc_audio`) y rehace la PMT para anunciar solo esas pistas; los paquetes pasan sin tocar. Dos paths porque MediaMTX fija las pistas de un path UDP la primera vez que lo lee: al activar el audio en el mismo path, rechazaba la pista nueva. Quita un salto (el FFmpeg y la conexión RTSP): medido el 29-10-2026 en local, una pasada por caso, la etapa "Publicación y transporte" bajó de 34 a 17-19 ms y la latencia de 65 a 43-57 ms sin audio; con audio, 275 ms frente a 304. El pie del reproductor indica el modo ("UDP directo" o "vía RTSP") y el CSV lo registra en `rtc_ingest`.
+- **Volver a la versión anterior:** `RTC_INGEST=rtsp` en el `.env` y `docker compose up -d --no-deps orchestrator` (no hace falta reconstruir nada). El path `live` sigue configurado en MediaMTX y el reproductor cambia solo de path. Comprobado en local el 29-10-2026, con y sin audio.
 - **Una sola calidad y, por defecto, sin audio.** No hay adaptación: esta rama sirve siempre la calidad más alta de la escalera. El audio Opus de la fuente se le añade, sin recodificar, con **Audio en WebRTC** en el panel (`rtc_audio` en `POST /api/config`; `-map 0:a:0 -c:a copy` en vez de `-an`). Viene desactivado porque cambia lo que se mide: el navegador sincroniza las dos pistas y **retrasa el vídeo hasta el búfer de jitter del audio**. Medido el 22-10-2026 en Chrome headless, con `getStats()` de la conexión (`jitterBufferTargetDelay` medio de cada pista) y sin sonido en ningún reproductor:
 
   | Fuente y momento de la conexión | Glass-to-glass WebRTC | Búfer objetivo vídeo | Búfer objetivo audio |
@@ -918,6 +930,7 @@ Desde el panel de control:
 | Calidad (por reproductor) | Auto o una calidad fija | Auto usa la adaptación de cada reproductor; fijar una la desactiva |
 | Reproductores activos | Cualquier combinación de LL-DASH, MoQ y WebRTC, con al menos uno | Un reproductor apagado se desmonta: cierra su conexión y no descarga nada, así que no compite con los demás por la red ni por el navegador. Se recuerda en el navegador; cada cambio abre un tramo de medida nuevo. En el CSV, `players` lista los activos y las métricas de los apagados quedan vacías |
 | Sonido | Ninguno (al abrir), LL-DASH, MoQ o WebRTC: uno a la vez | Quita el silencio a ese reproductor. En DASH y WebRTC el audio ya se descargaba; **en MoQ no**: `@moq/watch` solo se suscribe a la pista de audio con el sonido activado. Efecto medido el 22-10-2026 con la cámara a 15 fps, alternando con "Ninguno" (cinco ventanas de 45-90 s por rama): en WebRTC y DASH, ninguno visible (WebRTC 331-430 ms con sonido frente a 344-451 sin él; DASH varía más que cualquier diferencia, 523-847 frente a 509-852); en MoQ, igual en tres ventanas (85-91 ms frente a 83-89) y más alto en dos (127 y 157 ms). En headless no hay altavoz: el navegador reproduce hacia una salida nula. En el CSV, `audio` |
+| Ingesta de WebRTC | `udp` (por defecto) o `rtsp` | `RTC_INGEST` en el `.env`: MediaMTX lee el MPEG-TS por UDP, o un FFmpeg lo publica por RTSP (versión anterior). No es un control del panel: cambiarlo recrea el orquestador (sección 3.4b). En el CSV, `rtc_ingest` |
 | Audio en WebRTC | Desactivado (por defecto) o activado | El Opus de la fuente, sin recodificar. Sube la latencia de WebRTC hasta el búfer del audio: poco con el bucle, 100-200 ms con la cámara (sección 3.4b). En el CSV, `rtc_audio` |
 | Pantalla completa (por reproductor) | Botón arriba a la derecha del vídeo (aparece al pasar el ratón) o doble clic; Esc para salir | Amplía la zona de vídeo, con sus avisos. Solo escala la imagen: el timecode se lee del frame decodificado y el reproductor de MoQ sigue dibujando aunque su canvas quede tapado (`visible: 'always'`). Los otros reproductores siguen midiendo detrás (comprobado en Chrome headless el 22-10-2026). En el CSV, `fullscreen` dice cuál está a pantalla completa |
 | Segmento DASH | 0,5, 1, 2, 4 s | `-seg_duration`; debe ser ≥ GOP |

@@ -66,6 +66,8 @@ export interface ServerStatus {
     pipeline: boolean;
   };
   dash_url: string;
+  rtc_ingest?: 'udp' | 'rtsp'; // udp: MediaMTX lee el MPEG-TS por UDP; rtsp: con el FFmpeg intermedio
+  rtc_path?: string; // path de MediaMTX para WHEP
   dash_path?: 'direct' | 'proxy'; // direct: el navegador va al servidor de DASH por el router; proxy: a través del punto de entrada
   moq_port?: number;
   moq_host?: string | null; // dirección directa para MoQ; null = el host de la página
@@ -195,6 +197,7 @@ export interface SampleRow {
   fps: number | null; // cadencia de la emisión
   gop_size: number | null;
   ladder: string | null; // escalera codificada, p. ej. 1080p@4000|720p@2000
+  rtc_ingest: string | null; // udp o rtsp: cómo le llega el flujo a MediaMTX
   dash_path: string | null; // direct o proxy: si la conexión del navegador atraviesa la red emulada
   seg_duration: number | null;
   frag_duration: number | null;

@@ -44,7 +44,7 @@ Las tres ramas reciben **exactamente el mismo vídeo codificado**. Hay un único
 ```
                           ┌─ UDP 5001 ─ tsgate ─ ffmpeg (-f dash) ─ PUT ─▶ origen en memoria ─▶ nginx ─▶ router ─▶ navegador (dash.js)
 Fichero ─▶ FFmpeg ────────┼─ UDP 5002 ─ tsgate ─ moq import ts ─ QUIC ───▶ moq-relay ─────────────────▶ router ─▶ navegador (@moq/watch)
-(x264, 1 a 5 calidades)   └─ UDP 5003 ─ tsgate ─ ffmpeg (-f rtsp) ─ RTSP ▶ MediaMTX ──────────────────▶ router ─▶ navegador (RTCPeerConnection)
+(x264, 1 a 5 calidades)   └─ UDP 5003 ─ tsgate ─ UDP (MPEG-TS) ─────────▶ MediaMTX ──────────────────▶ router ─▶ navegador (RTCPeerConnection)
 ```
 
 Hay una cuarta salida, UDP 5004, que no va a ninguna rama: la graba `recorder.py` durante las pruebas de QoE, para calcular después el VMAF con el vídeo tal como salió del codificador (README, sección 4.7).
@@ -829,7 +829,7 @@ En una videollamada, el emisor estima el ancho de banda con la realimentación T
 
 ### 5.7. El recorrido en este testbed
 
-1. **Ingesta.** `ffmpeg -c:v copy -an -f rtsp` publica el vídeo por RTSP (sobre TCP) en MediaMTX. Sin audio por defecto. Con la opción `rtc_audio`, también el audio Opus de la fuente, sin recodificar (`-c:a copy`). Entonces el navegador sincroniza audio y vídeo: el búfer de jitter objetivo del vídeo sube hasta el del audio (comprobado con `getStats()` el 22-10-2026). Con el bucle el audio pide ~40 ms y la latencia sube poco (de 59-71 a 79-120 ms); con la cámara, cuyo audio llega con más jitter, pide 225-315 ms y la latencia sube 100-200 ms (README, sección 3.4b). Una conexión abierta en los primeros segundos de la emisión queda además 45-55 ms por encima toda la sesión; por eso el dashboard espera a que la emisión lleve unos segundos publicada antes de conectar. Hasta ese día la fuente codificaba en AAC, que WebRTC no admite.
+1. **Ingesta.** Desde el 29-10-2026, la compuerta envía el MPEG-TS por UDP directamente a MediaMTX, con solo la calidad más alta (y el audio, con `rtc_audio`) y la PMT reducida a esas pistas; antes, `ffmpeg -c:v copy -an -f rtsp` lo publicaba por RTSP (sobre TCP), y se puede volver a ello con `RTC_INGEST=rtsp` (README, 3.4b). Sin audio por defecto. Con la opción `rtc_audio`, también el audio Opus de la fuente, sin recodificar (`-c:a copy`). Entonces el navegador sincroniza audio y vídeo: el búfer de jitter objetivo del vídeo sube hasta el del audio (comprobado con `getStats()` el 22-10-2026). Con el bucle el audio pide ~40 ms y la latencia sube poco (de 59-71 a 79-120 ms); con la cámara, cuyo audio llega con más jitter, pide 225-315 ms y la latencia sube 100-200 ms (README, sección 3.4b). Una conexión abierta en los primeros segundos de la emisión queda además 45-55 ms por encima toda la sesión; por eso el dashboard espera a que la emisión lleve unos segundos publicada antes de conectar. Hasta ese día la fuente codificaba en AAC, que WebRTC no admite.
 2. **Servidor.** MediaMTX reparte el H.264 en paquetes RTP y los envía a cada navegador conectado.
 3. **Navegador.** `RTCPeerConnection` recibe, reordena, decodifica y pinta en un `<video>`. Todo lo hace el navegador; la aplicación solo lee estadísticas con `getStats()`. Se explica en 5.9.
 
@@ -871,7 +871,7 @@ Recibe los paquetes, los descifra, reconstruye cada frame a partir de sus trozos
 1. **Crea la conexión**, sin servidores STUN ni TURN: `new RTCPeerConnection()`.
 2. **Declara qué quiere recibir**: un único flujo de vídeo, solo de recepción (`addTransceiver('video', { direction: 'recvonly' })`).
 3. **Genera la oferta SDP** y espera a que el navegador reúna sus candidatos ICE, hasta 2 s.
-4. **La envía por WHEP**: un `POST` a `/rtc/live/whep` con la oferta en el cuerpo (`Content-Type: application/sdp`).
+4. **La envía por WHEP**: un `POST` a `/rtc/liveudp/whep` (el path depende de la ingesta: `liveudp`, `liveudpa` con audio, o `live` con la ingesta RTSP) con la oferta en el cuerpo (`Content-Type: application/sdp`).
 5. **Aplica la respuesta SDP** que devuelve MediaMTX.
 6. **Conecta el vídeo**: cuando el navegador avisa de que llega la pista, la asigna al `<video>` (`video.srcObject`).
 
@@ -1996,7 +1996,7 @@ Lo primero, para situarlo: **MPEG-TS no llega nunca al navegador**. Solo existe 
 ```
                       ┌── MPEG-TS ──▶ tsgate ──▶ ffmpeg -f dash ──▶ CMAF  (DASH)
 Fuente (FFmpeg) ──────┼── MPEG-TS ──▶ tsgate ──▶ moq import ts  ──▶ frames MoQ
-codifica y multiplexa └── MPEG-TS ──▶ tsgate ──▶ ffmpeg -f rtsp ──▶ RTP   (WebRTC)
+codifica y multiplexa └── MPEG-TS ──▶ tsgate ──▶ MediaMTX (UDP) ──▶ RTP   (WebRTC)
 
                       └─────── dentro del servidor ───────┘        └─ hacia el navegador ─┘
 ```
@@ -2202,7 +2202,7 @@ UDP no garantiza la entrega ni siquiera dentro de una misma máquina: si un empa
 
 ### C.8. Qué hace `tsgate.py`
 
-Es un programa pequeño colocado entre la fuente y cada empaquetador: lee los datagramas UDP y los escribe por una tubería. Usa directamente los campos descritos arriba, para tres cosas.
+Es un programa pequeño colocado entre la fuente y cada empaquetador: lee los datagramas UDP y los escribe por una tubería (en la rama WebRTC, desde el 29-10-2026, los reenvía por UDP a MediaMTX, solo con las pistas que este debe servir). Usa directamente los campos descritos arriba, para tres cosas.
 
 **1. Empezar en un keyframe.** Los empaquetadores arrancan en un instante cualquiera de la emisión. La compuerta descarta todo hasta ver un paquete del PID 256 con el **indicador de acceso aleatorio** activado: ahí empieza un keyframe. Mientras espera, guarda la última copia de la PAT, la SDT y la PMT, y las envía justo antes de ese keyframe, para que el empaquetador pueda interpretar el flujo desde el primer byte. Así las tres ramas empiezan en un punto limpio.
 
@@ -2266,7 +2266,7 @@ Las tres hacen lo mismo en esencia: demultiplexar, es decir, separar los paquete
 | :--- | :--- | :--- | :--- |
 | DASH | `ffmpeg -f dash` | Todos los vídeos y el audio | Fragmentos CMAF: cada frame pasa a un `mdat`, y su PTS a los tiempos del `moof`. |
 | MoQ | `moq import ts` | Todos los vídeos y el audio | Una pista por PID; cada frame, un frame de MoQ con su marca de tiempo; cada keyframe abre un grupo. |
-| WebRTC | `ffmpeg -f rtsp` | Solo el primer vídeo (PID 256) | Paquetes RTP, hacia MediaMTX. |
+| WebRTC | MediaMTX, que lee el MPEG-TS por UDP (antes, `ffmpeg -f rtsp`) | Solo el primer vídeo (PID 256), y el audio con `rtc_audio`: la compuerta filtra el resto y rehace la PMT | Paquetes RTP hacia el navegador. |
 
 En ninguna se recodifica: los bytes de H.264 de cada frame son los mismos a la entrada y a la salida. Lo que se desecha es el envoltorio de MPEG-TS, es decir, las cabeceras de 188 bytes, los PES y las tablas. El importador de MoQ conserva además un resumen de esas tablas en el catálogo.
 

@@ -76,6 +76,11 @@ services:
       - MTX_WEBRTCADDITIONALHOSTS=${MOQ_HOST:-127.0.0.1}
       - MTX_WEBRTCLOCALUDPADDRESS=:8189
       - MTX_WEBRTCIPSFROMINTERFACES=no
+      # Ingesta directa por UDP (RTC_INGEST=udp, por defecto): la compuerta de WebRTC envía aquí el MPEG-TS de la
+      # calidad más alta, sin audio a 5003 (liveudp) y con audio a 5013 (liveudpa): MediaMTX fija las pistas de
+      # un path UDP al empezar a leerlo. El path live, con publicación por RTSP, sigue para RTC_INGEST=rtsp.
+      - MTX_PATHS_LIVEUDP_SOURCE=udp+mpegts://0.0.0.0:5003
+      - MTX_PATHS_LIVEUDPA_SOURCE=udp+mpegts://0.0.0.0:5013
       - MTX_RTMP=no
       - MTX_HLS=no
       - MTX_SRT=no
@@ -137,6 +142,7 @@ services:
       - CAMERA_RTSP_URL=${CAMERA_RTSP_URL:-}
       - CAMERA_FPS=${CAMERA_FPS:-}
       - RTC_PUBLISH_URL=rtsp://172.30.50.12:8554/live
+      - RTC_INGEST=${RTC_INGEST:-udp}  # udp: directo a MediaMTX; rtsp: con el FFmpeg intermedio (versión anterior)
       # Solo para mostrarlas en el dashboard: deben coincidir con las etiquetas de imagen de arriba
       - MOQ_RELAY_VERSION=${MOQ_RELAY_VERSION:-0.17.9}
       - MEDIAMTX_VERSION=${MEDIAMTX_VERSION:-1.21.3}

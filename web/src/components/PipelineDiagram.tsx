@@ -145,7 +145,24 @@ const LANES: { id: LaneId; title: string; color: string; bar: string; stages: St
   },
 ];
 
+// Con la ingesta directa de WebRTC (RTC_INGEST=udp) no hay FFmpeg intermedio: la compuerta envía el MPEG-TS
+// por UDP a MediaMTX. Cambian las etapas que lo mencionan.
+const RTC_UDP_STAGES: Record<string, Partial<Stage>> = {
+  ingest: {
+    includes:
+      'Tiempo que el frame, ya codificado, pasa en la compuerta antes de salir por UDP hacia MediaMTX. Con la ingesta directa no hay nadie que pueda frenarla, así que debería ser casi cero.',
+    to: 'el instante en que la compuerta lo lee y lo envía por UDP a MediaMTX',
+  },
+  transport: {
+    nodes: ['MediaMTX', 'Router (emulación)', 'Red SRTP'],
+    includes:
+      'Lectura del MPEG-TS en MediaMTX, reempaquetado a RTP y la red, juntos: no se pueden separar sin instrumentar MediaMTX. Incluye las retransmisiones que pida el navegador si hay pérdidas.',
+    from: 'el envío del frame por UDP a MediaMTX',
+  },
+};
+
 interface PipelineDiagramProps {
+  rtcIngest?: 'udp' | 'rtsp';
   players: Record<LaneId, boolean>;
   stages: Record<LaneId, StageBreakdown | null | undefined>;
   latency: Record<LaneId, number | null>;
@@ -188,16 +205,20 @@ const Particles: React.FC<{ stages: Stage[]; breakdown?: StageBreakdown | null; 
   return <div ref={track} className="relative h-0.5 bg-slate-700/70 rounded mx-1 my-2" />;
 };
 
-export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ players, stages: data, latency }) => {
+export const PipelineDiagram: React.FC<PipelineDiagramProps> = ({ rtcIngest, players, stages: data, latency }) => {
+  const allLanes =
+    rtcIngest === 'udp'
+      ? LANES.map((l) => (l.id === 'rtc' ? { ...l, stages: l.stages.map((st) => ({ ...st, ...RTC_UDP_STAGES[st.key] })) } : l))
+      : LANES;
   const [chosen, setSelected] = useState<{ lane: LaneId; key: string }>({ lane: 'dash', key: 'deliver' });
   // Solo los carriles de los reproductores activos; si el elegido se apaga, se muestra el primero que quede
-  const lanes = LANES.filter((l) => players[l.id]);
+  const lanes = allLanes.filter((l) => players[l.id]);
   const selected = players[chosen.lane] ? chosen : { lane: lanes[0].id, key: lanes[0].stages[0].key };
   const scaleMs = Math.max(...lanes.map((l) => data[l.id]?.totalMs ?? 0), 1);
   const clock = getClockSync();
   const clockError = clock ? clock.rttMs / 2 : null;
 
-  const lane = LANES.find((l) => l.id === selected.lane)!;
+  const lane = allLanes.find((l) => l.id === selected.lane)!;
   const stage = lane.stages.find((s) => s.key === selected.key) ?? lane.stages[0];
   const value = stageMs(data[lane.id], stage.key);
 

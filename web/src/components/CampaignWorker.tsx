@@ -297,6 +297,8 @@ export const CampaignWorker: React.FC = () => {
               key={`rtc-${mounted.run}`}
               timecodes={status.timecodes}
               isStreaming={isStreaming}
+              mtxPath={status.rtc_path ?? 'live'}
+              ingest={status.rtc_ingest ?? 'rtsp'}
               withAudio={status.config.rtc_audio}
               streamStartedMs={status.stream_ids?.rtc ?? 0}
               audible={false}

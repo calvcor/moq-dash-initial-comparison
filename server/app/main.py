@@ -49,6 +49,19 @@ ROUTER_URL = os.getenv("ROUTER_URL", "http://172.30.50.2:9000")
 STOPPED_MARKER = os.path.join(os.path.dirname(VIDEO_FILE), ".stopped")
 PACKAGERS = ("dash_pipeline", "moq_pipeline", "rtc_pipeline")
 RTC_PUBLISH_URL = os.getenv("RTC_PUBLISH_URL", "rtsp://172.30.50.12:8554/live")
+# Ingesta de la rama WebRTC. "udp" (por defecto): la compuerta envía el MPEG-TS por UDP directamente a MediaMTX,
+# que lo lee en el path liveudp. "rtsp": la versión anterior, con un FFmpeg que lo remultiplexa y lo publica por
+# RTSP en el path live. Para volver a ella basta RTC_INGEST=rtsp en el .env y recrear el orquestador.
+RTC_INGEST = "rtsp" if os.getenv("RTC_INGEST", "udp").strip().lower() == "rtsp" else "udp"
+# MediaMTX fija las pistas de un path UDP la primera vez que lo lee y no las vuelve a leer: con y sin audio
+# van a paths distintos, cada uno en su puerto (ver docker-compose.yml).
+RTC_UDP_HOST = os.getenv("RTC_UDP_HOST", "172.30.50.12")
+
+def rtc_path() -> str:
+    """Path de MediaMTX que lleva la emisión de WebRTC con la configuración actual."""
+    if RTC_INGEST == "rtsp":
+        return "live"
+    return "liveudpa" if current_config.rtc_audio else "liveudp"
 TSGATE = os.path.join(os.path.dirname(__file__), "tsgate.py")
 # Reloj que usará dash.js; debe ser el mismo con el que se calcula el availabilityStartTime
 # Relativa al manifiesto: vale para cualquier nombre de host y para HTTP o HTTPS
@@ -583,6 +596,9 @@ def get_status():
         # través del punto de entrada, que es un proxy. MoQ va siempre directo por UDP al puerto indicado.
         "dash_url": dash_url(),
         "dash_path": "direct" if DASH_HOST else "proxy",
+        # Ingesta de WebRTC y path de MediaMTX que debe pedir el reproductor por WHEP
+        "rtc_ingest": RTC_INGEST,
+        "rtc_path": rtc_path(),
         "moq_port": int(os.getenv("MOQ_PORT", "4433")),
         # Vacío: el mismo nombre de host que la página. Detrás de un proxy HTTP ese nombre apunta al proxy,
         # que no reenvía QUIC, y hay que indicar la dirección directa de este servidor.
@@ -671,19 +687,24 @@ def start_moq():
     stream_ids["moq"] = int(started_at["moq"] * 1000)
 
 def start_rtc():
-    """Empaquetador WebRTC: lee de UDP 5003 y publica por RTSP en MediaMTX la calidad más alta, sin recodificar.
+    """Empaquetador WebRTC: lleva a MediaMTX la calidad más alta de UDP 5003, sin recodificar.
 
     El vídeo va tal cual. El audio, el Opus de la fuente, también tal cual, pero solo con rtc_audio; sin él,
-    solo vídeo.
+    solo vídeo. Con RTC_INGEST=udp la compuerta filtra las pistas y envía el MPEG-TS por UDP a MediaMTX; con
+    RTC_INGEST=rtsp, un FFmpeg lo remultiplexa y lo publica por RTSP (la versión anterior).
     """
     kill_proc(processes.get("rtc_pipeline"))
     trace.frame_log.reset("rtc")
-    audio = "-map 0:a:0 -c:a copy " if current_config.rtc_audio else "-an "
-    rtc_cmd = (
-        f"python3 -u {TSGATE} 5003 rtc | "
-        f"ffmpeg -y -fflags nobuffer -analyzeduration {int(PROBE_S * 1_000_000)} -i pipe:0 "
-        f"-map 0:v:0 -c:v copy {audio}-f rtsp -rtsp_transport tcp '{RTC_PUBLISH_URL}'"
-    )
+    if RTC_INGEST == "udp":
+        target, audio = (f"{RTC_UDP_HOST}:5013", " --audio") if current_config.rtc_audio else (f"{RTC_UDP_HOST}:5003", "")
+        rtc_cmd = f"python3 -u {TSGATE} 5003 rtc --udp {target} --first-video{audio}"
+    else:
+        audio = "-map 0:a:0 -c:a copy " if current_config.rtc_audio else "-an "
+        rtc_cmd = (
+            f"python3 -u {TSGATE} 5003 rtc | "
+            f"ffmpeg -y -fflags nobuffer -analyzeduration {int(PROBE_S * 1_000_000)} -i pipe:0 "
+            f"-map 0:v:0 -c:v copy {audio}-f rtsp -rtsp_transport tcp '{RTC_PUBLISH_URL}'"
+        )
     logger.info("Iniciando Empaquetador WebRTC hacia MediaMTX...")
     launch("rtc_pipeline", rtc_cmd, "/tmp/ffmpeg_rtc.log")
     started_at["rtc"] = time.time()

@@ -526,6 +526,8 @@ export function App() {
             key={`rtc-${rtcStreamId}`}
             timecodes={serverStatus?.timecodes}
             isStreaming={isStreaming}
+            mtxPath={serverStatus?.rtc_path ?? 'live'}
+            ingest={serverStatus?.rtc_ingest ?? 'rtsp'}
             withAudio={rtcAudio}
             streamStartedMs={rtcStreamId}
             audible={audioPlayer === 'rtc'}
@@ -535,6 +537,7 @@ export function App() {
 
         {/* Recorrido de un frame con la latencia medida en cada etapa */}
         <PipelineDiagram
+          rtcIngest={serverStatus?.rtc_ingest}
           players={players}
           stages={{ dash: dashMetrics.stages, moq: moqMetrics.stages, rtc: rtcMetrics.stages }}
           latency={{ dash: dashMetrics.latencyMs, moq: moqMetrics.latencyMs, rtc: rtcMetrics.latencyMs }}

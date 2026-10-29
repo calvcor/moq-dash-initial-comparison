@@ -8,6 +8,8 @@ import type { PlayerMetrics, PlayerPreset, TimecodeLayout } from '../types';
 
 interface RtcPlayerProps {
   isStreaming: boolean;
+  mtxPath: string; // path de MediaMTX que se pide por WHEP
+  ingest: 'udp' | 'rtsp'; // cómo le llega el flujo a MediaMTX
   withAudio: boolean; // la rama lleva audio (opción rtc_audio del servidor): se pide también la pista de audio
   audible: boolean; // sonido activado (selector de sonido del dashboard)
   streamStartedMs: number; // hora del servidor (ms epoch) a la que arrancó el empaquetador WebRTC (stream_ids.rtc)
@@ -17,7 +19,8 @@ interface RtcPlayerProps {
 }
 
 // Señalización WHEP de MediaMTX, a través del punto de entrada. El vídeo va después directo por UDP.
-const WHEP_URL = '/rtc/live/whep';
+// El path depende de la ingesta del servidor: liveudp (MPEG-TS por UDP) o live (RTSP, la versión anterior).
+const whepUrl = (path: string) => `/rtc/${path}/whep`;
 
 // Tras un reinicio de la emisión no se conecta hasta que esta lleva unos segundos publicada. Una conexión
 // abierta en los primeros segundos recibe de golpe el último segundo de media y, con audio, el navegador
@@ -27,7 +30,7 @@ const WHEP_URL = '/rtc/live/whep';
 // (keyframe y sondeo de la entrada); desde ahí, 6 s bastan.
 const JOIN_AFTER_START_MS = 8000;
 
-export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, audible, streamStartedMs, timecodes, preset, onMetricsUpdate }) => {
+export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, mtxPath, ingest, withAudio, audible, streamStartedMs, timecodes, preset, onMetricsUpdate }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null); // zona de vídeo, la que pasa a pantalla completa
 
@@ -129,7 +132,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
           setTimeout(resolve, 2000);
         });
         if (isAborted) return;
-        const res = await fetch(WHEP_URL, {
+        const res = await fetch(whepUrl(mtxPath), {
           method: 'POST',
           headers: { 'Content-Type': 'application/sdp' },
           body: connection.localDescription!.sdp,
@@ -232,7 +235,7 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
       connection.close();
       video.srcObject = null;
     };
-  }, [isStreaming, attempt, withAudio, streamStartedMs]);
+  }, [isStreaming, attempt, withAudio, streamStartedMs, mtxPath]);
 
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
@@ -295,7 +298,9 @@ export const RtcPlayer: React.FC<RtcPlayerProps> = ({ isStreaming, withAudio, au
       </div>
 
       <div className="px-4 py-2 bg-slate-950/60 border-t border-slate-800/60 text-[11px] text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono">
-        <span>MediaMTX · {WHEP_URL}</span>
+        <span title={ingest === 'udp' ? 'MediaMTX lee el MPEG-TS de la fuente por UDP, sin FFmpeg intermedio (RTC_INGEST=udp).' : 'Un FFmpeg remultiplexa el MPEG-TS y lo publica en MediaMTX por RTSP (RTC_INGEST=rtsp, la versión anterior).'}>
+          MediaMTX · {ingest === 'udp' ? 'UDP directo' : 'vía RTSP'} · {whepUrl(mtxPath)}
+        </span>
         <span>RTCPeerConnection + &lt;video&gt;</span>
       </div>
     </div>
