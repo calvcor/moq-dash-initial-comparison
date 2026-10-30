@@ -34,6 +34,14 @@ const METRICS: Record<string, Metric> = {
   kbps: { label: 'Bitrate de vídeo recibido', unit: 'kbit/s', field: 'kbps' },
   ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', field: 'ip_down_kbps', source: 'ip' },
   ip_up: { label: 'Tráfico IP de subida en el router', unit: 'kbit/s', field: 'ip_up_kbps', source: 'ip' },
+  // Lo lee el servidor cada segundo (desde el 30-10-2026); es de la emisión, el mismo en las tres ramas
+  source_lag: {
+    label: 'Retraso de la fuente',
+    unit: 'ms',
+    field: 'source_lag_ms',
+    source: 'ip',
+    note: 'Es de la emisión, el mismo en los tres protocolos: cuánto fue FFmpeg por detrás del tiempo real en cada segundo (la marca quemada menos lo que le toca por su número de frame). Los reproductores pintan por PTS, así que lo ven como esa misma cantidad de latencia de menos.',
+  },
   height: { label: 'Altura reproducida', unit: 'p', field: 'height' },
   // DASH: vídeo descargado por delante en el instante de la fila; MoQ y WebRTC: espera media de los frames
   // entregados desde la fila anterior

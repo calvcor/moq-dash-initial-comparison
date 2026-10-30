@@ -77,6 +77,8 @@ export interface ServerStatus {
   ingest_anomalies?: { master: number; dash: number; moq: number; rtc: number };
   // Desfase del último segmento DASH respecto al calendario de disponibilidad anunciado en el manifiesto
   dash_availability_drift_ms?: number | null;
+  // Cuánto va la fuente por detrás del tiempo real en los últimos 2 s (marca quemada frente a PTS)
+  source_lag_ms?: number | null;
   network?: NetworkState | null;
   // Cambian cuando arranca el empaquetador de cada rama: señal para reconectar ese reproductor
   stream_ids?: { dash: number; moq: number; rtc: number };
@@ -296,6 +298,7 @@ export interface SampleRow {
   clock_rtt_ms: number | null;
   ingest_anomalies: number | null;
   dash_availability_drift_ms: number | null;
+  source_lag_ms: number | null; // de /api/status (últimos 2 s); en campañas, el exacto de cada segundo va en ip.csv
   pipeline_restarts: number | null; // reinicios automáticos del supervisor (fuente + DASH + MoQ)
   // Perfil de red activo en el router
   net_down_rate_kbit: number | null;

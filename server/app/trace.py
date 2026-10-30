@@ -32,11 +32,16 @@ class FrameLog:
         self.first_pts = {"dash": {}, "moq": {}, "rtc": {}}  # rama -> stream -> PTS del primer frame que dejó pasar la compuerta
         self.stamps = {}    # stream -> ([marca ms...], [número de frame...])
         self.pts_base = {}  # stream -> PTS del frame 0 de la fuente actual
+        # Retraso de la fuente: la marca quemada (hora de pared) menos lo que le toca por su número de frame
+        self.frame_ms = 1000 / 60
+        self.lag_base = {}  # stream -> el menor (marca − número × frame_ms) visto desde que arrancó la fuente
 
-    def master_restarted(self):
+    def master_restarted(self, fps: int = 60):
         with self.lock:
             self.stamps = {}
             self.pts_base = {}
+            self.frame_ms = 1000 / fps
+            self.lag_base = {}
 
     def add_stamp(self, stream: int, number: int, stamp_ms: float):
         with self.lock:
@@ -45,6 +50,9 @@ class FrameLog:
                 return  # FFmpeg evalúa la expresión más de una vez por frame: vale la primera
             marks.append(stamp_ms)
             numbers.append(number)
+            offset = stamp_ms - number * self.frame_ms
+            if stream not in self.lag_base or offset < self.lag_base[stream]:
+                self.lag_base[stream] = offset
             if len(marks) > KEEP + 600:
                 del marks[:600], numbers[:600]
 
@@ -58,6 +66,32 @@ class FrameLog:
             if best is not None and abs(marks[best] - stamp_ms) <= 4:
                 return numbers[best], marks[best]
         return None
+
+    def source_lag(self, from_ms: float, to_ms: float) -> float | None:
+        """Retraso de la fuente (ms) en el intervalo (from_ms, to_ms], hora de pared del servidor.
+
+        El PTS de un frame es su número por la duración de un frame (setpts=N/fps) y su timecode, la hora a la que
+        FFmpeg lo dibujó. Si FFmpeg va por detrás del tiempo real, la marca se adelanta a lo que le tocaría y los
+        reproductores, que pintan por PTS, lo ven como menos latencia. El retraso de un frame es su marca menos
+        número × frame_ms, respecto al menor valor visto desde el arranque (el ritmo más adelantado: 0 al ritmo).
+        Del intervalo, el mayor de sus frames en cualquier calidad; sin ningún frame, lo que lleva de retraso el
+        siguiente que tocaba, que no ha llegado. None si la fuente aún no ha dejado ninguna marca."""
+        with self.lock:
+            worst = None
+            for stream, (marks, numbers) in self.stamps.items():
+                base = self.lag_base.get(stream)
+                if base is None or not marks:
+                    continue
+                i = bisect.bisect_right(marks, from_ms)
+                j = bisect.bisect_right(marks, to_ms)
+                if i < j:
+                    lag = max(marks[k] - numbers[k] * self.frame_ms - base for k in range(i, j))
+                elif j == len(marks):
+                    lag = max(0.0, to_ms - (base + (numbers[-1] + 1) * self.frame_ms))
+                else:
+                    continue  # intervalo anterior a lo que se recuerda
+                worst = lag if worst is None else max(worst, lag)
+            return None if worst is None else round(worst, 1)
 
     def stamps_since(self, stamp_ms: float) -> dict:
         """Copia de las marcas posteriores a stamp_ms: calidad -> [(marca ms, número de frame)...]."""

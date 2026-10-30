@@ -561,6 +561,7 @@ export function App() {
             anomalies={serverStatus?.ingest_anomalies}
             pipelineRestarts={serverStatus?.restarts}
             availabilityDriftMs={serverStatus?.dash_availability_drift_ms}
+            sourceLagMs={serverStatus?.source_lag_ms}
             onExport={handleExport}
             onReset={handleResetSamples}
           />

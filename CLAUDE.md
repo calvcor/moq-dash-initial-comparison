@@ -158,3 +158,7 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
   si se confirma, desplegarla.
 - En WebRTC, el reparto del desglose entre "transporte" y "búfer" no es fiable (`receiveTime`).
 - La configuración de la emisión no persiste entre reinicios del orquestador.
+- Con la escalera de tres calidades, la fuente del servidor se queda a ratos por detrás del tiempo real y los
+  tres reproductores lo ven como menos latencia (campaña del 29-10-2026; no reproducido a voluntad el 30-10-2026).
+  Desde el 30-10-2026 se mide en cada segundo (`source_lag_ms`, README, tabla de métricas): revísalo antes de
+  interpretar una latencia por debajo del objetivo.

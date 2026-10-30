@@ -39,6 +39,7 @@ interface MetricsDashboardProps {
   samples: SampleRow[];
   anomalies?: { master: number; dash: number; moq: number; rtc: number };
   availabilityDriftMs?: number | null;
+  sourceLagMs?: number | null;
   pipelineRestarts?: { master: number; dash: number; moq: number; rtc: number };
   onExport: () => void;
   onReset: () => void;
@@ -244,6 +245,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   samples,
   anomalies,
   availabilityDriftMs,
+  sourceLagMs,
   pipelineRestarts,
   onExport,
   onReset,
@@ -476,6 +478,12 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           </span>
           <span className={Math.abs(availabilityDriftMs ?? 0) > 100 ? 'text-amber-400' : 'text-slate-400'}>
             Deriva disponibilidad DASH: {availabilityDriftMs == null ? '--' : `${availabilityDriftMs} ms`}
+          </span>
+          <span
+            className={(sourceLagMs ?? 0) > 50 ? 'text-amber-400' : 'text-slate-400'}
+            title="Cuánto va la fuente por detrás del tiempo real en los últimos 2 s: la marca quemada en cada frame menos lo que le toca por su número. Los reproductores pintan por PTS, así que lo ven como menos latencia."
+          >
+            Retraso de la fuente: {sourceLagMs == null ? '--' : `${Math.round(sourceLagMs)} ms`}
           </span>
           <span
             className={playerRestarts + serverRestarts ? 'text-amber-400' : 'text-slate-400'}

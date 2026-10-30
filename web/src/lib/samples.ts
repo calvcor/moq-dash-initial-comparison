@@ -251,6 +251,7 @@ export function buildSampleRow({ epoch, epochStartedAt, active, metrics, status,
     ? status.ingest_anomalies.master + status.ingest_anomalies.dash + status.ingest_anomalies.moq + (status.ingest_anomalies.rtc ?? 0)
     : null,
   dash_availability_drift_ms: status?.dash_availability_drift_ms ?? null,
+  source_lag_ms: status?.source_lag_ms ?? null,
   pipeline_restarts: status?.restarts ? status.restarts.master + status.restarts.dash + status.restarts.moq + (status.restarts.rtc ?? 0) : null,
   net_down_rate_kbit: net?.down.rate_kbit ?? null,
   net_down_delay_ms: net?.down.delay_ms ?? null,

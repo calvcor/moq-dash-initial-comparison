@@ -413,6 +413,8 @@ def ensure_master_source(force_restart: bool = False):
     if force_restart or processes["master_source"] is None or processes["master_source"].poll() is not None:
         kill_proc(processes.get("master_source"))
         master_start_time = time.time()
+        # Números de frame y marcas empiezan de nuevo, y el retraso de la fuente se mide a esta cadencia
+        trace.frame_log.master_restarted(current_config.fps)
         start_epoch_sec = int(master_start_time)
         font_path = get_font_path()
         fps = current_config.fps
@@ -575,6 +577,12 @@ async def get_utc():
 def alive(name: str) -> bool:
     return processes[name] is not None and processes[name].poll() is None
 
+def source_lag_now() -> Optional[float]:
+    if not alive("master_source"):
+        return None
+    now = time.time() * 1000
+    return trace.frame_log.source_lag(now - 2000, now)
+
 @app.get("/api/status")
 def get_status():
     return {
@@ -606,6 +614,8 @@ def get_status():
         "spki_fingerprint": get_spki_fingerprint(),
         "timecodes": [timecode_layout(r.width, r.height) for r in current_config.renditions],
         "ingest_anomalies": {name: count_anomalies(name) for name in log_state},
+        # Cuánto va la fuente por detrás del tiempo real en los últimos 2 s (trace.FrameLog.source_lag)
+        "source_lag_ms": source_lag_now(),
         "dash_availability_drift_ms": origin.drift_ms,
         "network": router_call(),
         "campaign": campaigns.running(),
@@ -1217,6 +1227,7 @@ def on_startup():
     campaigns.snapshot = campaign_snapshot
     campaigns.load()
     campaigns.read_counters = lambda: (router_call() or {}).get("stats")
+    campaigns.read_source_lag = lambda from_ms, to_ms: trace.frame_log.source_lag(from_ms, to_ms) if alive("master_source") else None
     threading.Thread(target=campaigns.scheduler, daemon=True).start()
     threading.Thread(target=campaigns.ip_sampler, daemon=True).start()
 

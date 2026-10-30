@@ -72,6 +72,8 @@ UNRESTRICTED = {
 # el calentamiento y la medida, con su propio reloj, y guarda lo exacto de cada intervalo en ip.jsonl
 IP_KEYS = tuple(f"{p}_{d}" for p in PLAYERS for d in ("down", "up"))
 IP_PERIOD_S = 1
+# Retraso de la fuente a partir del cual un segundo cuenta como "fuente retrasada" en el resumen: 3 frames a 60 fps
+SOURCE_LATE_MS = 50
 
 # Columna del búfer de cada reproductor en las filas del dashboard
 BUFFER_COLUMN = {"dash": "dash_buffer_s", "moq": "moq_jitter_buffer_s", "rtc": "rtc_jitter_buffer_s"}
@@ -166,6 +168,17 @@ def summarize_ip(player: str, samples: list[dict]) -> dict:
     return out
 
 
+def summarize_source(samples: list[dict]) -> dict:
+    """Retraso de la fuente durante la medida, de las mismas lecturas: el máximo, el p95 de los segundos y la
+    fracción de segundos en que pasó de SOURCE_LATE_MS. Es de la emisión, el mismo para los tres reproductores."""
+    lags = [s["source_lag_ms"] for s in samples if s.get("source_lag_ms") is not None]
+    return {
+        "source_lag_max_ms": rounded(max(lags)) if lags else None,
+        "source_lag_p95_ms": rounded(percentile(lags, 95)),
+        "source_late_share": rounded(sum(lag > SOURCE_LATE_MS for lag in lags) / len(lags), 4) if lags else None,
+    }
+
+
 class Campaigns:
     def __init__(self, root: str):
         self.root = root
@@ -189,6 +202,8 @@ class Campaigns:
         self.snapshot: Callable[[], dict] = lambda: {}
         # Contadores acumulados del router por cola ({"dash_down": {"bytes": ...}, ...}); None si no responde
         self.read_counters: Callable[[], Optional[dict]] = lambda: None
+        # Retraso de la fuente (ms) en un intervalo de reloj del servidor (trace.FrameLog.source_lag)
+        self.read_source_lag: Callable[[int, int], Optional[float]] = lambda from_ms, to_ms: None
 
     # --- ficheros ---
 
@@ -752,8 +767,9 @@ class Campaigns:
                 "players": {p: summarize_player(p, rows, plan["measure_s"], target.get(f"{p}_ms")) for p in run["players"]},
             }
             ip = [s for s in self.ip.pop(run["id"], []) if s["phase"] == "measuring"]
+            source = summarize_source(ip)
             for p in run["players"]:
-                run["summary"]["players"][p].update(summarize_ip(p, ip))
+                run["summary"]["players"][p].update(summarize_ip(p, ip), **source)
             # Del montaje a la primera fila con latencia medida, con la resolución de una fila por segundo
             for p in run["players"]:
                 first = next((r["t_server_ms"] for r in warmup if r.get(f"{p}_g2g_ms") is not None), None)
@@ -923,6 +939,11 @@ class Campaigns:
                     size = b - a if isinstance(a, int) and isinstance(b, int) and b >= a else None
                     sample[f"{q}_bytes"] = size
                     sample[f"{q}_kbps"] = round(size * 8 / dt, 1) if size is not None else None
+                # Cuánto fue la fuente por detrás del tiempo real en el intervalo: común a las tres ramas
+                try:
+                    sample["source_lag_ms"] = self.read_source_lag(last["t"], t)
+                except Exception:
+                    sample["source_lag_ms"] = None
                 self.ip.setdefault(run["id"], []).append(sample)
                 with open(self.path(campaign["id"], "ip.jsonl"), "a") as f:
                     f.write(json.dumps(sample) + "\n")
@@ -982,6 +1003,8 @@ class Campaigns:
                     for p in run["players"]:
                         for d in ("down", "up"):
                             point[f"{p}_ip_{d}_kbps"] = sample.get(f"{p}_{d}_kbps")
+                        # Común a las tres ramas: se repite en cada una para dibujarlo junto a sus métricas
+                        point[f"{p}_source_lag_ms"] = sample.get("source_lag_ms")
                     out[run["id"]]["ip"].append(point)
         except OSError:
             pass

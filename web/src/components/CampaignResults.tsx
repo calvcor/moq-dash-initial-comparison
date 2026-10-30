@@ -46,6 +46,9 @@ const METRICS: Record<string, Metric> = {
   // Leído por el servidor en el router: cabeceras y retransmisiones incluidas (desde el 28-10-2026)
   ip_down: { label: 'Tráfico IP de bajada en el router', unit: 'kbit/s', get: (s) => s.ip_down_kbps },
   ip_up: { label: 'Tráfico IP de subida en el router', unit: 'kbit/s', get: (s) => s.ip_up_kbps },
+  // De la emisión, igual en los tres protocolos (desde el 30-10-2026)
+  source_lag: { label: 'Retraso máximo de la fuente', unit: 'ms', get: (s) => s.source_lag_max_ms, note: 'Es de la emisión, el mismo en los tres protocolos: cuánto llegó a ir FFmpeg por detrás del tiempo real durante la medida. Los reproductores lo ven como esa misma cantidad de latencia de menos.' },
+  source_late: { label: 'Segundos con la fuente retrasada (> 50 ms)', unit: '%', get: (s) => (s.source_late_share == null ? null : s.source_late_share * 100) },
   height: { label: 'Altura media reproducida', unit: 'p', get: (s) => s.height_mean },
   // No es la misma magnitud en las tres ramas (README, tabla de métricas)
   buffer: {
