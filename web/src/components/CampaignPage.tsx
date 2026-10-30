@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Copy, Download, Eye, FlaskConical, Pause, Pencil, Play, RotateCcw, Settings2, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ChartLine, Check, Copy, Download, Eye, FlaskConical, Pause, Pencil, Play, RotateCcw, Settings2, Square, Trash2, X } from 'lucide-react';
 import { CampaignEditor, DEFAULT_PLAYER_OPTIONS, formatDuration } from './CampaignEditor';
 import { CampaignWorker } from './CampaignWorker';
 import { CampaignResults } from './CampaignResults';
@@ -68,7 +68,8 @@ const RunsTable: React.FC<{
   focus: { id: string; n: number } | null;
   onChanged: () => void;
   onPreview: (run: CampaignRun) => void;
-}> = ({ campaign, focus, onChanged, onPreview }) => {
+  onSeries: (id: string) => void;
+}> = ({ campaign, focus, onChanged, onPreview, onSeries }) => {
   const plan = campaign.plan;
   const runs = campaign.runs ?? [];
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +160,16 @@ const RunsTable: React.FC<{
                     <Eye className="w-3 h-3" /> Ver
                   </button>
                 )}
+                {/* Las gráficas solo tienen las pruebas terminadas y válidas */}
+                {run.state === 'done' && run.summary && (
+                  <button
+                    className="flex items-center gap-1 text-emerald-300 hover:text-emerald-200"
+                    title="Abrir esta prueba en la gráfica segundo a segundo, con varias métricas"
+                    onClick={() => onSeries(run.id)}
+                  >
+                    <ChartLine className="w-3 h-3" /> Gráfica
+                  </button>
+                )}
                 {(run.state === 'done' || run.state === 'invalid') && !repeated.has(run.id) && (
                   <button
                     className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200"
@@ -198,6 +209,12 @@ const Monitor: React.FC<{
   // Con el trabajador en esta pestaña, las gráficas van plegadas: no se dibujan mientras mide
   const [showResults, setShowResults] = useState(!lean);
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
+  // La prueba que se abre en la gráfica segundo a segundo desde la tabla (n, como en focus)
+  const [seriesFocus, setSeriesFocus] = useState<{ id: string; n: number } | null>(null);
+  const showSeries = (id: string) => {
+    setShowResults(true);
+    setSeriesFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
+  };
   const selectRun = (id: string) => {
     setShowRuns(true);
     setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
@@ -391,12 +408,12 @@ const Monitor: React.FC<{
       <button className="text-indigo-300 hover:text-indigo-200" onClick={() => setShowRuns((v) => !v)}>
         {showRuns ? 'Ocultar las pruebas ▴' : 'Ver las pruebas ▾'}
       </button>
-      {showRuns && <RunsTable campaign={campaign} focus={focus} onChanged={onChanged} onPreview={onPreview} />}
+      {showRuns && <RunsTable campaign={campaign} focus={focus} onChanged={onChanged} onPreview={onPreview} onSeries={showSeries} />}
 
       <button className="block text-indigo-300 hover:text-indigo-200" onClick={() => setShowResults((v) => !v)}>
         {showResults ? 'Ocultar los resultados ▴' : 'Ver los resultados ▾'}
       </button>
-      {showResults && <CampaignResults campaign={campaign} onSelectRun={selectRun} />}
+      {showResults && <CampaignResults campaign={campaign} onSelectRun={selectRun} seriesFocus={seriesFocus} />}
     </div>
   );
 };

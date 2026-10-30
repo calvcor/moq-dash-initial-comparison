@@ -177,7 +177,11 @@ const Panel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, 
   </div>
 );
 
-export const CampaignResults: React.FC<{ campaign: Campaign; onSelectRun?: (id: string) => void }> = ({ campaign, onSelectRun }) => {
+export const CampaignResults: React.FC<{
+  campaign: Campaign;
+  onSelectRun?: (id: string) => void;
+  seriesFocus?: { id: string; n: number } | null;
+}> = ({ campaign, onSelectRun, seriesFocus }) => {
   const plan = campaign.plan;
   const [metricKey, setMetricKey] = useState('g2g_p50');
   const [xAxis, setXAxis] = useState<'network' | 'target'>('network');
@@ -280,7 +284,7 @@ export const CampaignResults: React.FC<{ campaign: Campaign; onSelectRun?: (id: 
         )}
       </div>
 
-      <CampaignSeries campaign={campaign} runs={[...tests, ...controls]} />
+      <CampaignSeries campaign={campaign} runs={[...tests, ...controls]} focus={seriesFocus ?? null} />
     </div>
   );
 };

@@ -148,7 +148,12 @@ const crosshair = (at: React.MutableRefObject<number | null>): Plugin<'line'> =>
 const GRID = '#334155';
 const TICK = '#94a3b8';
 
-export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] }> = ({ campaign, runs }) => {
+// focus: una prueba pedida desde la tabla, que se abre en la vista de varias métricas
+export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[]; focus?: { id: string; n: number } | null }> = ({
+  campaign,
+  runs,
+  focus,
+}) => {
   const plan = campaign.plan;
   const conditionOf = (r: CampaignRun) => (r.network === null ? 'control' : `${r.network}:${r.target}`);
   const conditionLabel = (key: string) => {
@@ -177,6 +182,17 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   const [stripOverlay, setStripOverlay] = useState(true);
   const hoverX = useRef<number | null>(null);
   const charts = useRef<Record<string, ChartJS<'line'> | null>>({});
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const run = focus && runs.find((r) => r.id === focus.id);
+    if (!run) return;
+    setView('metrics');
+    setCondition(conditionOf(run));
+    setSingle(run.id);
+    // Tras dibujar: si los resultados se acaban de desplegar, las gráficas de encima aún no tienen su alto
+    const timer = setTimeout(() => container.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
+    return () => clearTimeout(timer);
+  }, [focus]);
   const [overlay, setOverlay] = useState(false);
   const [shade, setShade] = useState(true);
   const [data, setData] = useState<Record<string, Series>>({});
@@ -438,7 +454,7 @@ export const CampaignSeries: React.FC<{ campaign: Campaign; runs: CampaignRun[] 
   if (!runs.length) return null;
 
   return (
-    <div className="space-y-3 pt-2">
+    <div ref={container} className="space-y-3 pt-2 scroll-mt-4">
       <h4 className="text-xs font-semibold text-slate-200">Segundo a segundo</h4>
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1">
