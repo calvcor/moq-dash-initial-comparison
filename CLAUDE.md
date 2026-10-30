@@ -136,6 +136,7 @@ la vez y mide la latencia leyendo un timecode quemado en la imagen.
 - Mantén actualizados `README.md` y `PROTOCOLOS.md` con cada cambio de comportamiento, parámetro o
   hallazgo. Si una afirmación de `PROTOCOLOS.md` resulta falsa, corrígela y dilo.
 - `CONTEXT_SUMMARY.md` es un resumen histórico; no hace falta reescribirlo con cada cambio.
+- `FINDINGS/` recoge hallazgos y decisiones razonadas en documentos propios (por ejemplo, `moq-versiones-main.md`: por qué se usa `main` de moq).
 - En `README.md` y `PROTOCOLOS.md`, cada párrafo, elemento de lista o cita va en una sola línea, sin cortes
   manuales: algunos visores muestran esos cortes como saltos de línea.
 - Nuevas métricas o parámetros: van al panel, al CSV (`SampleRow` en `web/src/types.ts`) y a la tabla
