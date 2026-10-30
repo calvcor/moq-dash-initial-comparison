@@ -116,7 +116,11 @@ const RunsTable: React.FC<{
               key={run.id}
               id={`run-${campaign.id}-${run.id}`}
               className={`border-t border-slate-800/60 transition-colors ${
-                run.id === highlight ? 'bg-amber-900/40 outline outline-1 outline-amber-500/70' : run.id === campaign.current ? 'bg-indigo-950/40' : ''
+                run.id === highlight
+                  ? 'bg-amber-900/40 outline outline-1 outline-amber-500/70'
+                  : run.id === campaign.current
+                    ? 'bg-indigo-950/40 hover:bg-indigo-900/40'
+                    : 'hover:bg-slate-800/60'
               }`}
             >
               <td className="py-1 pr-2 text-slate-300">
